@@ -1408,11 +1408,17 @@ function getOrderOriginalRank(row,fallback){
 function normalizeOrderItemForSort(it){
   return {
     code:it?.p_code||it?.code||'',
-    prodCode:it?.prod_code||it?.prodCode||'',
+    prodCode:it?.prod_code||it?.prodCode||it?.p_dpcode||'',
     name:it?.p_name||it?.name||'',
     qty:Number(String(it?.qty??1).replace(/,/g,''))||1,
     memo2:it?.o_shop_memo2||''
   };
+}
+function getSelfCodeRouteRank(value){
+  const first=String(value||'').trim().replace(/^\[|\]$/g,'').charAt(0).toUpperCase();
+  if(first==='P') return 0;
+  if(first==='E') return 1;
+  return 2;
 }
 function getOrderSortMetrics(row,itemRows=[],pickRows=[]){
   const items=(itemRows||[]).map(normalizeOrderItemForSort);
@@ -1423,13 +1429,18 @@ function getOrderSortMetrics(row,itemRows=[],pickRows=[]){
     || (pickRows||[]).some(r=>(Number(r.shortage_qty)||0)>0);
   const hasHold=!!(row?.hold||row?.is_hold||row?.shipping_hold)
     || (pickRows||[]).some(r=>!!r.hold);
-  return {itemKindCount:itemKindCount||0,totalItemQty:totalItemQty||0,hasGoldItem,hasShortage,hasHold};
+  const routeRanks=items.map(it=>getSelfCodeRouteRank(it.prodCode||it.code)).filter(n=>Number.isFinite(n));
+  const routeZoneRank=routeRanks.length?Math.min(...routeRanks):2;
+  const routeZoneSpread=new Set(routeRanks).size||1;
+  return {itemKindCount:itemKindCount||0,totalItemQty:totalItemQty||0,hasGoldItem,hasShortage,hasHold,routeZoneRank,routeZoneSpread};
 }
 function compareWorkOrderRows(a,b){
   const am=a._sortMetrics||{}, bm=b._sortMetrics||{};
   const ar=WORK_SORT_POLICY.deferProblemOrders&&(am.hasShortage||am.hasHold)?2:(am.hasGoldItem?1:0);
   const br=WORK_SORT_POLICY.deferProblemOrders&&(bm.hasShortage||bm.hasHold)?2:(bm.hasGoldItem?1:0);
   if(ar!==br) return ar-br;
+  if((am.routeZoneRank??2)!==(bm.routeZoneRank??2)) return (am.routeZoneRank??2)-(bm.routeZoneRank??2);
+  if((am.routeZoneSpread||1)!==(bm.routeZoneSpread||1)) return (am.routeZoneSpread||1)-(bm.routeZoneSpread||1);
   if((am.itemKindCount||0)!==(bm.itemKindCount||0)) return (am.itemKindCount||0)-(bm.itemKindCount||0);
   if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
   return (a._originalRank||0)-(b._originalRank||0);
@@ -1795,7 +1806,7 @@ async function loadData(silent=false,preserveView=false){
       const no=i+1;
       const sellpiaSeq=getSellpiaSeqValue(row,i+1);
       const m=row._sortMetrics||getOrderSortMetrics(row,itemsByOrd[row.ord_no]||[]);
-      ORDERS_ALL.push({no,printSeqNo:row.print_seq_no||'',plannedPrintSeqNo:row.planned_print_seq_no||no,workSeqNo:row.work_seq_no||'',originalSeqNo:sellpiaSeq,sellpiaSeqNo:sellpiaSeq,buyer:row.buyer||'',recv:row.receiver||row.buyer||'',ordDate:row.ord_date||'',invNo:row.inv_no||'',seller:row.seller||'',seller_id:row.seller_id||'',itemKindCount:m.itemKindCount,totalItemQty:m.totalItemQty,hasGoldItem:m.hasGoldItem,hasShortage:m.hasShortage,hasHold:m.hasHold,items:itemsByOrd[row.ord_no]||[],
+      ORDERS_ALL.push({no,printSeqNo:row.print_seq_no||'',plannedPrintSeqNo:row.planned_print_seq_no||no,workSeqNo:row.work_seq_no||'',originalSeqNo:sellpiaSeq,sellpiaSeqNo:sellpiaSeq,buyer:row.buyer||'',recv:row.receiver||row.buyer||'',ordDate:row.ord_date||'',invNo:row.inv_no||'',seller:row.seller||'',seller_id:row.seller_id||'',itemKindCount:m.itemKindCount,totalItemQty:m.totalItemQty,routeZoneRank:m.routeZoneRank,routeZoneSpread:m.routeZoneSpread,hasGoldItem:m.hasGoldItem,hasShortage:m.hasShortage,hasHold:m.hasHold,items:itemsByOrd[row.ord_no]||[],
         /* postoffice CSV enrichment fields (from orders) */
         ordNo:row.ord_no||'',
         receiverName:row.receiver_name||row.receiver||row.buyer||'',
