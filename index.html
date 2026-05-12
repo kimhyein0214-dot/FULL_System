@@ -1394,6 +1394,15 @@ function workNoHtml(no, cls=''){
   const sp=sellpiaSeqText(no);
   return '<span class="work-no '+cls+'">'+shortWorkNoText(no)+'</span>'+(sp?'<span class="sellpia-seq">S'+String(sp).replace(/^셀피아\s*/,'')+'</span>':'');
 }
+function itemNameWithOption(it){
+  const name=String(it?.name||it?.p_name||'').trim();
+  const option=String(it?.option||it?.p_option||it?.seller_option_name||'').trim();
+  if(name&&option) return name+' / '+option;
+  return name||option||'??? ?? ??';
+}
+function displayInvoiceNo(no){
+  return String(seqToReal[no]||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
+}
 function renderLocationBadge(val,typeHint=''){
   const clean=String(val||'').replace(/^\[|\]$/g,'').trim();
   if(!clean) return '';
@@ -2495,10 +2504,12 @@ function renderRight(){
       const c=multi[it.code]||{b:'#B0BEC5'};
       const done=checked[order.no+'-'+it.code], sh=(shortage[order.no+'-'+it.code]||0)>0, isHold=!!holded[order.no+'-'+it.code], gItem=isGold(it), inGInv=gInv&&!gItem;
       const dotColor=gItem?'#D4A800':inGInv?'rgba(200,168,75,0.5)':done?'#0E7A4A':isHold?'#FFB74D':sh?'#E57373':c.b;
-      return `<div class="ic-item"><div class="ic-dot" style="background:${dotColor}"></div><span class="ic-item-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':'var(--text)'}">${it.prodCode||it.code}${inGInv?'<span style="font-size:8px;color:rgba(200,168,75,0.8);margin-left:2px;">🥇</span>':''}</span><span class="ic-item-qty">${it.qty}개</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">−${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;
+      const itemTitle=itemNameWithOption(it);
+      return `<div class="ic-item"><div class="ic-dot" style="background:${dotColor}"></div><div class="ic-item-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':'var(--text)'}"><div>${it.prodCode||it.code}${inGInv?'<span style="font-size:8px;color:rgba(200,168,75,0.8);margin-left:2px;">??</span>':''}</div><div style="font-size:9px;font-weight:600;color:var(--muted);line-height:1.25;margin-top:1px;">${esc(itemTitle)}</div></div><span class="ic-item-qty">${it.qty}?</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">?${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;color:rgba(200,168,75,0.8);margin-left:2px;">🥇</span>':''}</span><span class="ic-item-qty">${it.qty}개</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">−${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;
     }).join('');
 
-    cells.push(`<div class="inv-card${allDone?' done':''}${hasShort?' has-short':''}${gInv?' is-gold':''}${hasHold?' is-hold':''}" data-inv="${order.no}" onclick="selectInv(${order.no})"><div class="ic-hdr ${hcls}"><div class="ic-no" style="color:${hasShort?'var(--red)':allDone?'var(--green)':hasHold?'#E65100':'var(--text)'}">${workNoHtml(order.no,'sm')}</div><div class="ic-buyer">${buyerLabel(order.buyer,order.recv)}${chBadge(order.no)}</div><div class="ic-stat" style="color:${statColor}">${statTxt}</div></div><div class="ic-meta">${sortBadges}</div><div class="ic-body">${items}</div><div class="ic-foot" onclick="event.stopPropagation()"><span class="ic-dr-lbl">📝</span><button class="ic-dr-btn${drVal?' has-val':''}" onclick="openKeypad(${order.no},'${esc(drVal)}',this)">${drVal?drVal:'서랍번호'}</button></div></div>`);
+    const realInv=displayInvoiceNo(order.no);
+    cells.push(`<div class="inv-card${allDone?' done':''}${hasShort?' has-short':''}${gInv?' is-gold':''}${hasHold?' is-hold':''}" data-inv="${order.no}" onclick="selectInv(${order.no})"><div class="ic-hdr ${hcls}"><div class="ic-no" style="color:${hasShort?'var(--red)':allDone?'var(--green)':hasHold?'#E65100':'var(--text)'}">${workNoHtml(order.no,'sm')}</div><div class="ic-buyer">${buyerLabel(order.buyer,order.recv)}${chBadge(order.no)}</div><div class="ic-stat" style="color:${statColor}">${statTxt}</div></div><div class="ic-meta">${sortBadges}</div><div class="ic-body">${items}</div><div class="ic-foot" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch;gap:3px;"><div style="display:flex;align-items:center;gap:8px;"><span class="ic-dr-lbl">??</span><button class="ic-dr-btn${drVal?' has-val':''}" onclick="openKeypad(${order.no},'${esc(drVal)}',this)">${drVal?drVal:'????'}</button></div>${realInv?`<div style="font-size:9px;color:var(--muted);padding-left:22px;letter-spacing:0;line-height:1.2;">?? ${esc(realInv)}</div>`:''}</div></div>`);
   }
   const btLbl=document.getElementById('bt-lbl');
   if(btLbl) btLbl.textContent=zoneSortMode?'📦 종별 주문서':'📦 조별 주문서';
@@ -2542,7 +2553,7 @@ function openPopup(no){
     let ordBg='#B0BEC5',ordTxt=String(i+1);
     if(done){ordBg='#0E7A4A';ordTxt='✓';} else if(gItem){ordBg='#C49A00';ordTxt='🥇';} else if(isHold){ordBg='#FFB74D';ordTxt='⏸';} else if(multi[it.code]) ordBg=c.b;
 
-    return `<div class="pitem${done?' done':''}${gItem?' is-gold':''}${isHold?' is-hold':''}"><div class="pi-ord" style="background:${ordBg};font-size:${ordTxt==='✓'?'12':'10'}px;" onclick="${gItem||isHold?'':`tog(${no},'${esc(it.code)}')`}">${ordTxt}</div><div class="pi-inf"><div class="pi-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':c.t}">${it.prodCode||it.code}${inGInv?' <span class="gi-badge">🥇송장</span>':''} ${renderLocationBadge(it.location)}</div><div class="pi-name">${it.name||'상품명 연동 예정'}</div>${gItem?'<div style="font-size:10px;color:var(--gold);margin-top:2px;">골드 담당자 처리</div>':isHold?'<div style="font-size:10px;color:#E65100;margin-top:2px;">보류됨</div>':`<div class="pi-short${hasV?' has-val':''}"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)">+</button></div>`}</div><div class="pi-qty">${it.qty}개</div></div>`;
+    return `<div class="pitem${done?' done':''}${gItem?' is-gold':''}${isHold?' is-hold':''}"><div class="pi-ord" style="background:${ordBg};font-size:${ordTxt==='✓'?'12':'10'}px;" onclick="${gItem||isHold?'':`tog(${no},'${esc(it.code)}')`}">${ordTxt}</div><div class="pi-inf"><div class="pi-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':c.t}">${it.prodCode||it.code}${inGInv?' <span class="gi-badge">🥇송장</span>':''} ${renderLocationBadge(it.location)}</div><div class="pi-name">${esc(itemNameWithOption(it))}</div>${gItem?'<div style="font-size:10px;color:var(--gold);margin-top:2px;">골드 담당자 처리</div>':isHold?'<div style="font-size:10px;color:#E65100;margin-top:2px;">보류됨</div>':`<div class="pi-short${hasV?' has-val':''}"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)">+</button></div>`}</div><div class="pi-qty">${it.qty}개</div></div>`;
   }).join('');
   document.getElementById('popup-overlay').style.display='flex';
 }
