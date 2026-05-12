@@ -956,8 +956,8 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
   <button id="work-sort-btn" class="abtn work-sort-btn" onclick="toggleWorkSort()" title="송장 출력 전 작업순서: 일반상품 우선 → 상품종류 적은순 → 총수량 적은순 → 골드 뒤로">🧭 작업순서</button>
   <button class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
   <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="현재 주문의 우체국 보강(주소/연락처/우편번호) 현황을 확인합니다">📊 보강현황</button>
-  <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="작업순서대로 우체국 양식 CSV를 만듭니다 (보강 누락 시 경고)">📮 우체국CSV</button>
-  <button class="abtn work-export-btn" onclick="downloadSellpiaOrderPostOfficeCsv()" title="셀피아 송장 업로드용 원래 수집순서 CSV를 만듭니다">셀피아순CSV</button>
+  <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="작업순서대로 우체국 양식 CSV를 만듭니다 (보강 누락 시 경고)">&#128238; &#50864;&#52404;&#44397;CSV</button>
+  <button class="abtn work-export-btn" onclick="downloadSellpiaInvoiceCsv()" title="Sellpia invoice upload CSV: invoice + item key">&#49472;&#54588;&#50500;&#49569;&#51109;CSV</button>
   <button class="abtn zone-aux-btn" onclick="openZoneSortPopup()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역순 송장 배치 현황">📊 구역현황</button>
   <button class="abtn" onclick="showOrderListModal()" style="background:#1A3A6B;">📋 주문리스트</button>
   <span class="work-sort-summary" id="work-sort-summary">정렬 기준: 출력순서</span>
@@ -1550,22 +1550,14 @@ function cleanSellpiaManageMemo(v){
     .filter(line=>line&&!isSellerOrderMemoLine(line))
     .join('\n');
 }
-function getSellpiaUploadItemNo(o,it){
-  const raw=String(it?.item_no||'').trim();
-  if(!raw) return '';
-  if(/^\d+_/.test(raw)) return raw;
-  const prefix=String(o?.seller_id||o?.sellerId||noMap[o?.no]?.seller_id||'').trim();
-  if(/^\d+$/.test(prefix)) return prefix+'_'+raw;
-  return raw;
-}
-function getPostOfficeOrderValues(o,it,orderMode='work'){
+function getPostOfficeOrderValues(o,it){
   /* 1??-1??? ?? row. ????? ????? ??. */
   const invNo=seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||'';
   return {
     inv_no:invNo,
     ord_no:o.ordNo||noMap[o.no]?.ord_no||'',
     order_date:o.ordDate||'',
-    order_item_no:orderMode==='sellpia'?getSellpiaUploadItemNo(o,it):(it&&it.item_no||''),
+    order_item_no:it&&it.item_no||'',
     seller_product_name:it&&(it.seller_product_name||it.name)||'',
     seller_option_name:it&&(it.seller_option_name||it.option)||'',
     qty:it&&(it.qty||1)||1,
@@ -1577,23 +1569,13 @@ function getPostOfficeOrderValues(o,it,orderMode='work'){
     order_memo:o.orderMemo||''
   };
 }
-function getSellpiaOriginalOrders(){
-  return ORDERS_ALL.slice().sort((a,b)=>{
-    const ar=Number(a.sellpiaSeqNo||a.originalSeqNo||noMap[a.no]?.sellpia_seq_no||noMap[a.no]?.original_seq_no||a.no||0)||999999;
-    const br=Number(b.sellpiaSeqNo||b.originalSeqNo||noMap[b.no]?.sellpia_seq_no||noMap[b.no]?.original_seq_no||b.no||0)||999999;
-    if(ar!==br) return ar-br;
-    return String(a.ordNo||noMap[a.no]?.ord_no||'').localeCompare(String(b.ordNo||noMap[b.no]?.ord_no||''),'ko',{numeric:true});
-  });
-}
-function buildPostOfficeCsvRows(orderMode='work'){
-  const ordered=orderMode==='sellpia'?getSellpiaOriginalOrders():getPostOfficePrintOrders();
-  const headers=POST_OFFICE_HEADERS.slice();
-  if(orderMode==='sellpia') headers[3]='*\uC8FC\uBB38\uD488\uBAA9No';
-  const rows=[headers];
+function buildPostOfficeCsvRows(){
+  const ordered=getPostOfficePrintOrders();
+  const rows=[POST_OFFICE_HEADERS.slice()];
   ordered.forEach(o=>{
     const items=(o.items&&o.items.length?o.items:[null]);
     items.forEach(it=>{
-      const v=getPostOfficeOrderValues(o,it,orderMode);
+      const v=getPostOfficeOrderValues(o,it);
       rows.push([
         v.inv_no, v.ord_no, v.order_date, v.order_item_no,
         v.seller_product_name, v.seller_option_name, v.qty,
@@ -1603,6 +1585,34 @@ function buildPostOfficeCsvRows(orderMode='work'){
     });
   });
   return rows;
+}
+const SELLPIA_INVOICE_HEADERS=['\uC6B4\uC1A1\uC7A5\uBC88\uD638','*\uC8FC\uBB38\uD488\uBAA9No'];
+function getSellpiaInvoiceNo(o){
+  return String(seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||'').trim();
+}
+function getSellpiaUploadItemNo(it){
+  return String(it?.item_no||'').trim();
+}
+function buildSellpiaInvoiceCsvRows(){
+  const rows=[SELLPIA_INVOICE_HEADERS.slice()];
+  ORDERS_ALL.forEach(o=>{
+    const items=(o.items&&o.items.length?o.items:[]);
+    items.forEach(it=>rows.push([getSellpiaInvoiceNo(o),getSellpiaUploadItemNo(it)]));
+  });
+  return rows;
+}
+function validateSellpiaInvoiceCsvRows(rows){
+  const stats={total:0,missingInv:0,missingItemNo:0,legacyItemNo:0,sample:[]};
+  for(let i=1;i<rows.length;i++){
+    const inv=String(rows[i][0]||'').trim();
+    const itemNo=String(rows[i][1]||'').trim();
+    stats.total++;
+    if(!inv) stats.missingInv++;
+    if(!itemNo) stats.missingItemNo++;
+    if(itemNo&&!/^\d+_/.test(itemNo)) stats.legacyItemNo++;
+    if((!inv||!itemNo||!/^\d+_/.test(itemNo))&&stats.sample.length<8){stats.sample.push({row:i+1,inv,itemNo});}
+  }
+  return stats;
 }
 function validatePostOfficeCsvRows(rows){
   /* rows[0] = header. 데이터 row 기준으로 누락 카운트. */
@@ -1646,7 +1656,7 @@ function showPostOfficeEnrichmentStatus(){
 }
 function downloadPostOfficeCsv(){
   if(!ORDERS_ALL.length){toast('⚠ 출력 대상 없음');return;}
-  const rows=buildPostOfficeCsvRows('work');
+  const rows=buildPostOfficeCsvRows();
   const stats=validatePostOfficeCsvRows(rows);
   console.log('[POST] CSV stats',stats);
   if(stats.missingRequired>0){
@@ -1660,32 +1670,25 @@ function downloadPostOfficeCsv(){
   toast('📮 우체국 CSV '+(rows.length-1)+'건 (누락 '+stats.missingRequired+')');
 }
 
-function downloadSellpiaOrderPostOfficeCsv(){
-  if(!ORDERS_ALL.length){toast('no orders');return;}
-  const rows=buildPostOfficeCsvRows('sellpia');
-  const stats=validatePostOfficeCsvRows(rows);
-  console.log('[POST] sellpia-order CSV stats',stats);
-  if(stats.missingInvNo>0){
-    alert('???? CSV? ?????? ??? ?????.\n\n????? ?? ?: '+stats.missingInvNo+'?\n\n??/????? ???? ?? ? ??? ????? ???? ??? ?? ??????.');
-    toast('???? CSV ??: ????? ?? '+stats.missingInvNo+'?');
+function downloadSellpiaInvoiceCsv(){
+  if(!ORDERS_ALL.length){toast('No orders');return;}
+  const rows=buildSellpiaInvoiceCsvRows();
+  const stats=validateSellpiaInvoiceCsvRows(rows);
+  console.log('[SELLPIA-INVOICE] CSV stats',stats);
+  if(stats.missingInv||stats.missingItemNo||stats.legacyItemNo){
+    alert('Cannot create Sellpia invoice CSV.\n\n'
+      +'total rows: '+stats.total+'\n'
+      +'missing invoice: '+stats.missingInv+'\n'
+      +'missing *order item no: '+stats.missingItemNo+'\n'
+      +'legacy item no without seller prefix: '+stats.legacyItemNo+'\n\n'
+      +'Re-run the latest Sellpia scraper on stockmatch, then attach invoice numbers and try again.');
     return;
-  }
-  if(stats.missingRequired>0){
-    const proceed=confirm(
-      '???? CSV? ??/????/???? ?? ??? ????.\n\n'
-      +'? '+stats.total+'? ? '+stats.missingRequired+'? ???? ??\n'
-      +' - ????: '+stats.missingAddr+'\n'
-      +' - ??????: '+stats.missingZip+'\n'
-      +' - ??????: '+stats.missingName+'\n\n'
-      +'??? ???? ???????'
-    );
-    if(!proceed){toast('???? CSV ???? ??');return;}
   }
   const pad=n=>String(n).padStart(2,'0');
   const now=new Date();
-  const fn='sellpia_order_postoffice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
+  const fn='sellpia_invoice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
   downloadCsv(fn,rows);
-  toast('???? CSV '+(rows.length-1)+'? ????');
+  toast('Sellpia invoice CSV '+(rows.length-1)+' rows');
 }
 
 function getZone(code){
@@ -1852,7 +1855,7 @@ async function loadData(silent=false,preserveView=false){
     outputOrders.forEach((row,i)=>{
       const no=i+1;
       const sellpiaSeq=getSellpiaSeqValue(row,i+1);
-      noMap[no]={ord_no:row.ord_no,inv_no:row.inv_no,seller_id:row.seller_id||'',scraped_at:row.scraped_at||'',print_seq_no:row.print_seq_no||'',planned_print_seq_no:row.planned_print_seq_no||no,work_seq_no:row.work_seq_no||'',sellpia_seq_no:sellpiaSeq,original_seq_no:sellpiaSeq};
+      noMap[no]={ord_no:row.ord_no,inv_no:row.inv_no,scraped_at:row.scraped_at||'',print_seq_no:row.print_seq_no||'',planned_print_seq_no:row.planned_print_seq_no||no,work_seq_no:row.work_seq_no||'',sellpia_seq_no:sellpiaSeq,original_seq_no:sellpiaSeq};
       invToNo[row.inv_no]=no;
       seqToReal[no]=String(row.inv_no).trim();
       realToSeq[String(row.inv_no).trim()]=String(no);
