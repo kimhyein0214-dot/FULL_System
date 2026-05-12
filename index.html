@@ -1655,23 +1655,27 @@ function downloadSellpiaOrderPostOfficeCsv(){
   const rows=buildPostOfficeCsvRows('sellpia');
   const stats=validatePostOfficeCsvRows(rows);
   console.log('[POST] sellpia-order CSV stats',stats);
+  if(stats.missingInvNo>0){
+    alert('???? CSV? ?????? ??? ?????.\n\n????? ?? ?: '+stats.missingInvNo+'?\n\n??/????? ???? ?? ? ??? ????? ???? ??? ?? ??????.');
+    toast('???? CSV ??: ????? ?? '+stats.missingInvNo+'?');
+    return;
+  }
   if(stats.missingRequired>0){
     const proceed=confirm(
-      'Sellpia order CSV has missing required fields.\n\n'
-      +'Total '+stats.total+' rows / missing '+stats.missingRequired+' rows\n'
-      +' - missing invoice: '+stats.missingInvNo+'\n'
-      +' - missing address: '+stats.missingAddr+'\n'
-      +' - missing zipcode: '+stats.missingZip+'\n'
-      +' - missing receiver: '+stats.missingName+'\n\n'
-      +'Download anyway?'
+      '???? CSV? ??/????/???? ?? ??? ????.\n\n'
+      +'? '+stats.total+'? ? '+stats.missingRequired+'? ???? ??\n'
+      +' - ????: '+stats.missingAddr+'\n'
+      +' - ??????: '+stats.missingZip+'\n'
+      +' - ??????: '+stats.missingName+'\n\n'
+      +'??? ???? ???????'
     );
-    if(!proceed){toast('download cancelled');return;}
+    if(!proceed){toast('???? CSV ???? ??');return;}
   }
   const pad=n=>String(n).padStart(2,'0');
   const now=new Date();
   const fn='sellpia_order_postoffice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
   downloadCsv(fn,rows);
-  toast('Sellpia CSV '+(rows.length-1)+' rows (missing '+stats.missingRequired+')');
+  toast('???? CSV '+(rows.length-1)+'? ????');
 }
 
 function getZone(code){
