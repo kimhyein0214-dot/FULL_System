@@ -1580,7 +1580,7 @@ function getSellpiaOriginalOrders(){
 function buildPostOfficeCsvRows(orderMode='work'){
   const ordered=orderMode==='sellpia'?getSellpiaOriginalOrders():getPostOfficePrintOrders();
   const headers=POST_OFFICE_HEADERS.slice();
-  if(orderMode==='sellpia') headers[3]='*????No';
+  if(orderMode==='sellpia') headers[3]='*\uC8FC\uBB38\uD488\uBAA9No';
   const rows=[headers];
   ordered.forEach(o=>{
     const items=(o.items&&o.items.length?o.items:[null]);
