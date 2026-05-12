@@ -1550,14 +1550,22 @@ function cleanSellpiaManageMemo(v){
     .filter(line=>line&&!isSellerOrderMemoLine(line))
     .join('\n');
 }
-function getPostOfficeOrderValues(o,it){
-  /* 1주문-1아이템 단위 row. 작업순서는 호출쪽에서 보장. */
+function getSellpiaUploadItemNo(o,it){
+  const raw=String(it?.item_no||'').trim();
+  if(!raw) return '';
+  if(/^\d+_/.test(raw)) return raw;
+  const prefix=String(o?.seller_id||o?.sellerId||noMap[o?.no]?.seller_id||'').trim();
+  if(/^\d+$/.test(prefix)) return prefix+'_'+raw;
+  return raw;
+}
+function getPostOfficeOrderValues(o,it,orderMode='work'){
+  /* 1??-1??? ?? row. ????? ????? ??. */
   const invNo=seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||'';
   return {
     inv_no:invNo,
     ord_no:o.ordNo||noMap[o.no]?.ord_no||'',
     order_date:o.ordDate||'',
-    order_item_no:it&&it.item_no||'',
+    order_item_no:orderMode==='sellpia'?getSellpiaUploadItemNo(o,it):(it&&it.item_no||''),
     seller_product_name:it&&(it.seller_product_name||it.name)||'',
     seller_option_name:it&&(it.seller_option_name||it.option)||'',
     qty:it&&(it.qty||1)||1,
@@ -1585,7 +1593,7 @@ function buildPostOfficeCsvRows(orderMode='work'){
   ordered.forEach(o=>{
     const items=(o.items&&o.items.length?o.items:[null]);
     items.forEach(it=>{
-      const v=getPostOfficeOrderValues(o,it);
+      const v=getPostOfficeOrderValues(o,it,orderMode);
       rows.push([
         v.inv_no, v.ord_no, v.order_date, v.order_item_no,
         v.seller_product_name, v.seller_option_name, v.qty,
@@ -1844,7 +1852,7 @@ async function loadData(silent=false,preserveView=false){
     outputOrders.forEach((row,i)=>{
       const no=i+1;
       const sellpiaSeq=getSellpiaSeqValue(row,i+1);
-      noMap[no]={ord_no:row.ord_no,inv_no:row.inv_no,scraped_at:row.scraped_at||'',print_seq_no:row.print_seq_no||'',planned_print_seq_no:row.planned_print_seq_no||no,work_seq_no:row.work_seq_no||'',sellpia_seq_no:sellpiaSeq,original_seq_no:sellpiaSeq};
+      noMap[no]={ord_no:row.ord_no,inv_no:row.inv_no,seller_id:row.seller_id||'',scraped_at:row.scraped_at||'',print_seq_no:row.print_seq_no||'',planned_print_seq_no:row.planned_print_seq_no||no,work_seq_no:row.work_seq_no||'',sellpia_seq_no:sellpiaSeq,original_seq_no:sellpiaSeq};
       invToNo[row.inv_no]=no;
       seqToReal[no]=String(row.inv_no).trim();
       realToSeq[String(row.inv_no).trim()]=String(no);
