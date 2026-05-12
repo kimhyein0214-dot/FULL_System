@@ -1444,12 +1444,12 @@ function compareWorkOrderRows(a,b){
   const ar=WORK_SORT_POLICY.deferProblemOrders&&(am.hasShortage||am.hasHold)?2:(am.hasGoldItem?1:0);
   const br=WORK_SORT_POLICY.deferProblemOrders&&(bm.hasShortage||bm.hasHold)?2:(bm.hasGoldItem?1:0);
   if(ar!==br) return ar-br;
+  if((am.itemKindCount||0)!==(bm.itemKindCount||0)) return (am.itemKindCount||0)-(bm.itemKindCount||0);
+  if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
+  if((am.routeZoneSpread||1)!==(bm.routeZoneSpread||1)) return (am.routeZoneSpread||1)-(bm.routeZoneSpread||1);
   if((am.routeZoneRank??2)!==(bm.routeZoneRank??2)) return (am.routeZoneRank??2)-(bm.routeZoneRank??2);
   const codeCompare=String(am.primaryRouteCode||'').localeCompare(String(bm.primaryRouteCode||''),'en',{numeric:true,sensitivity:'base'});
   if(codeCompare!==0) return codeCompare;
-  if((am.routeZoneSpread||1)!==(bm.routeZoneSpread||1)) return (am.routeZoneSpread||1)-(bm.routeZoneSpread||1);
-  if((am.itemKindCount||0)!==(bm.itemKindCount||0)) return (am.itemKindCount||0)-(bm.itemKindCount||0);
-  if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
   return (a._originalRank||0)-(b._originalRank||0);
 }
 // TODO(print-sequence-flow): 작업순서 생성 → 그 순서로 송장 출력 → 셀피아 출력순번 재수집 → print_seq_no 저장 흐름을 API/DB 계층에서 연결합니다.
