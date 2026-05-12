@@ -1579,7 +1579,9 @@ function getSellpiaOriginalOrders(){
 }
 function buildPostOfficeCsvRows(orderMode='work'){
   const ordered=orderMode==='sellpia'?getSellpiaOriginalOrders():getPostOfficePrintOrders();
-  const rows=[POST_OFFICE_HEADERS.slice()];
+  const headers=POST_OFFICE_HEADERS.slice();
+  if(orderMode==='sellpia') headers[3]='*????No';
+  const rows=[headers];
   ordered.forEach(o=>{
     const items=(o.items&&o.items.length?o.items:[null]);
     items.forEach(it=>{
