@@ -1400,8 +1400,8 @@ function itemNameWithOption(it){
   if(name&&option) return name+' / '+option;
   return name||option||'??? ?? ??';
 }
-function displayInvoiceNo(no){
-  return String(seqToReal[no]||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
+function displayInvoiceNo(no,order=null){
+  return String(seqToReal[no]||order?.invNo||order?.inv_no||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
 }
 function renderLocationBadge(val,typeHint=''){
   const clean=String(val||'').replace(/^\[|\]$/g,'').trim();
@@ -2197,14 +2197,16 @@ function renderRightDetail(no){
   document.getElementById('rp-hdr').innerHTML=`<div class="rp-inv-no">${rpJoLabel?rpJoLabel+' · ':''}${workNoHtml(no,'sm')}${gInv?' 🥇':''}</div><div class="rp-buyer">${buyerLabel(order.buyer,order.recv)}&nbsp;<span style="font-size:11px;color:${statColor};">${statTxt}</span> ${rpSortMeta}</div>`;
 
   // 서랍번호를 상품 리스트 위에 배치
-  document.getElementById('rp-dr').innerHTML=`<span class="rp-dr-lbl">📝 서랍번호</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'서랍번호 입력'}</button>`;
+  const detailRealInv=displayInvoiceNo(no,order);
+  document.getElementById('rp-dr').innerHTML=`<span class="rp-dr-lbl">?? ????</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'???? ??'}</button>${detailRealInv?`<div style="width:100%;font-size:10px;color:rgba(255,255,255,0.42);padding-left:4px;margin-top:2px;">?? ${esc(detailRealInv)}</div>`:''}`;
 
   document.getElementById('rp-scroll').innerHTML=order.items.map((it,idx)=>{
     const c=multi[it.prodCode||it.code]||{b:'#B0BEC5'};
     const gItem=isGold(it);
     const done2=checked[no+'-'+it.code], isHold=!!holded[no+'-'+it.code], shVal=shortage[no+'-'+it.code]||0;
     const seq=idx+1;
-    return `<div class="rp-item${gItem?' gold':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><div class="rp-dot" style="background:${done2?'#00CC66':isHold?'#FFB74D':gItem?'var(--gold)':c.b};flex-shrink:0;"></div><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;">${it.prodCode||it.code}${gItem?' 🥇':''} ${renderLocationBadge(it.location)}</div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">−</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
+    const itemTitle=itemNameWithOption(it);
+    return `<div class="rp-item${gItem?' gold':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><div class="rp-dot" style="background:${done2?'#00CC66':isHold?'#FFB74D':gItem?'var(--gold)':c.b};flex-shrink:0;"></div><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' ??':''} ${renderLocationBadge(it.location)}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">?</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}?</div></div>`;
   }).join('');
 }
 
@@ -2372,7 +2374,7 @@ function renderLeft(){
   const multi=buildMultiMap(jo);
   let flat=[];
   sourceOrders.forEach(o=>o.items.forEach((it,idx2)=>{
-    flat.push({no:o.no,buyer:o.buyer,recv:o.recv||'',code:it.code,nal:it.nal,qty:it.qty,seq:idx2+1,name:it.name||'',prodCode:it.prodCode||'',goldItem:isGold(it),inGoldInv:joGoldNos.has(o.no)&&!isGold(it),location:it.location||''});
+    flat.push({no:o.no,buyer:o.buyer,recv:o.recv||'',code:it.code,nal:it.nal,qty:it.qty,seq:idx2+1,name:it.name||'',option:it.option||'',seller_option_name:it.seller_option_name||'',prodCode:it.prodCode||'',goldItem:isGold(it),inGoldInv:joGoldNos.has(o.no)&&!isGold(it),location:it.location||''});
   }));
   flat.sort((a,b)=>{const cc=(a.prodCode||a.code).localeCompare(b.prodCode||b.code,'ko');if(cc!==0)return cc;if(a.no!==b.no)return a.no-b.no;return a.seq-b.seq;});
 
@@ -2420,7 +2422,7 @@ function renderLeft(){
       const _pairLoc=_locMap[_pairCode]||'';
       const _locBadge=renderLocationBadge(_loc);
       const _pairBadge=renderLocationBadge(_pairLoc,f.nal?'한쌍':'낱');
-      listHtml+=`<div class="code-section" id="code-${escId(_pcode)}"><div class="code-section-hdr"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'#E8D080':'#fff'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${_locBadge}${_pairBadge}<span class="csh-name">${f.name||'상품명 연동 예정'}</span></div><div class="code-section-body">`;
+      listHtml+=`<div class="code-section" id="code-${escId(_pcode)}"><div class="code-section-hdr"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'#E8D080':'#fff'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${_locBadge}${_pairBadge}<span class="csh-name">${esc(itemNameWithOption(f))}</span></div><div class="code-section-body">`;
     }
     const cellColor=done?'#00CC66':f.goldItem?'var(--gold)':isHold?'#E65100':isM?c.t:'var(--text)';
 
