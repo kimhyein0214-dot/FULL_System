@@ -957,6 +957,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
   <button class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
   <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="현재 주문의 우체국 보강(주소/연락처/우편번호) 현황을 확인합니다">📊 보강현황</button>
   <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="작업순서대로 우체국 양식 CSV를 만듭니다 (보강 누락 시 경고)">📮 우체국CSV</button>
+  <button class="abtn work-export-btn" onclick="downloadSellpiaOrderPostOfficeCsv()" title="셀피아 송장 업로드용 원래 수집순서 CSV를 만듭니다">셀피아순CSV</button>
   <button class="abtn zone-aux-btn" onclick="openZoneSortPopup()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역순 송장 배치 현황">📊 구역현황</button>
   <button class="abtn" onclick="showOrderListModal()" style="background:#1A3A6B;">📋 주문리스트</button>
   <span class="work-sort-summary" id="work-sort-summary">정렬 기준: 출력순서</span>
@@ -1568,8 +1569,16 @@ function getPostOfficeOrderValues(o,it){
     order_memo:o.orderMemo||''
   };
 }
-function buildPostOfficeCsvRows(){
-  const ordered=getPostOfficePrintOrders();
+function getSellpiaOriginalOrders(){
+  return ORDERS_ALL.slice().sort((a,b)=>{
+    const ar=Number(a.sellpiaSeqNo||a.originalSeqNo||noMap[a.no]?.sellpia_seq_no||noMap[a.no]?.original_seq_no||a.no||0)||999999;
+    const br=Number(b.sellpiaSeqNo||b.originalSeqNo||noMap[b.no]?.sellpia_seq_no||noMap[b.no]?.original_seq_no||b.no||0)||999999;
+    if(ar!==br) return ar-br;
+    return String(a.ordNo||noMap[a.no]?.ord_no||'').localeCompare(String(b.ordNo||noMap[b.no]?.ord_no||''),'ko',{numeric:true});
+  });
+}
+function buildPostOfficeCsvRows(orderMode='work'){
+  const ordered=orderMode==='sellpia'?getSellpiaOriginalOrders():getPostOfficePrintOrders();
   const rows=[POST_OFFICE_HEADERS.slice()];
   ordered.forEach(o=>{
     const items=(o.items&&o.items.length?o.items:[null]);
@@ -1627,7 +1636,7 @@ function showPostOfficeEnrichmentStatus(){
 }
 function downloadPostOfficeCsv(){
   if(!ORDERS_ALL.length){toast('⚠ 출력 대상 없음');return;}
-  const rows=buildPostOfficeCsvRows();
+  const rows=buildPostOfficeCsvRows('work');
   const stats=validatePostOfficeCsvRows(rows);
   console.log('[POST] CSV stats',stats);
   if(stats.missingRequired>0){
@@ -1639,6 +1648,30 @@ function downloadPostOfficeCsv(){
   const fn='postoffice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
   downloadCsv(fn,rows);
   toast('📮 우체국 CSV '+(rows.length-1)+'건 (누락 '+stats.missingRequired+')');
+}
+
+function downloadSellpiaOrderPostOfficeCsv(){
+  if(!ORDERS_ALL.length){toast('no orders');return;}
+  const rows=buildPostOfficeCsvRows('sellpia');
+  const stats=validatePostOfficeCsvRows(rows);
+  console.log('[POST] sellpia-order CSV stats',stats);
+  if(stats.missingRequired>0){
+    const proceed=confirm(
+      'Sellpia order CSV has missing required fields.\n\n'
+      +'Total '+stats.total+' rows / missing '+stats.missingRequired+' rows\n'
+      +' - missing invoice: '+stats.missingInvNo+'\n'
+      +' - missing address: '+stats.missingAddr+'\n'
+      +' - missing zipcode: '+stats.missingZip+'\n'
+      +' - missing receiver: '+stats.missingName+'\n\n'
+      +'Download anyway?'
+    );
+    if(!proceed){toast('download cancelled');return;}
+  }
+  const pad=n=>String(n).padStart(2,'0');
+  const now=new Date();
+  const fn='sellpia_order_postoffice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
+  downloadCsv(fn,rows);
+  toast('Sellpia CSV '+(rows.length-1)+' rows (missing '+stats.missingRequired+')');
 }
 
 function getZone(code){
