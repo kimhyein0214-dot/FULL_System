@@ -955,9 +955,9 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
   <button id="zone-sort-btn" class="abtn zone-aux-btn" onclick="toggleZoneSort()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역별 자동 배치">🗂️ 구역순</button>
   <button id="work-sort-btn" class="abtn work-sort-btn" onclick="toggleWorkSort()" title="송장 출력 전 작업순서: 일반상품 우선 → 상품종류 적은순 → 총수량 적은순 → 골드 뒤로">🧭 작업순서</button>
   <button class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
-  <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="현재 주문의 우체국 보강(주소/연락처/우편번호) 현황을 확인합니다">📊 보강현황</button>
-  <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="작업순서대로 우체국 양식 CSV를 만듭니다 (보강 누락 시 경고)">&#128238; &#50864;&#52404;&#44397;CSV</button>
-  <button class="abtn work-export-btn" onclick="downloadSellpiaInvoiceCsv()" title="Sellpia invoice upload CSV: invoice + item key">&#49472;&#54588;&#50500;&#49569;&#51109;CSV</button>
+  <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="토글 등록용 CSV에 필요한 수취인/주소/연락처 보강 현황을 확인합니다">📊 보강현황</button>
+  <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="토글 등록용 CSV를 만듭니다. 토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.">📮 토글CSV</button>
+  <button class="abtn work-export-btn" onclick="downloadSellpiaInvoiceCsv()" title="토글 송장 발급 후 셀피아 업로드용 CSV를 만듭니다. 운송장번호 + *주문품목No가 필수입니다.">&#49472;&#54588;&#50500;&#49569;&#51109;CSV</button>
   <button class="abtn zone-aux-btn" onclick="openZoneSortPopup()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역순 송장 배치 현황">📊 구역현황</button>
   <button class="abtn" onclick="showOrderListModal()" style="background:#1A3A6B;">📋 주문리스트</button>
   <span class="work-sort-summary" id="work-sort-summary">정렬 기준: 출력순서</span>
@@ -1529,10 +1529,9 @@ function downloadPlannedPrintList(){
 }
 
 /* ──────────────────────────────────────────────────────────────
-   📮 우체국 CSV (작업순서대로) — 헤더 13컬럼 고정, 빈 컬럼은 빈문자열 유지
-   ord_no/inv_no/주소/연락처/우편번호/주문메모는 orders 테이블 보강 필드를 사용.
-   보강이 안 된 row는 빈 컬럼이 그대로 나가므로, 다운로드 직전 검증 단계에서
-   누락 통계와 경고를 한 번 더 보여줍니다.
+   📮 토글 등록용 CSV (작업순서대로) — 헤더 13컬럼 고정, 빈 컬럼은 빈문자열 유지
+   토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.
+   셀피아 송장 업로드는 별도 "셀피아송장CSV"에서 운송장번호 + *주문품목No만 사용합니다.
    ────────────────────────────────────────────────────────────── */
 const POST_OFFICE_HEADERS=['운송장번호','주문번호','주문일자','주문품목No','판매처상품명','판매처옵션명','주문수량','수취인명','수취인연락처','수취인핸드폰','우편번호','주소','주문메모'];
 function isSellerOrderMemoLine(v){
@@ -1615,7 +1614,7 @@ function validateSellpiaInvoiceCsvRows(rows){
   return stats;
 }
 function validatePostOfficeCsvRows(rows){
-  /* rows[0] = header. 데이터 row 기준으로 누락 카운트. */
+  /* rows[0] = header. 토글 등록용 검증: 운송장번호는 토글 발급 전 비어 있어도 정상입니다. */
   const stats={total:0,missingName:0,missingTel:0,missingMobile:0,missingZip:0,missingAddr:0,missingMemo:0,missingOrdNo:0,missingInvNo:0,missingRequired:0,sample:[]};
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
@@ -1628,11 +1627,12 @@ function validatePostOfficeCsvRows(rows){
     if(!String(r[10]||'').trim()) stats.missingZip++;
     if(!String(r[11]||'').trim()) stats.missingAddr++;
     if(!String(r[12]||'').trim()) stats.missingMemo++;
-    /* 필수: 운송장번호 + 수취인명 + 주소 + 우편번호 */
-    const required=String(r[0]||'').trim()&&String(r[7]||'').trim()&&String(r[11]||'').trim()&&String(r[10]||'').trim();
+    /* 토글 등록 전 필수: 수취인명 + 연락처(전화/핸드폰 중 하나) + 우편번호 + 주소 */
+    const hasTel=String(r[8]||'').trim()||String(r[9]||'').trim();
+    const required=String(r[7]||'').trim()&&hasTel&&String(r[10]||'').trim()&&String(r[11]||'').trim();
     if(!required){
       stats.missingRequired++;
-      if(stats.sample.length<8) stats.sample.push({row:i+1,inv:r[0],ord:r[1],name:r[7],zip:r[10],addr:r[11]});
+      if(stats.sample.length<8) stats.sample.push({row:i+1,ord:r[1],name:r[7],tel:r[8],mobile:r[9],zip:r[10],addr:r[11]});
     }
   }
   return stats;
@@ -1650,24 +1650,24 @@ function showPostOfficeEnrichmentStatus(){
   });
   const csvRows=buildPostOfficeCsvRows();
   const csvStats=validatePostOfficeCsvRows(csvRows);
-  const msg=`📮 우체국 보강 현황\n\n총 주문: ${total}\nCSV 상품행: ${csvStats.total}\n보강 완료(enriched_at): ${enriched}\n운송장번호 누락 주문: ${missingInvOrders}\n운송장번호 누락 CSV행: ${csvStats.missingInvNo}\n주소 누락: ${missingAddr}\n연락처(전화/핸드폰 모두) 누락: ${missingTel}\n우편번호 누락: ${missingZip}`;
-  console.log('[POST] enrichment status',{total,enriched,missingAddr,missingTel,missingZip,missingInvOrders,csvStats});
+  const msg=`📮 토글 등록 CSV 준비 현황\n\n총 주문: ${total}\nCSV 상품행: ${csvStats.total}\n보강 완료(enriched_at): ${enriched}\n주소 누락: ${missingAddr}\n연락처(전화/핸드폰 모두) 누락: ${missingTel}\n우편번호 누락: ${missingZip}\n토글 발급 전 송장번호 빈 주문: ${missingInvOrders}\n토글 발급 전 송장번호 빈 CSV행: ${csvStats.missingInvNo}\n\n※ 송장번호 빈 값은 토글 등록 전이면 정상입니다.`;
+  console.log('[TOGLE] registration CSV status',{total,enriched,missingAddr,missingTel,missingZip,missingInvOrders,csvStats});
   alert(msg);
 }
 function downloadPostOfficeCsv(){
   if(!ORDERS_ALL.length){toast('⚠ 출력 대상 없음');return;}
   const rows=buildPostOfficeCsvRows();
   const stats=validatePostOfficeCsvRows(rows);
-  console.log('[POST] CSV stats',stats);
+  console.log('[TOGLE] registration CSV stats',stats);
   if(stats.missingRequired>0){
-    const proceed=confirm(`운송장번호 또는 수취인 주소 정보가 없는 주문이 있습니다. 우체국 업로드 전 주문정보 보강/송장번호 수집을 먼저 실행해주세요.\n\n총 ${stats.total}행 중 ${stats.missingRequired}행 필수정보(운송장번호/수취인명/우편번호/주소) 누락\n - 운송장번호누락: ${stats.missingInvNo}\n - 주소누락: ${stats.missingAddr}\n - 우편번호누락: ${stats.missingZip}\n - 수취인명누락: ${stats.missingName}\n\n그래도 다운로드 하시겠습니까?`);
-    if(!proceed){toast('🚫 취소: 셀피아 북마클릿에서 우체국정보 보강 실행 후 다시 시도하세요');return;}
+    const proceed=confirm(`토글 등록에 필요한 수취인 정보가 없는 행이 있습니다.\n\n총 ${stats.total}행 중 ${stats.missingRequired}행 필수정보 누락\n - 수취인명 누락: ${stats.missingName}\n - 연락처(전화/핸드폰 모두) 누락: ${Math.min(stats.missingTel,stats.missingMobile)}\n - 우편번호 누락: ${stats.missingZip}\n - 주소 누락: ${stats.missingAddr}\n\n※ 운송장번호 빈 값은 토글 등록 전이면 정상입니다.\n\n그래도 다운로드 하시겠습니까?`);
+    if(!proceed){toast('🚫 취소: 주문정보 보강 후 다시 시도하세요');return;}
   }
   const pad=n=>String(n).padStart(2,'0');
   const now=new Date();
-  const fn='postoffice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
+  const fn='togle_registration_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
   downloadCsv(fn,rows);
-  toast('📮 우체국 CSV '+(rows.length-1)+'건 (누락 '+stats.missingRequired+')');
+  toast('📮 토글 등록 CSV '+(rows.length-1)+'건 (수취인정보 누락 '+stats.missingRequired+')');
 }
 
 function downloadSellpiaInvoiceCsv(){
@@ -1676,12 +1676,12 @@ function downloadSellpiaInvoiceCsv(){
   const stats=validateSellpiaInvoiceCsvRows(rows);
   console.log('[SELLPIA-INVOICE] CSV stats',stats);
   if(stats.missingInv||stats.missingItemNo||stats.legacyItemNo){
-    alert('Cannot create Sellpia invoice CSV.\n\n'
-      +'total rows: '+stats.total+'\n'
-      +'missing invoice: '+stats.missingInv+'\n'
-      +'missing *order item no: '+stats.missingItemNo+'\n'
-      +'legacy item no without seller prefix: '+stats.legacyItemNo+'\n\n'
-      +'Re-run the latest Sellpia scraper on stockmatch, then attach invoice numbers and try again.');
+    alert('셀피아 송장 업로드 CSV를 만들 수 없습니다.\n\n'
+      +'전체 행: '+stats.total+'\n'
+      +'운송장번호 누락: '+stats.missingInv+'\n'
+      +'*주문품목No 누락: '+stats.missingItemNo+'\n'
+      +'판매처 prefix 없는 주문품목No: '+stats.legacyItemNo+'\n\n'
+      +'토글에서 송장번호를 받은 뒤, 최신 셀피아 스크래퍼로 *주문품목No가 저장됐는지 확인해주세요.');
     return;
   }
   const pad=n=>String(n).padStart(2,'0');
