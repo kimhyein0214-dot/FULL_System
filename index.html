@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>피킹 시스템</title>
-<link rel="stylesheet" href="picking-system_0511.css">
+<link rel="stylesheet" href="picking-system_0515.css">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1399,7 +1399,7 @@ function itemNameWithOption(it){
   const name=String(it?.name||it?.p_name||'').trim();
   const option=String(it?.option||it?.p_option||it?.seller_option_name||'').trim();
   if(name&&option) return name+' / '+option;
-  return name||option||'??? ?? ??';
+  return name||option||'상품명 없음';
 }
 function displayInvoiceNo(no,order=null){
   return String(seqToReal[no]||order?.invNo||order?.inv_no||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
@@ -1551,7 +1551,7 @@ function cleanSellpiaManageMemo(v){
     .join('\n');
 }
 function getPostOfficeOrderValues(o,it){
-  /* 1??-1??? ?? row. ????? ????? ??. */
+  /* Keep one representative row per invoice item. */
   const invNo=seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||'';
   return {
     inv_no:invNo,
@@ -2167,11 +2167,8 @@ function renderAll(skipLeft){
   document.getElementById('prog-pct').textContent=pct+'%';
   
   const pickableOrders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)));
-  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>checked[o.no+'-'+it.code])).length;
-  // ????: ???? ? shortage ?? 0?? ? ?? ? ?? ?????. ?? ??? ???? short_qty ??? ?? ???? ?????.
-  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0).length,0);
+  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>checked[o.no+'-'+it.code])).length;  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0).length,0);
   const holdCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&holded[o.no+'-'+it.code]).length,0);
-  // ???? ??: ???? ??? ??? ?? inv_no ?? ?? ?? ?????. ????/????/???? ? ???? ??? ?????.
   const memoWaitInvNos=new Set();
   ORDERS_ALL.forEach(o=>{
     if(o.items.some(it=>!isGold(it)&&((shortage[o.no+'-'+it.code]||0)>0||holded[o.no+'-'+it.code]||String(drawer[o.no]||'').trim()))){
@@ -2248,7 +2245,7 @@ function renderRightDetail(no){
 
   // 서랍번호를 상품 리스트 위에 배치
   const detailRealInv=displayInvoiceNo(no,order);
-  document.getElementById('rp-dr').innerHTML=`<span class="rp-dr-lbl">?? ????</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'???? ??'}</button>${detailRealInv?`<div style="width:100%;font-size:10px;color:rgba(255,255,255,0.42);padding-left:4px;margin-top:2px;">?? ${esc(detailRealInv)}</div>`:''}`;
+  document.getElementById('rp-dr').innerHTML=`<span class="rp-dr-lbl">서랍번호</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'서랍번호 입력'}</button>${detailRealInv?`<div style="width:100%;font-size:10px;color:rgba(255,255,255,0.42);padding-left:4px;margin-top:2px;">송장 ${esc(detailRealInv)}</div>`:''}`;
 
   document.getElementById('rp-scroll').innerHTML=order.items.map((it,idx)=>{
     const c=multi[it.prodCode||it.code]||{b:'#B0BEC5'};
@@ -2256,7 +2253,7 @@ function renderRightDetail(no){
     const done2=checked[no+'-'+it.code], isHold=!!holded[no+'-'+it.code], shVal=shortage[no+'-'+it.code]||0;
     const seq=idx+1;
     const itemTitle=itemNameWithOption(it);
-    return `<div class="rp-item${gItem?' gold':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><div class="rp-dot" style="background:${done2?'#00CC66':isHold?'#FFB74D':gItem?'var(--gold)':c.b};flex-shrink:0;"></div><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' ??':''} ${renderLocationBadge(it.location)}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">?</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}?</div></div>`;
+    return `<div class="rp-item${gItem?' gold':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><div class="rp-dot" style="background:${done2?'#00CC66':isHold?'#FFB74D':gItem?'var(--gold)':c.b};flex-shrink:0;"></div><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' 골드':''} ${renderLocationBadge(it.location)}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
   }).join('');
 }
 
@@ -2477,7 +2474,7 @@ function renderLeft(){
     const cellColor=done?'#00CC66':f.goldItem?'var(--gold)':isHold?'#E65100':isM?c.t:'var(--text)';
 
     const joLabel=_joLabelCache.get(f.no)||'';
-    listHtml+=`<div class="pick-row${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}"><div class="pr-check" ${goldDimmed||isHold?'':`onclick="tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'??':isHold?'?':done?'?':''}</div></div><div class="pr-photo-wrap"><div class="pr-photo" ${photoMap[f.code]?`onclick="zoomPhoto('${photoMap[f.code].replace(/'/g,"\\'")}')"`:''} >${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div><div class="pr-cells"><div class="pr-cell" style="${f.inGoldInv?'border-color:#C8A84B;background:#FFF8E0;':''}"><span class="pr-cell-lbl">수량</span><span class="pr-cell-val" style="font-size:20px;font-weight:900;color:#7C7D81;">${f.qty}개</span>${zoneSortMode?`<span style="display:flex;gap:2px;align-items:center;margin-top:3px;flex-wrap:wrap;"><span style="font-size:10px;font-weight:800;color:#70AEFF;background:#0C1D38;border-radius:3px;padding:1px 4px;white-space:nowrap;">${workNoText(f.no)}</span>${(_typeCountMap[f.no]||1)===2?`<span style="font-size:10px;font-weight:800;color:#FFCF50;background:#332208;border-radius:3px;padding:1px 4px;">(${f.seq})</span>`:''}</span>`:''} ${f.inGoldInv?'<span style="font-size:8px;font-weight:800;color:#8B6200;background:rgba(200,168,75,0.25);border:1px solid rgba(200,168,75,0.55);border-radius:3px;padding:1px 3px;margin-top:2px;white-space:nowrap;">🥇 골드송장</span>':''}</div><div class="pr-cell" onclick="selectInv(${f.no})" style="cursor:pointer;">${renderJoSlots(f.no,f.seq)}<span style="font-size:10px;font-weight:700;color:var(--muted);line-height:1.2;display:flex;align-items:center;gap:4px;margin-top:4px;">${buyerLabel(f.buyer,f.recv)}&nbsp;${chBadge(f.no)}</span></div><div class="pr-cell pr-memo-cell" onclick="event.stopPropagation()"><span class="pr-cell-lbl">메모</span><input class="pr-field-input" type="text" placeholder="—" value="${esc(memoData[f.no+'-'+f.code]||'')}" onclick="event.stopPropagation()" onblur="saveMemo(${f.no},'${esc(f.code)}',this.value)"></div>${(f.goldItem&&viewMode!=='gold')?'<div class="pr-cell" style="background:#FFFBE8;border-color:#E8D080;"><span style="font-size:11px;color:var(--gold);font-weight:900;">?? ???? ??? ??</span></div>':isHold?'<div class="pr-cell" style="background:#FFE0B2;border-color:#FFB74D;"><span style="font-size:11px;color:#E65100;">⏸ 보류됨</span></div>':`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`}<div class="pr-cell" style="min-width:65px;max-width:80px;flex-shrink:0;background:#EEE8DF;border-color:#D9CBBA;"><span class="pr-cell-lbl">상품코드</span><span style="font-size:9px;font-weight:700;color:#555;line-height:1.3;word-break:break-all;">${f.code||'—'}</span></div></div></div>`;
+    listHtml+=`<div class="pick-row${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}"><div class="pr-check" ${goldDimmed||isHold?'':`onclick="tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div><div class="pr-photo-wrap"><div class="pr-photo" ${photoMap[f.code]?`onclick="zoomPhoto('${photoMap[f.code].replace(/'/g,"\\'")}')"`:''} >${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div><div class="pr-cells"><div class="pr-cell" style="${f.inGoldInv?'border-color:#C8A84B;background:#FFF8E0;':''}"><span class="pr-cell-lbl">수량</span><span class="pr-cell-val" style="font-size:20px;font-weight:900;color:#7C7D81;">${f.qty}개</span>${zoneSortMode?`<span style="display:flex;gap:2px;align-items:center;margin-top:3px;flex-wrap:wrap;"><span style="font-size:10px;font-weight:800;color:#70AEFF;background:#0C1D38;border-radius:3px;padding:1px 4px;white-space:nowrap;">${workNoText(f.no)}</span>${(_typeCountMap[f.no]||1)===2?`<span style="font-size:10px;font-weight:800;color:#FFCF50;background:#332208;border-radius:3px;padding:1px 4px;">(${f.seq})</span>`:''}</span>`:''} ${f.inGoldInv?'<span style="font-size:8px;font-weight:800;color:#8B6200;background:rgba(200,168,75,0.25);border:1px solid rgba(200,168,75,0.55);border-radius:3px;padding:1px 3px;margin-top:2px;white-space:nowrap;">🥇 골드송장</span>':''}</div><div class="pr-cell" onclick="selectInv(${f.no})" style="cursor:pointer;">${renderJoSlots(f.no,f.seq)}<span style="font-size:10px;font-weight:700;color:var(--muted);line-height:1.2;display:flex;align-items:center;gap:4px;margin-top:4px;">${buyerLabel(f.buyer,f.recv)}&nbsp;${chBadge(f.no)}</span></div><div class="pr-cell pr-memo-cell" onclick="event.stopPropagation()"><span class="pr-cell-lbl">메모</span><input class="pr-field-input" type="text" placeholder="—" value="${esc(memoData[f.no+'-'+f.code]||'')}" onclick="event.stopPropagation()" onblur="saveMemo(${f.no},'${esc(f.code)}',this.value)"></div>${(f.goldItem&&viewMode!=='gold')?'<div class="pr-cell" style="background:#FFFBE8;border-color:#E8D080;"><span style="font-size:11px;color:var(--gold);font-weight:900;">골드 담당자 처리</span></div>':isHold?'<div class="pr-cell" style="background:#FFE0B2;border-color:#FFB74D;"><span style="font-size:11px;color:#E65100;">⏸ 보류됨</span></div>':`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`}<div class="pr-cell" style="min-width:65px;max-width:80px;flex-shrink:0;background:#EEE8DF;border-color:#D9CBBA;"><span class="pr-cell-lbl">상품코드</span><span style="font-size:9px;font-weight:700;color:#555;line-height:1.3;word-break:break-all;">${f.code||'—'}</span></div></div></div>`;
   });
   if(prevCode!=='') listHtml+='</div></div>';
   if(!flat.length) listHtml='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">데이터 없음</div>';
@@ -2557,11 +2554,11 @@ function renderRight(){
       const done=checked[order.no+'-'+it.code], sh=(shortage[order.no+'-'+it.code]||0)>0, isHold=!!holded[order.no+'-'+it.code], gItem=isGold(it), inGInv=gInv&&!gItem;
       const dotColor=gItem?'#D4A800':inGInv?'rgba(200,168,75,0.5)':done?'#0E7A4A':isHold?'#FFB74D':sh?'#E57373':c.b;
       const itemTitle=itemNameWithOption(it);
-      return `<div class="ic-item"><div class="ic-dot" style="background:${dotColor}"></div><div class="ic-item-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':'var(--text)'}"><div>${it.prodCode||it.code}${inGInv?'<span style="font-size:8px;color:rgba(200,168,75,0.8);margin-left:2px;">??</span>':''}</div><div style="font-size:9px;font-weight:600;color:var(--muted);line-height:1.25;margin-top:1px;">${esc(itemTitle)}</div></div><span class="ic-item-qty">${it.qty}?</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">?${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;
+      return `<div class="ic-item"><div class="ic-dot" style="background:${dotColor}"></div><div class="ic-item-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':'var(--text)'}"><div>${it.prodCode||it.code}${inGInv?'<span style="font-size:8px;color:rgba(200,168,75,0.8);margin-left:2px;">골드</span>':''}</div><div style="font-size:9px;font-weight:600;color:var(--muted);line-height:1.25;margin-top:1px;">${esc(itemTitle)}</div></div><span class="ic-item-qty">${it.qty}개</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">부족 ${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;
     }).join('');
 
     const realInv=displayInvoiceNo(order.no);
-    cells.push(`<div class="inv-card${allDone?' done':''}${hasShort?' has-short':''}${gInv?' is-gold':''}${hasHold?' is-hold':''}" data-inv="${order.no}" onclick="selectInv(${order.no})"><div class="ic-hdr ${hcls}"><div class="ic-no" style="color:${hasShort?'var(--red)':allDone?'var(--green)':hasHold?'#E65100':'var(--text)'}">${workNoHtml(order.no,'sm')}</div><div class="ic-buyer">${buyerLabel(order.buyer,order.recv)}${chBadge(order.no)}</div><div class="ic-stat" style="color:${statColor}">${statTxt}</div></div><div class="ic-meta">${sortBadges}</div><div class="ic-body">${items}</div><div class="ic-foot" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch;gap:3px;"><div style="display:flex;align-items:center;gap:8px;"><span class="ic-dr-lbl">??</span><button class="ic-dr-btn${drVal?' has-val':''}" onclick="openKeypad(${order.no},'${esc(drVal)}',this)">${drVal?drVal:'????'}</button></div>${realInv?`<div style="font-size:9px;color:var(--muted);padding-left:22px;letter-spacing:0;line-height:1.2;">?? ${esc(realInv)}</div>`:''}</div></div>`);
+    cells.push(`<div class="inv-card${allDone?' done':''}${hasShort?' has-short':''}${gInv?' is-gold':''}${hasHold?' is-hold':''}" data-inv="${order.no}" onclick="selectInv(${order.no})"><div class="ic-hdr ${hcls}"><div class="ic-no" style="color:${hasShort?'var(--red)':allDone?'var(--green)':hasHold?'#E65100':'var(--text)'}">${workNoHtml(order.no,'sm')}</div><div class="ic-buyer">${buyerLabel(order.buyer,order.recv)}${chBadge(order.no)}</div><div class="ic-stat" style="color:${statColor}">${statTxt}</div></div><div class="ic-meta">${sortBadges}</div><div class="ic-body">${items}</div><div class="ic-foot" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch;gap:3px;"><div style="display:flex;align-items:center;gap:8px;"><span class="ic-dr-lbl">서랍</span><button class="ic-dr-btn${drVal?' has-val':''}" onclick="openKeypad(${order.no},'${esc(drVal)}',this)">${drVal?drVal:'입력'}</button></div>${realInv?`<div style="font-size:9px;color:var(--muted);padding-left:22px;letter-spacing:0;line-height:1.2;">송장 ${esc(realInv)}</div>`:''}</div></div>`);
   }
   const btLbl=document.getElementById('bt-lbl');
   if(btLbl) btLbl.textContent=zoneSortMode?'📦 종별 주문서':'📦 조별 주문서';
@@ -5469,3 +5466,4 @@ document.addEventListener('keydown',e=>{
 </script>
 </body>
 </html>
+
