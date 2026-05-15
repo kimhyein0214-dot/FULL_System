@@ -1533,7 +1533,7 @@ function downloadPlannedPrintList(){
    토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.
    셀피아 송장 업로드는 별도 "셀피아송장CSV"에서 운송장번호 + *주문품목No만 사용합니다.
    ────────────────────────────────────────────────────────────── */
-const POST_OFFICE_HEADERS=['운송장번호','주문번호','주문일자','주문품목No','판매처상품명','판매처옵션명','주문수량','수취인명','수취인연락처','수취인핸드폰','우편번호','주소','주문메모'];
+const POST_OFFICE_HEADERS=['운송장번호','주문번호','주문일자','*주문품목No','판매처상품명','판매처옵션명','주문수량','수취인명','수취인연락처','수취인핸드폰','우편번호','주소','주문메모'];
 function isSellerOrderMemoLine(v){
   const s=String(v||'').trim();
   if(!s) return false;
@@ -1615,12 +1615,16 @@ function validateSellpiaInvoiceCsvRows(rows){
 }
 function validatePostOfficeCsvRows(rows){
   /* rows[0] = header. 토글 등록용 검증: 운송장번호는 토글 발급 전 비어 있어도 정상입니다. */
-  const stats={total:0,missingName:0,missingTel:0,missingMobile:0,missingZip:0,missingAddr:0,missingMemo:0,missingOrdNo:0,missingInvNo:0,missingRequired:0,sample:[]};
+  const stats={total:0,missingName:0,missingTel:0,missingMobile:0,missingZip:0,missingAddr:0,missingMemo:0,missingOrdNo:0,missingInvNo:0,missingItemNo:0,badItemNo:0,missingRequired:0,sample:[]};
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
     stats.total++;
     if(!String(r[0]||'').trim()) stats.missingInvNo++;
     if(!String(r[1]||'').trim()) stats.missingOrdNo++;
+    const ordNo=String(r[1]||'').trim();
+    const itemNo=String(r[3]||'').trim();
+    if(!itemNo) stats.missingItemNo++;
+    if(itemNo&&ordNo&&itemNo===ordNo) stats.badItemNo++;
     if(!String(r[7]||'').trim()) stats.missingName++;
     if(!String(r[8]||'').trim()) stats.missingTel++;
     if(!String(r[9]||'').trim()) stats.missingMobile++;
@@ -1629,10 +1633,10 @@ function validatePostOfficeCsvRows(rows){
     if(!String(r[12]||'').trim()) stats.missingMemo++;
     /* 토글 등록 전 필수: 수취인명 + 연락처(전화/핸드폰 중 하나) + 우편번호 + 주소 */
     const hasTel=String(r[8]||'').trim()||String(r[9]||'').trim();
-    const required=String(r[7]||'').trim()&&hasTel&&String(r[10]||'').trim()&&String(r[11]||'').trim();
+    const required=String(r[7]||'').trim()&&hasTel&&String(r[10]||'').trim()&&String(r[11]||'').trim()&&itemNo&&itemNo!==ordNo;
     if(!required){
       stats.missingRequired++;
-      if(stats.sample.length<8) stats.sample.push({row:i+1,ord:r[1],name:r[7],tel:r[8],mobile:r[9],zip:r[10],addr:r[11]});
+      if(stats.sample.length<8) stats.sample.push({row:i+1,ord:r[1],itemNo:r[3],name:r[7],tel:r[8],mobile:r[9],zip:r[10],addr:r[11]});
     }
   }
   return stats;
@@ -1650,7 +1654,7 @@ function showPostOfficeEnrichmentStatus(){
   });
   const csvRows=buildPostOfficeCsvRows();
   const csvStats=validatePostOfficeCsvRows(csvRows);
-  const msg=`📮 토글 등록 CSV 준비 현황\n\n총 주문: ${total}\nCSV 상품행: ${csvStats.total}\n보강 완료(enriched_at): ${enriched}\n주소 누락: ${missingAddr}\n연락처(전화/핸드폰 모두) 누락: ${missingTel}\n우편번호 누락: ${missingZip}\n토글 발급 전 송장번호 빈 주문: ${missingInvOrders}\n토글 발급 전 송장번호 빈 CSV행: ${csvStats.missingInvNo}\n\n※ 송장번호 빈 값은 토글 등록 전이면 정상입니다.`;
+  const msg=`📮 토글 등록 CSV 준비 현황\n\n총 주문: ${total}\nCSV 상품행: ${csvStats.total}\n보강 완료(enriched_at): ${enriched}\n주소 누락: ${missingAddr}\n연락처(전화/핸드폰 모두) 누락: ${missingTel}\n우편번호 누락: ${missingZip}\n토글 발급 전 송장번호 빈 주문: ${missingInvOrders}\n토글 발급 전 송장번호 빈 CSV행: ${csvStats.missingInvNo}\n*주문품목No 누락: ${csvStats.missingItemNo}\n주문번호로 잘못 들어간 품목No: ${csvStats.badItemNo}\n\n※ 송장번호 빈 값은 토글 등록 전이면 정상입니다.`;
   console.log('[TOGLE] registration CSV status',{total,enriched,missingAddr,missingTel,missingZip,missingInvOrders,csvStats});
   alert(msg);
 }
@@ -1660,7 +1664,7 @@ function downloadPostOfficeCsv(){
   const stats=validatePostOfficeCsvRows(rows);
   console.log('[TOGLE] registration CSV stats',stats);
   if(stats.missingRequired>0){
-    const proceed=confirm(`토글 등록에 필요한 수취인 정보가 없는 행이 있습니다.\n\n총 ${stats.total}행 중 ${stats.missingRequired}행 필수정보 누락\n - 수취인명 누락: ${stats.missingName}\n - 연락처(전화/핸드폰 모두) 누락: ${Math.min(stats.missingTel,stats.missingMobile)}\n - 우편번호 누락: ${stats.missingZip}\n - 주소 누락: ${stats.missingAddr}\n\n※ 운송장번호 빈 값은 토글 등록 전이면 정상입니다.\n\n그래도 다운로드 하시겠습니까?`);
+    const proceed=confirm(`토글 등록에 필요한 수취인 정보가 없는 행이 있습니다.\n\n총 ${stats.total}행 중 ${stats.missingRequired}행 필수정보 누락\n - 수취인명 누락: ${stats.missingName}\n - 연락처(전화/핸드폰 모두) 누락: ${Math.min(stats.missingTel,stats.missingMobile)}\n - 우편번호 누락: ${stats.missingZip}\n - 주소 누락: ${stats.missingAddr}\n - *주문품목No 누락: ${stats.missingItemNo}\n - 주문번호로 잘못 들어간 품목No: ${stats.badItemNo}\n\n※ 운송장번호 빈 값은 토글 등록 전이면 정상입니다.\n\n그래도 다운로드 하시겠습니까?`);
     if(!proceed){toast('🚫 취소: 주문정보 보강 후 다시 시도하세요');return;}
   }
   const pad=n=>String(n).padStart(2,'0');
