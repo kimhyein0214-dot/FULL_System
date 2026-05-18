@@ -1375,6 +1375,28 @@ let zoneSortMode=false, zoneSortedOrders=null;
 const _savedWorkSortMode=localStorage.getItem('pickingWorkSortMode');
 let workSortMode=_savedWorkSortMode===null?true:_savedWorkSortMode==='1';
 const WORK_SORT_POLICY={deferProblemOrders:true};
+function getFrozenWorkOrderKey(mode=workSortMode){
+  return 'pickingFrozenWorkOrder:'+[selectedDate||'',selectedSession||'ALL',mode?'work':'print'].join(':');
+}
+function readFrozenWorkOrder(mode=workSortMode){
+  try{
+    const raw=localStorage.getItem(getFrozenWorkOrderKey(mode));
+    const arr=raw?JSON.parse(raw):[];
+    return Array.isArray(arr)?arr.map(v=>String(v)).filter(Boolean):[];
+  }catch(e){return [];}
+}
+function writeFrozenWorkOrder(rows,mode=workSortMode){
+  try{
+    const seq=(rows||[]).map(r=>String(r?.ord_no||'')).filter(Boolean);
+    if(seq.length) localStorage.setItem(getFrozenWorkOrderKey(mode),JSON.stringify(seq));
+  }catch(e){}
+}
+function clearFrozenWorkOrderForCurrentContext(){
+  try{
+    localStorage.removeItem(getFrozenWorkOrderKey(true));
+    localStorage.removeItem(getFrozenWorkOrderKey(false));
+  }catch(e){}
+}
 function getOutputOrderValue(row, fallback){
   // 출력순서 컬럼이 생기면 우선 사용하고, 없으면 현재 수집 순서(sort_order) 기반으로 안전하게 유지합니다.
   const raw=row?.print_seq_no??row?.planned_print_seq_no??row?.work_seq_no??row?.output_order??row?.print_order??row?.sort_order??fallback;
@@ -1477,9 +1499,21 @@ function buildOutputOrders(ordersData,itemsByOrd,pickingRows=[]){
     _originalRank:getOrderOriginalRank(row,i+1),
     _sortMetrics:getOrderSortMetrics(row,itemsByOrd[row.ord_no]||[],pickingByOrd[String(row.ord_no||'').trim()]||[])
   }));
-  const sorted=workSortMode
-    ? rows.sort(compareWorkOrderRows)
-    : rows.sort((a,b)=>getOutputOrderValue(a,999999)-getOutputOrderValue(b,999999)||getOrderOriginalRank(a,999999)-getOrderOriginalRank(b,999999));
+  const sortFresh=list=>workSortMode
+    ? list.sort(compareWorkOrderRows)
+    : list.sort((a,b)=>getOutputOrderValue(a,999999)-getOutputOrderValue(b,999999)||getOrderOriginalRank(a,999999)-getOrderOriginalRank(b,999999));
+  const frozen=readFrozenWorkOrder();
+  let sorted;
+  if(frozen.length){
+    const rank=new Map(frozen.map((ordNo,i)=>[String(ordNo),i]));
+    const known=rows.filter(r=>rank.has(String(r.ord_no))).sort((a,b)=>rank.get(String(a.ord_no))-rank.get(String(b.ord_no)));
+    const added=sortFresh(rows.filter(r=>!rank.has(String(r.ord_no))));
+    sorted=known.concat(added);
+    if(added.length||known.length!==frozen.length) writeFrozenWorkOrder(sorted);
+  }else{
+    sorted=sortFresh(rows);
+    writeFrozenWorkOrder(sorted);
+  }
   return sorted.map((row,i)=>({...row,planned_print_seq_no:i+1}));
 }
 function updateWorkSortUI(){
@@ -1495,6 +1529,7 @@ function updateWorkSortUI(){
 function toggleWorkSort(){
   workSortMode=!workSortMode;
   localStorage.setItem('pickingWorkSortMode',workSortMode?'1':'0');
+  clearFrozenWorkOrderForCurrentContext();
   updateWorkSortUI();
   reloadData();
 }
@@ -5470,4 +5505,3 @@ document.addEventListener('keydown',e=>{
 </script>
 </body>
 </html>
-
