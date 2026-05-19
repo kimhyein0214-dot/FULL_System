@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0519-pwa-v1';
+const CACHE_NAME = 'picking-system-0519-pwa-v2';
 const APP_ASSETS = [
   './',
   './index.html',

@@ -2771,8 +2771,11 @@ textarea{
   }
 }
 
-/* 0519 tablet balance: shorter memo, wider photo and shortage controls */
+/* 0519 tablet balance: prevent title overlap and keep shortage compact */
 @media (max-width: 1368px) and (orientation: landscape) {
+  .main{
+    grid-template-columns:150px minmax(0,1fr) 238px !important;
+  }
   .deck-scroll .pick-row{
     grid-template-columns:178px minmax(0,1fr) !important;
     column-gap:8px !important;
@@ -2792,9 +2795,29 @@ textarea{
   .deck-photo-rail .pr-photo img{
     width:142px !important;
   }
+  .deck-content .deck-card-head{
+    grid-template-columns:174px minmax(0,1fr) auto !important;
+    column-gap:12px !important;
+  }
+  .deck-card-title{
+    min-width:0 !important;
+    overflow:hidden !important;
+  }
+  .deck-card-title .csh-code{
+    display:block !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    white-space:nowrap !important;
+  }
+  .deck-card-name{
+    min-width:0 !important;
+    padding-left:2px !important;
+  }
   .deck-content .deck-card-body{
     --deck-cell-gap:5px !important;
-    grid-template-columns:58px 128px 48px minmax(116px,1fr) !important;
+    grid-template-columns:58px 128px 52px 108px !important;
+    justify-content:start !important;
     width:100% !important;
   }
   .deck-content .pr-memo-cell{
@@ -2810,7 +2833,8 @@ textarea{
   .deck-content .short-cell{
     padding-left:6px !important;
     padding-right:6px !important;
-    justify-self:stretch !important;
+    justify-self:start !important;
+    width:108px !important;
   }
   .deck-card-body .short-ctrl-row{
     gap:5px !important;
