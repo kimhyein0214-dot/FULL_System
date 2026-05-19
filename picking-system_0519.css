@@ -2774,11 +2774,25 @@ textarea{
 /* 0519 tablet balance: prevent title overlap and keep shortage compact */
 @media (max-width: 1368px) and (orientation: landscape) {
   .main{
-    grid-template-columns:150px minmax(0,1fr) 238px !important;
+    grid-template-columns:168px minmax(0,1fr) 268px !important;
+  }
+  .stack-wrap{
+    padding-left:1px !important;
+    padding-right:1px !important;
+  }
+  .deck-scroll{
+    margin-top:3px !important;
+    gap:8px !important;
+    --deck-card-h:150px !important;
+    height:min(440px, calc(100% - 4px)) !important;
+    flex-basis:min(440px, calc(100% - 4px)) !important;
   }
   .deck-scroll .pick-row{
     grid-template-columns:178px minmax(0,1fr) !important;
+    flex-basis:150px !important;
     column-gap:8px !important;
+    padding-top:7px !important;
+    padding-bottom:7px !important;
   }
   .deck-photo-rail{
     grid-template-columns:30px 142px !important;
@@ -2798,6 +2812,7 @@ textarea{
   .deck-content .deck-card-head{
     grid-template-columns:174px minmax(0,1fr) auto !important;
     column-gap:12px !important;
+    padding-bottom:4px !important;
   }
   .deck-card-title{
     min-width:0 !important;
@@ -2819,6 +2834,7 @@ textarea{
     grid-template-columns:58px 128px 52px 108px !important;
     justify-content:start !important;
     width:100% !important;
+    padding-top:4px !important;
   }
   .deck-content .pr-memo-cell{
     padding-left:6px !important;
@@ -2845,5 +2861,14 @@ textarea{
   }
   .deck-card-body .sq-val{
     min-width:18px !important;
+  }
+  .bottom-tray.open{
+    max-height:280px !important;
+  }
+  .bottom-tray.open.expanded{
+    max-height:62vh !important;
+  }
+  .bottom-tray.expanded .jo-scroll{
+    max-height:calc(62vh - 42px) !important;
   }
 }

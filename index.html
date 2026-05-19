@@ -1459,8 +1459,9 @@ function getOrderSortMetrics(row,itemRows=[],pickRows=[]){
 }
 function compareWorkOrderRows(a,b){
   const am=a._sortMetrics||{}, bm=b._sortMetrics||{};
-  const ar=WORK_SORT_POLICY.deferProblemOrders&&(am.hasShortage||am.hasHold)?2:(am.hasGoldItem?1:0);
-  const br=WORK_SORT_POLICY.deferProblemOrders&&(bm.hasShortage||bm.hasHold)?2:(bm.hasGoldItem?1:0);
+  // 피킹 도중 생긴 미송은 현재 조를 유지해야 하므로 작업순서 재계산에서 뒤로 보내지 않는다.
+  const ar=WORK_SORT_POLICY.deferProblemOrders&&am.hasHold?2:(am.hasGoldItem?1:0);
+  const br=WORK_SORT_POLICY.deferProblemOrders&&bm.hasHold?2:(bm.hasGoldItem?1:0);
   if(ar!==br) return ar-br;
   if((am.itemKindCount||0)!==(bm.itemKindCount||0)) return (am.itemKindCount||0)-(bm.itemKindCount||0);
   if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
