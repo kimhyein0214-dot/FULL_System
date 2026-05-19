@@ -2410,3 +2410,207 @@ textarea{
     font-size:13px !important;
   }
 }
+
+/* 0519 tablet landscape pass: prioritize the center picking deck */
+@media (max-width: 1280px) and (orientation: landscape) {
+  body{
+    padding:6px !important;
+    gap:5px !important;
+  }
+  .header{
+    padding:5px 8px !important;
+    gap:5px !important;
+    min-height:34px;
+    overflow:hidden;
+  }
+  .header h1{
+    font-size:12px !important;
+    max-width:92px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .abtn,
+  .work-sort-btn,
+  .work-export-btn,
+  .postoffice-enrich-btn{
+    padding:4px 7px !important;
+    font-size:9px !important;
+  }
+  #date-picker{
+    width:98px !important;
+    padding:4px 5px !important;
+    font-size:10px !important;
+  }
+  .hstats{
+    gap:4px !important;
+  }
+  .hstat{
+    padding:4px 7px !important;
+    font-size:10px !important;
+  }
+  #hs-mu,
+  #hs-nd{
+    display:none !important;
+  }
+  .prog{
+    min-height:22px;
+  }
+  .main{
+    grid-template-columns:172px minmax(0,1fr) 210px !important;
+    gap:5px !important;
+  }
+  .sidebar{
+    padding:6px !important;
+  }
+  .sys-tab{
+    height:32px !important;
+    font-size:12px !important;
+    padding:0 8px !important;
+  }
+  .jo-side-btn{
+    min-height:29px !important;
+    padding:4px 7px !important;
+    font-size:11px !important;
+  }
+  .jo-bulk-btn{
+    width:20px !important;
+    height:29px !important;
+  }
+  .sb-bottom{
+    gap:3px !important;
+  }
+  .sb-jump-row{
+    padding:0 2px !important;
+    gap:3px !important;
+  }
+  .sb-jump-lbl{
+    width:24px !important;
+    font-size:9px !important;
+  }
+  .sb-kp-display,
+  .sb-jump-input{
+    min-width:0 !important;
+    font-size:9px !important;
+  }
+  .sc-hdr{
+    padding:8px 10px !important;
+  }
+  .sub-tab-bar{
+    padding:0 8px !important;
+    gap:14px !important;
+  }
+  .stack-wrap{
+    padding:0 !important;
+  }
+  .deck-scroll{
+    height:min(480px, calc(100% - 8px)) !important;
+    flex-basis:min(480px, calc(100% - 8px)) !important;
+    margin-top:6px !important;
+    padding-left:0 !important;
+    padding-right:0 !important;
+    gap:10px !important;
+    --deck-card-h:168px !important;
+  }
+  .deck-scroll .pick-row{
+    width:99.5% !important;
+    flex-basis:168px !important;
+    padding:12px 12px !important;
+    grid-template-columns:160px minmax(0,1fr) !important;
+    column-gap:10px !important;
+    border-radius:14px !important;
+  }
+  .deck-photo-rail{
+    grid-template-columns:34px 116px !important;
+    gap:8px !important;
+  }
+  .deck-photo-rail .pr-circle{
+    width:34px !important;
+    height:34px !important;
+    min-width:34px !important;
+    min-height:34px !important;
+  }
+  .deck-photo-rail .pr-photo-wrap,
+  .deck-photo-rail .pr-photo,
+  .deck-photo-rail .pr-photo img{
+    width:116px !important;
+  }
+  .deck-content .deck-card-head{
+    grid-template-columns:108px minmax(0,1fr) auto !important;
+    gap:8px !important;
+    padding-bottom:7px !important;
+  }
+  .deck-current .deck-card-title .csh-code{
+    font-size:18px !important;
+  }
+  .deck-card-name{
+    font-size:11px !important;
+    line-height:1.18 !important;
+  }
+  .deck-current .deck-card-name{
+    font-size:12px !important;
+  }
+  .deck-card-meta{
+    font-size:10px !important;
+    gap:4px !important;
+  }
+  .deck-content .deck-card-body{
+    --deck-cell-gap:7px !important;
+    grid-template-columns:66px 150px minmax(96px,1fr) 96px !important;
+    column-gap:var(--deck-cell-gap) !important;
+    padding-top:8px !important;
+  }
+  .deck-content .pr-cell{
+    height:76px !important;
+    border-radius:12px !important;
+    padding:6px 7px !important;
+  }
+  .deck-current .deck-card-body .qty-cell .pr-cell-val{
+    font-size:30px !important;
+  }
+  .deck-card-body .jo-slot{
+    width:34px !important;
+    height:40px !important;
+  }
+  .deck-card-body .jo-slot-num{
+    font-size:9px !important;
+  }
+  .deck-card-body .pr-field-input{
+    font-size:13px !important;
+    height:28px !important;
+  }
+  .deck-card-body .sq-btn{
+    width:30px !important;
+    height:30px !important;
+    font-size:18px !important;
+  }
+  .deck-card-body .sq-val{
+    min-width:22px !important;
+    font-size:24px !important;
+  }
+  .right-panel{
+    min-width:0 !important;
+  }
+  .rp-hdr{
+    padding:10px 10px !important;
+  }
+  .rp-inv-no{
+    font-size:14px !important;
+  }
+  .rp-dr{
+    padding:7px 8px !important;
+  }
+  .rp-scroll{
+    padding:8px !important;
+  }
+  .rp-item{
+    padding:7px !important;
+    gap:5px !important;
+  }
+  .bottom-tray{
+    max-height:28px;
+  }
+  .bt-handle{
+    height:28px !important;
+    min-height:28px !important;
+  }
+}
