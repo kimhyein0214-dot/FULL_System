@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#F7F8FA">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="피킹 시스템">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>피킹 시스템 0519</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="pwa-icon.svg">
 <link rel="stylesheet" href="picking-system_0519.css">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
@@ -5607,6 +5615,12 @@ function renderOrderList(){
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&document.getElementById('order-list-modal')?.style.display!=='none') closeOrderListModal();
 });
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js').catch(err=>console.warn('[pwa] service worker registration failed',err));
+  });
+}
 
 </script>
 </body>
