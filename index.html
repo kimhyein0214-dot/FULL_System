@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>피킹 시스템</title>
-<link rel="stylesheet" href="picking-system_0515.css">
+<title>피킹 시스템 0519</title>
+<link rel="stylesheet" href="picking-system_0519.css">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -954,7 +954,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
   <!-- TODO(zone-sort): 작업순서 출력 흐름이 기본이므로 구역순은 보조 기능으로 유지하되 상단 기본 노출에서는 제외합니다. -->
   <button id="zone-sort-btn" class="abtn zone-aux-btn" onclick="toggleZoneSort()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역별 자동 배치">🗂️ 구역순</button>
   <button id="work-sort-btn" class="abtn work-sort-btn" onclick="toggleWorkSort()" title="송장 출력 전 작업순서: 일반상품 우선 → 상품종류 적은순 → 총수량 적은순 → 골드 뒤로">🧭 작업순서</button>
-  <button class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
+  <button id="planned-print-export-btn" class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
   <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="토글 등록용 CSV에 필요한 수취인/주소/연락처 보강 현황을 확인합니다">📊 보강현황</button>
   <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="토글 등록용 CSV를 만듭니다. 토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.">📮 토글CSV</button>
   <button class="abtn work-export-btn" onclick="downloadSellpiaInvoiceCsv()" title="토글 송장 발급 후 셀피아 업로드용 CSV를 만듭니다. 운송장번호 + *주문품목No가 필수입니다.">&#49472;&#54588;&#50500;&#49569;&#51109;CSV</button>
@@ -1375,28 +1375,6 @@ let zoneSortMode=false, zoneSortedOrders=null;
 const _savedWorkSortMode=localStorage.getItem('pickingWorkSortMode');
 let workSortMode=_savedWorkSortMode===null?true:_savedWorkSortMode==='1';
 const WORK_SORT_POLICY={deferProblemOrders:true};
-function getFrozenWorkOrderKey(mode=workSortMode){
-  return 'pickingFrozenWorkOrder:'+[selectedDate||'',selectedSession||'ALL',mode?'work':'print'].join(':');
-}
-function readFrozenWorkOrder(mode=workSortMode){
-  try{
-    const raw=localStorage.getItem(getFrozenWorkOrderKey(mode));
-    const arr=raw?JSON.parse(raw):[];
-    return Array.isArray(arr)?arr.map(v=>String(v)).filter(Boolean):[];
-  }catch(e){return [];}
-}
-function writeFrozenWorkOrder(rows,mode=workSortMode){
-  try{
-    const seq=(rows||[]).map(r=>String(r?.ord_no||'')).filter(Boolean);
-    if(seq.length) localStorage.setItem(getFrozenWorkOrderKey(mode),JSON.stringify(seq));
-  }catch(e){}
-}
-function clearFrozenWorkOrderForCurrentContext(){
-  try{
-    localStorage.removeItem(getFrozenWorkOrderKey(true));
-    localStorage.removeItem(getFrozenWorkOrderKey(false));
-  }catch(e){}
-}
 function getOutputOrderValue(row, fallback){
   // 출력순서 컬럼이 생기면 우선 사용하고, 없으면 현재 수집 순서(sort_order) 기반으로 안전하게 유지합니다.
   const raw=row?.print_seq_no??row?.planned_print_seq_no??row?.work_seq_no??row?.output_order??row?.print_order??row?.sort_order??fallback;
@@ -1499,21 +1477,9 @@ function buildOutputOrders(ordersData,itemsByOrd,pickingRows=[]){
     _originalRank:getOrderOriginalRank(row,i+1),
     _sortMetrics:getOrderSortMetrics(row,itemsByOrd[row.ord_no]||[],pickingByOrd[String(row.ord_no||'').trim()]||[])
   }));
-  const sortFresh=list=>workSortMode
-    ? list.sort(compareWorkOrderRows)
-    : list.sort((a,b)=>getOutputOrderValue(a,999999)-getOutputOrderValue(b,999999)||getOrderOriginalRank(a,999999)-getOrderOriginalRank(b,999999));
-  const frozen=readFrozenWorkOrder();
-  let sorted;
-  if(frozen.length){
-    const rank=new Map(frozen.map((ordNo,i)=>[String(ordNo),i]));
-    const known=rows.filter(r=>rank.has(String(r.ord_no))).sort((a,b)=>rank.get(String(a.ord_no))-rank.get(String(b.ord_no)));
-    const added=sortFresh(rows.filter(r=>!rank.has(String(r.ord_no))));
-    sorted=known.concat(added);
-    if(added.length||known.length!==frozen.length) writeFrozenWorkOrder(sorted);
-  }else{
-    sorted=sortFresh(rows);
-    writeFrozenWorkOrder(sorted);
-  }
+  const sorted=workSortMode
+    ? rows.sort(compareWorkOrderRows)
+    : rows.sort((a,b)=>getOutputOrderValue(a,999999)-getOutputOrderValue(b,999999)||getOrderOriginalRank(a,999999)-getOrderOriginalRank(b,999999));
   return sorted.map((row,i)=>({...row,planned_print_seq_no:i+1}));
 }
 function updateWorkSortUI(){
@@ -1529,7 +1495,6 @@ function updateWorkSortUI(){
 function toggleWorkSort(){
   workSortMode=!workSortMode;
   localStorage.setItem('pickingWorkSortMode',workSortMode?'1':'0');
-  clearFrozenWorkOrderForCurrentContext();
   updateWorkSortUI();
   reloadData();
 }
@@ -2120,6 +2085,7 @@ function setView(v){
     }
   });
   renderLeft();
+  if(trayOpen) renderRight();
 }
 
 function renderTabs(){
@@ -2284,7 +2250,7 @@ function renderRightDetail(no){
 
   // 서랍번호를 상품 리스트 위에 배치
   const detailRealInv=displayInvoiceNo(no,order);
-  document.getElementById('rp-dr').innerHTML=`<span class="rp-dr-lbl">서랍번호</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'서랍번호 입력'}</button>${detailRealInv?`<div style="width:100%;font-size:10px;color:rgba(255,255,255,0.42);padding-left:4px;margin-top:2px;">송장 ${esc(detailRealInv)}</div>`:''}`;
+  document.getElementById('rp-dr').innerHTML=`<div class="rp-dr-main"><span class="rp-dr-lbl">서랍번호</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'서랍번호 입력'}</button></div>${detailRealInv?`<div class="rp-real-invoice">송장 ${esc(detailRealInv)}</div>`:''}`;
 
   document.getElementById('rp-scroll').innerHTML=order.items.map((it,idx)=>{
     const c=multi[it.prodCode||it.code]||{b:'#B0BEC5'};
@@ -2292,7 +2258,8 @@ function renderRightDetail(no){
     const done2=checked[no+'-'+it.code], isHold=!!holded[no+'-'+it.code], shVal=shortage[no+'-'+it.code]||0;
     const seq=idx+1;
     const itemTitle=itemNameWithOption(it);
-    return `<div class="rp-item${gItem?' gold':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><div class="rp-dot" style="background:${done2?'#00CC66':isHold?'#FFB74D':gItem?'var(--gold)':c.b};flex-shrink:0;"></div><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' 골드':''} ${renderLocationBadge(it.location)}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
+    const canCheck=!gItem&&!isHold;
+    return `<div class="rp-item${gItem?' gold':''}${done2?' done':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><button class="rp-check-btn${done2?' checked':''}" ${canCheck?`onclick="event.stopPropagation();tog(${no},'${esc(it.code)}')"`:'disabled'}>${done2?'✓':''}</button><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' 골드':''} ${renderLocationBadge(it.location)}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
   }).join('');
 }
 
@@ -2493,36 +2460,153 @@ function renderLeft(){
   flat.forEach(f=>{ const k=f.prodCode||f.code; if(f.location&&!_locMap[k]) _locMap[k]=f.location; });
 
   let listHtml='', prevCode='';
+  const seenCodeAnchors=new Set();
   flat.forEach(f=>{
     const _pcode=f.prodCode||f.code;
     const isM=!!multi[_pcode], c=multi[_pcode]||{b:'#B0BEC5',t:'var(--text)',bg:'#fff'};
     const goldDimmed=f.goldItem&&viewMode!=='gold';
     const done=!goldDimmed&&!!checked[f.no+'-'+f.code], shVal=shortage[f.no+'-'+f.code]||0, sh=shVal>0, isHold=!!holded[f.no+'-'+f.code];
 
-    if(_pcode!==prevCode){
-      if(prevCode!=='') listHtml+='</div></div>';
-      prevCode=_pcode;
-      // 위치 표기: 자신 위치 + 쌍 파트너 위치
-      const _loc=_locMap[_pcode]||'';
-      const _pairCode=f.nal?_pcode.replace(/^낱/,''):'낱'+_pcode;
-      const _pairLoc=_locMap[_pairCode]||'';
-      const _locBadge=renderLocationBadge(_loc);
-      const _pairBadge=renderLocationBadge(_pairLoc,f.nal?'한쌍':'낱');
-      listHtml+=`<div class="code-section" id="code-${escId(_pcode)}"><div class="code-section-hdr"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'#E8D080':'#fff'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${_locBadge}${_pairBadge}<span class="csh-name">${esc(itemNameWithOption(f))}</span></div><div class="code-section-body">`;
-    }
+    if(_pcode!==prevCode) prevCode=_pcode;
+    // 위치 표기: 자신 위치 + 쌍 파트너 위치
+    const _loc=_locMap[_pcode]||'';
+    const _pairCode=f.nal?_pcode.replace(/^낱/,''):'낱'+_pcode;
+    const _pairLoc=_locMap[_pairCode]||'';
+    const _locBadge=renderLocationBadge(_loc);
+    const _pairBadge=renderLocationBadge(_pairLoc,f.nal?'한쌍':'낱');
+    const _codeId=escId(_pcode);
+    const _anchorAttr=seenCodeAnchors.has(_codeId)?'':` id="code-${_codeId}"`;
+    seenCodeAnchors.add(_codeId);
     const cellColor=done?'#00CC66':f.goldItem?'var(--gold)':isHold?'#E65100':isM?c.t:'var(--text)';
 
     const joLabel=_joLabelCache.get(f.no)||'';
-    listHtml+=`<div class="pick-row${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}"><div class="pr-check" ${goldDimmed||isHold?'':`onclick="tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div><div class="pr-photo-wrap"><div class="pr-photo" ${photoMap[f.code]?`onclick="zoomPhoto('${photoMap[f.code].replace(/'/g,"\\'")}')"`:''} >${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div><div class="pr-cells"><div class="pr-cell" style="${f.inGoldInv?'border-color:#C8A84B;background:#FFF8E0;':''}"><span class="pr-cell-lbl">수량</span><span class="pr-cell-val" style="font-size:20px;font-weight:900;color:#7C7D81;">${f.qty}개</span>${zoneSortMode?`<span style="display:flex;gap:2px;align-items:center;margin-top:3px;flex-wrap:wrap;"><span style="font-size:10px;font-weight:800;color:#70AEFF;background:#0C1D38;border-radius:3px;padding:1px 4px;white-space:nowrap;">${workNoText(f.no)}</span>${(_typeCountMap[f.no]||1)===2?`<span style="font-size:10px;font-weight:800;color:#FFCF50;background:#332208;border-radius:3px;padding:1px 4px;">(${f.seq})</span>`:''}</span>`:''} ${f.inGoldInv?'<span style="font-size:8px;font-weight:800;color:#8B6200;background:rgba(200,168,75,0.25);border:1px solid rgba(200,168,75,0.55);border-radius:3px;padding:1px 3px;margin-top:2px;white-space:nowrap;">🥇 골드송장</span>':''}</div><div class="pr-cell" onclick="selectInv(${f.no})" style="cursor:pointer;">${renderJoSlots(f.no,f.seq)}<span style="font-size:10px;font-weight:700;color:var(--muted);line-height:1.2;display:flex;align-items:center;gap:4px;margin-top:4px;">${buyerLabel(f.buyer,f.recv)}&nbsp;${chBadge(f.no)}</span></div><div class="pr-cell pr-memo-cell" onclick="event.stopPropagation()"><span class="pr-cell-lbl">메모</span><input class="pr-field-input" type="text" placeholder="—" value="${esc(memoData[f.no+'-'+f.code]||'')}" onclick="event.stopPropagation()" onblur="saveMemo(${f.no},'${esc(f.code)}',this.value)"></div>${(f.goldItem&&viewMode!=='gold')?'<div class="pr-cell" style="background:#FFFBE8;border-color:#E8D080;"><span style="font-size:11px;color:var(--gold);font-weight:900;">골드 담당자 처리</span></div>':isHold?'<div class="pr-cell" style="background:#FFE0B2;border-color:#FFB74D;"><span style="font-size:11px;color:#E65100;">⏸ 보류됨</span></div>':`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`}<div class="pr-cell" style="min-width:65px;max-width:80px;flex-shrink:0;background:#EEE8DF;border-color:#D9CBBA;"><span class="pr-cell-lbl">상품코드</span><span style="font-size:9px;font-weight:700;color:#555;line-height:1.3;word-break:break-all;">${f.code||'—'}</span></div></div></div>`;
+    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
+      <div class="deck-photo-rail">
+        <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
+        <div class="pr-photo-wrap"><div class="pr-photo">${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div>
+      </div>
+      <div class="deck-content">
+        <div class="deck-card-head">
+          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${_locBadge}${_pairBadge}</div>
+          <div class="deck-card-name">${esc(itemNameWithOption(f))}</div>
+          <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
+        </div>
+        <div class="deck-card-body">
+          <div class="deck-main">
+            <div class="pr-cell qty-cell" style="${f.inGoldInv?'border-color:#C8A84B;background:#FFF8E0;':''}">
+              <span class="pr-cell-lbl">수량</span><span class="pr-cell-val">${f.qty}개</span>
+              ${f.inGoldInv?'<span class="gold-invoice-mini">골드송장</span>':''}
+            </div>
+            <div class="pr-cell order-cell">${renderJoSlots(f.no,f.seq)}</div>
+          </div>
+          <div class="deck-actions">
+            <div class="pr-cell pr-memo-cell" onclick="event.stopPropagation()"><span class="pr-cell-lbl">메모</span><input class="pr-field-input" type="text" placeholder="—" value="${esc(memoData[f.no+'-'+f.code]||'')}" onclick="event.stopPropagation()" onblur="saveMemo(${f.no},'${esc(f.code)}',this.value)"></div>
+            ${(f.goldItem&&viewMode!=='gold')?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:var(--gold);font-weight:900;">골드 담당자 처리</span></div>':isHold?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:#E65100;font-weight:900;">보류됨</span></div>':`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`}
+          </div>
+        </div>
+      </div>
+    </div>`;
   });
-  if(prevCode!=='') listHtml+='</div></div>';
   if(!flat.length) listHtml='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">데이터 없음</div>';
 
   const _prevSc=wrap.querySelector('.sc-scroll');
   const _savedTop=_prevSc?_prevSc.scrollTop:0;
-  wrap.innerHTML=`<div class="stack-main" style="grid-column:2;"><div class="sc-scroll">${listHtml}</div></div>`;
+  wrap.innerHTML=`<div class="stack-main" style="grid-column:2;"><div class="sc-scroll deck-scroll">${listHtml}</div></div>`;
   // 레이아웃 완료 후 다음 프레임에서 복원 (innerHTML 직후엔 scrollHeight 미확정)
-  if(_savedTop>0) requestAnimationFrame(()=>{ const sc=wrap.querySelector('.sc-scroll'); if(sc) sc.scrollTop=_savedTop; });
+  requestAnimationFrame(()=>{ const sc=wrap.querySelector('.sc-scroll'); if(!sc) return; if(_savedTop>0) sc.scrollTop=_savedTop; initDeckScroll(sc); });
+}
+
+let deckScrollRaf=null;
+function initDeckScroll(sc){
+  if(!sc) return;
+  sc._deckWheelLock=false;
+  updateDeckFocus(sc);
+  sc.onscroll=()=>{
+    if(deckScrollRaf) cancelAnimationFrame(deckScrollRaf);
+    deckScrollRaf=requestAnimationFrame(()=>updateDeckFocus(sc));
+  };
+  sc.onwheel=(e)=>{
+    const target=e.target;
+    if(target?.closest?.('input,textarea,select')) return;
+    e.preventDefault();
+    if(sc._deckWheelLock) return;
+    const dir=e.deltaY>0?1:-1;
+    moveDeck(sc,dir);
+  };
+  sc.addEventListener('touchstart',e=>{ sc._deckTouchY=e.touches?.[0]?.clientY||0; },{passive:true});
+  sc.addEventListener('touchend',e=>{
+    const endY=e.changedTouches?.[0]?.clientY||0;
+    const diff=(sc._deckTouchY||0)-endY;
+    if(Math.abs(diff)>24){
+      sc._deckIgnoreClick=true;
+      moveDeck(sc,diff>0?1:-1);
+      setTimeout(()=>{sc._deckIgnoreClick=false;},280);
+    }
+  },{passive:true});
+}
+function getDeckFocusIndex(sc){
+  const cards=[...sc.querySelectorAll('.pick-row')];
+  if(!cards.length) return -1;
+  const box=sc.getBoundingClientRect();
+  const center=box.top+(box.height/2);
+  let focusIdx=0, best=Infinity;
+  cards.forEach((card,i)=>{
+    const r=card.getBoundingClientRect();
+    const d=Math.abs((r.top+r.height/2)-center);
+    if(d<best){best=d;focusIdx=i;}
+  });
+  return focusIdx;
+}
+function moveDeck(sc,dir){
+  const cards=[...sc.querySelectorAll('.pick-row')];
+  if(!cards.length) return;
+  const cur=getDeckFocusIndex(sc);
+  const next=Math.max(0,Math.min(cards.length-1,cur+dir));
+  if(next===cur) return;
+  sc._deckWheelLock=true;
+  centerDeckCard(sc,cards[next],'smooth');
+  setTimeout(()=>{sc._deckWheelLock=false;updateDeckFocus(sc);},260);
+}
+function centerDeckCard(sc,card,behavior='smooth'){
+  if(!sc||!card) return;
+  const scBox=sc.getBoundingClientRect();
+  const cardBox=card.getBoundingClientRect();
+  const target=sc.scrollTop+(cardBox.top-scBox.top)-((sc.clientHeight-cardBox.height)/2);
+  const max=Math.max(0,sc.scrollHeight-sc.clientHeight);
+  sc.scrollTo({top:Math.max(0,Math.min(max,target)),behavior});
+}
+function handleDeckCardClick(e,no,card){
+  if(!card) return;
+  if(e?.target?.closest?.('.pr-memo-cell,.short-cell,input,textarea,select')) return;
+  const sc=card.closest('.deck-scroll');
+  if(sc?._deckIgnoreClick) return;
+  selectInv(no);
+  if(sc&&!card.classList.contains('deck-current')){
+    sc._deckWheelLock=true;
+    centerDeckCard(sc,card,'smooth');
+    setTimeout(()=>{sc._deckWheelLock=false;updateDeckFocus(sc);},260);
+  }else if(sc){
+    updateDeckFocus(sc);
+  }
+}
+function updateDeckFocus(sc){
+  const cards=[...sc.querySelectorAll('.pick-row')];
+  if(!cards.length) return;
+  const focusIdx=getDeckFocusIndex(sc);
+  cards.forEach((card,i)=>{
+    card.classList.toggle('deck-current',i===focusIdx);
+    card.classList.toggle('deck-near',Math.abs(i-focusIdx)===1);
+    card.classList.toggle('deck-far',Math.abs(i-focusIdx)>1);
+  });
+}
+function scrollDeckAfterToggle(no,code){
+  const row=document.querySelector(`.pick-row[data-k="${no}-${CSS.escape(code)}"]`);
+  const sc=row?.closest('.deck-scroll');
+  if(!row||!sc) return;
+  const cards=[...sc.querySelectorAll('.pick-row')];
+  const idx=cards.indexOf(row);
+  const next=cards.slice(idx+1).find(card=>!card.classList.contains('is-gold')&&!card.classList.contains('is-hold'))||cards[idx+1];
+  if(next) setTimeout(()=>centerDeckCard(sc,next,'smooth'),120);
 }
 
 function openZoneSortPopup(){
@@ -2565,9 +2649,27 @@ function openZoneSortPopup(){
 }
 function closeZoneSortPopup(){ document.getElementById('zone-sort-popup')?.remove(); }
 
+function getBottomTrayContext(){
+  const currentJo=jos[curJo]||[];
+  if(viewGlobal&&viewMode==='short'){
+    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0));
+    return {orders,label:'📦 미송 주문서',empty:'미송 주문서가 없습니다'};
+  }
+  if(viewGlobal&&viewMode==='hold'){
+    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&holded[o.no+'-'+it.code]));
+    return {orders,label:'📦 보류 주문서',empty:'보류 주문서가 없습니다'};
+  }
+  if(viewGlobal&&viewMode==='nodrawer'){
+    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0)&&!String(drawer[o.no]||'').trim());
+    return {orders,label:'📦 서랍없는 주문서',empty:'서랍번호 미입력 주문서가 없습니다'};
+  }
+  return {orders:currentJo,label:zoneSortMode?'📦 종별 주문서':'📦 조별 주문서',empty:'주문서가 없습니다'};
+}
+
 function renderRight(){
-  if(!jos.length||!jos[curJo]) return;
-  const jo=jos[curJo];
+  if(!jos.length) return;
+  const trayCtx=getBottomTrayContext();
+  const jo=trayCtx.orders||[];
   const goldNos=new Set(GOLD_ORDERS.map(o=>o.no));
   const multi=buildMultiMap(jo);
 
@@ -2600,8 +2702,10 @@ function renderRight(){
     cells.push(`<div class="inv-card${allDone?' done':''}${hasShort?' has-short':''}${gInv?' is-gold':''}${hasHold?' is-hold':''}" data-inv="${order.no}" onclick="selectInv(${order.no})"><div class="ic-hdr ${hcls}"><div class="ic-no" style="color:${hasShort?'var(--red)':allDone?'var(--green)':hasHold?'#E65100':'var(--text)'}">${workNoHtml(order.no,'sm')}</div><div class="ic-buyer">${buyerLabel(order.buyer,order.recv)}${chBadge(order.no)}</div><div class="ic-stat" style="color:${statColor}">${statTxt}</div></div><div class="ic-meta">${sortBadges}</div><div class="ic-body">${items}</div><div class="ic-foot" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch;gap:3px;"><div style="display:flex;align-items:center;gap:8px;"><span class="ic-dr-lbl">서랍</span><button class="ic-dr-btn${drVal?' has-val':''}" onclick="openKeypad(${order.no},'${esc(drVal)}',this)">${drVal?drVal:'입력'}</button></div>${realInv?`<div style="font-size:9px;color:var(--muted);padding-left:22px;letter-spacing:0;line-height:1.2;">송장 ${esc(realInv)}</div>`:''}</div></div>`);
   }
   const btLbl=document.getElementById('bt-lbl');
-  if(btLbl) btLbl.textContent=zoneSortMode?'📦 종별 주문서':'📦 조별 주문서';
-  document.getElementById('jo-scroll').innerHTML=`<div class="inv-grid">${cells.join('')}</div>`;
+  if(btLbl) btLbl.textContent=trayCtx.label;
+  document.getElementById('jo-scroll').innerHTML=cells.length
+    ? `<div class="inv-grid">${cells.join('')}</div>`
+    : `<div class="tray-empty">${trayCtx.empty}</div>`;
 }
 
 function selectInv(no){
@@ -2736,7 +2840,9 @@ function tog(no,code){
     rowEl.classList.toggle('done',!!checked[k]);
     const circle=rowEl.querySelector('.pr-circle');
     if(circle) circle.textContent=checked[k]?'✓':'';
+    if(checked[k]) scrollDeckAfterToggle(no,code);
   }
+  if(currentPopupNo&&Number(currentPopupNo)===Number(no)) renderRightDetail(no);
   saveToSheet(no,code,!!checked[k],shortage[k]||0,drawer[no]||'',!!holded[k])
     .catch(()=>toast('⚠ 체크 저장 실패 (네트워크 확인)'));
   scheduleRender(true); // DOM 직접 업데이트 완료 → renderLeft 스킵
