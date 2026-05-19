@@ -2770,3 +2770,48 @@ textarea{
     display:none !important;
   }
 }
+
+/* 0519 tablet balance: shorter memo, wider photo and shortage controls */
+@media (max-width: 1368px) and (orientation: landscape) {
+  .deck-scroll .pick-row{
+    grid-template-columns:156px minmax(0,1fr) !important;
+    column-gap:8px !important;
+  }
+  .deck-photo-rail{
+    grid-template-columns:28px 122px !important;
+    gap:6px !important;
+  }
+  .deck-photo-rail .pr-photo-wrap,
+  .deck-photo-rail .pr-photo,
+  .deck-photo-rail .pr-photo img{
+    width:122px !important;
+  }
+  .deck-content .deck-card-body{
+    --deck-cell-gap:5px !important;
+    grid-template-columns:54px 118px 48px 96px !important;
+  }
+  .deck-content .pr-memo-cell{
+    padding-left:6px !important;
+    padding-right:6px !important;
+  }
+  .deck-content .pr-memo-cell .pr-cell-lbl{
+    font-size:9px !important;
+  }
+  .deck-card-body .pr-field-input{
+    font-size:10px !important;
+  }
+  .deck-content .short-cell{
+    padding-left:6px !important;
+    padding-right:6px !important;
+  }
+  .deck-card-body .short-ctrl-row{
+    gap:5px !important;
+  }
+  .deck-card-body .sq-btn{
+    width:26px !important;
+    height:26px !important;
+  }
+  .deck-card-body .sq-val{
+    min-width:18px !important;
+  }
+}
