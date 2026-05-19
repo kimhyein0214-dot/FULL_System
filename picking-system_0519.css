@@ -2614,3 +2614,159 @@ textarea{
     min-height:28px !important;
   }
 }
+
+/* 0519 Galaxy Tab S9 base fit: no horizontal overflow, keep shortage cell visible */
+@media (max-width: 1368px) and (orientation: landscape) {
+  html,
+  body{
+    width:100% !important;
+    max-width:100% !important;
+    overflow-x:hidden !important;
+  }
+  .header{
+    max-width:100% !important;
+    overflow:hidden !important;
+  }
+  .main{
+    grid-template-columns:150px minmax(0,1fr) 168px !important;
+    gap:4px !important;
+    min-width:0 !important;
+    overflow:hidden !important;
+  }
+  .left-panel,
+  .right-panel,
+  .stack-main,
+  .stack-wrap,
+  .deck-scroll,
+  .deck-scroll .pick-row,
+  .deck-content{
+    min-width:0 !important;
+    max-width:100% !important;
+  }
+  .sidebar{
+    padding:5px !important;
+  }
+  .sys-tab{
+    height:30px !important;
+    font-size:11px !important;
+    gap:5px !important;
+    padding:0 7px !important;
+  }
+  .jo-side-btn{
+    min-height:27px !important;
+    padding:3px 6px !important;
+    gap:3px !important;
+  }
+  .jo-side-btn .jo-side-no{
+    font-size:11px !important;
+  }
+  .jo-side-btn .jo-side-stat{
+    font-size:10px !important;
+  }
+  .jo-bulk-btn{
+    width:18px !important;
+    height:27px !important;
+  }
+  .sb-jump-lbl{
+    width:22px !important;
+    font-size:8px !important;
+  }
+  .sb-jump-btn{
+    padding:3px 5px !important;
+    font-size:9px !important;
+  }
+  .right-panel{
+    opacity:0.94;
+  }
+  .deck-scroll{
+    width:100% !important;
+    height:min(460px, calc(100% - 6px)) !important;
+    flex-basis:min(460px, calc(100% - 6px)) !important;
+    --deck-card-h:158px !important;
+  }
+  .deck-scroll .pick-row{
+    width:100% !important;
+    flex-basis:158px !important;
+    padding:10px 10px !important;
+    grid-template-columns:138px minmax(0,1fr) !important;
+    column-gap:7px !important;
+    overflow:hidden !important;
+  }
+  .deck-photo-rail{
+    grid-template-columns:28px 104px !important;
+    gap:6px !important;
+  }
+  .deck-photo-rail .pr-circle{
+    width:28px !important;
+    height:28px !important;
+    min-width:28px !important;
+    min-height:28px !important;
+    border-width:3px !important;
+  }
+  .deck-photo-rail .pr-photo-wrap,
+  .deck-photo-rail .pr-photo,
+  .deck-photo-rail .pr-photo img{
+    width:104px !important;
+  }
+  .deck-content .deck-card-head{
+    grid-template-columns:96px minmax(0,1fr) auto !important;
+    gap:5px !important;
+    padding-bottom:5px !important;
+  }
+  .deck-current .deck-card-title .csh-code{
+    font-size:16px !important;
+  }
+  .deck-card-name{
+    font-size:10px !important;
+    line-height:1.14 !important;
+  }
+  .deck-current .deck-card-name{
+    font-size:11px !important;
+  }
+  .deck-card-meta{
+    font-size:9px !important;
+  }
+  .deck-content .deck-card-body{
+    --deck-cell-gap:5px !important;
+    grid-template-columns:54px 118px minmax(68px,1fr) 74px !important;
+    column-gap:var(--deck-cell-gap) !important;
+    padding-top:6px !important;
+    width:100% !important;
+    min-width:0 !important;
+  }
+  .deck-content .pr-cell{
+    height:68px !important;
+    padding:5px !important;
+    border-radius:10px !important;
+  }
+  .deck-current .deck-card-body .qty-cell .pr-cell-val{
+    font-size:26px !important;
+  }
+  .deck-card-body .jo-slot{
+    width:30px !important;
+    height:34px !important;
+  }
+  .deck-card-body .jo-slot-num{
+    font-size:8px !important;
+  }
+  .deck-card-body .pr-field-input{
+    font-size:11px !important;
+    height:22px !important;
+  }
+  .deck-card-body .short-ctrl-row{
+    gap:3px !important;
+  }
+  .deck-card-body .sq-btn{
+    width:24px !important;
+    height:24px !important;
+    border-radius:7px !important;
+    font-size:15px !important;
+  }
+  .deck-card-body .sq-val{
+    min-width:14px !important;
+    font-size:20px !important;
+  }
+  .deck-card-body .bulk-short-btn{
+    display:none !important;
+  }
+}
