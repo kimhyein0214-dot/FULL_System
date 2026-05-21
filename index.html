@@ -1435,11 +1435,42 @@ function normalizeOrderItemForSort(it){
 function normalizeSelfCode(value){
   return String(value||'').trim().replace(/^\[|\]$/g,'').toUpperCase();
 }
-function getSelfCodeRouteRank(value){
-  const first=normalizeSelfCode(value).charAt(0);
-  if(first==='P') return 0;
-  if(first==='E') return 1;
-  return 2;
+function getRouteBaseCode(value){
+  return normalizeSelfCode(value).replace(/^낱/i,'').replace(/\s+/g,'');
+}
+const PICK_ROUTE_ORDER=[
+  'CA',
+  'PS','PT','PQ','PR','PO','PP','PM','PN',
+  'PG','PH','PE','PF','PC','PD','PA','PB',
+  'PK','PL','PI','PJ','EF','EE',
+  'SA','RA','NA','BA','HD','HC','HB','HA',
+  'EC','ED','EB','EA'
+];
+const PICK_ROUTE_RANK=PICK_ROUTE_ORDER.reduce((m,code,idx)=>(m[code]=idx,m),{});
+function getSelfCodePickRank(value){
+  const code=getRouteBaseCode(value);
+  if(!code) return 9999;
+  if(PICK_ROUTE_RANK[code]!==undefined) return PICK_ROUTE_RANK[code];
+  const prefix2=code.slice(0,2);
+  if(PICK_ROUTE_RANK[prefix2]!==undefined) return PICK_ROUTE_RANK[prefix2];
+  const first=code.charAt(0);
+  if(first==='P') return 900;
+  if(first==='E') return 920;
+  if(/^[HNRSB]/.test(first)) return 940;
+  return 9999;
+}
+function compareSelfCodeRoute(a,b){
+  const ar=getSelfCodePickRank(a), br=getSelfCodePickRank(b);
+  if(ar!==br) return ar-br;
+  return String(getRouteBaseCode(a)).localeCompare(String(getRouteBaseCode(b)),'en',{numeric:true,sensitivity:'base'});
+}
+function getRouteMetricsFromCodes(codes=[]){
+  const ranks=(codes||[]).map(getSelfCodePickRank).filter(n=>Number.isFinite(n)&&n<9999);
+  const startRank=ranks.length?Math.min(...ranks):9999;
+  const endRank=ranks.length?Math.max(...ranks):9999;
+  const routeSpan=ranks.length?endRank-startRank:9999;
+  const primaryRouteCode=(codes||[]).filter(Boolean).sort(compareSelfCodeRoute)[0]||'';
+  return {startRank,endRank,routeSpan,routeZoneSpread:new Set(ranks).size||1,primaryRouteCode};
 }
 function getOrderSortMetrics(row,itemRows=[],pickRows=[]){
   const items=(itemRows||[]).map(normalizeOrderItemForSort);
@@ -1451,11 +1482,8 @@ function getOrderSortMetrics(row,itemRows=[],pickRows=[]){
   const hasHold=!!(row?.hold||row?.is_hold||row?.shipping_hold)
     || (pickRows||[]).some(r=>!!r.hold);
   const routeCodes=items.map(it=>normalizeSelfCode(it.prodCode||it.code)).filter(Boolean);
-  const routeRanks=routeCodes.map(getSelfCodeRouteRank).filter(n=>Number.isFinite(n));
-  const routeZoneRank=routeRanks.length?Math.min(...routeRanks):2;
-  const routeZoneSpread=new Set(routeRanks).size||1;
-  const primaryRouteCode=(routeCodes.filter(code=>getSelfCodeRouteRank(code)===routeZoneRank).sort()[0])||'';
-  return {itemKindCount:itemKindCount||0,totalItemQty:totalItemQty||0,hasGoldItem,hasShortage,hasHold,routeZoneRank,routeZoneSpread,primaryRouteCode};
+  const route=getRouteMetricsFromCodes(routeCodes);
+  return {itemKindCount:itemKindCount||0,totalItemQty:totalItemQty||0,hasGoldItem,hasShortage,hasHold,routeZoneRank:route.startRank,routeZoneSpread:route.routeZoneSpread,primaryRouteCode:route.primaryRouteCode,startRank:route.startRank,endRank:route.endRank,routeSpan:route.routeSpan};
 }
 function compareWorkOrderRows(a,b){
   const am=a._sortMetrics||{}, bm=b._sortMetrics||{};
@@ -1464,12 +1492,61 @@ function compareWorkOrderRows(a,b){
   const br=WORK_SORT_POLICY.deferProblemOrders&&bm.hasHold?2:(bm.hasGoldItem?1:0);
   if(ar!==br) return ar-br;
   if((am.itemKindCount||0)!==(bm.itemKindCount||0)) return (am.itemKindCount||0)-(bm.itemKindCount||0);
-  if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
-  if((am.routeZoneSpread||1)!==(bm.routeZoneSpread||1)) return (am.routeZoneSpread||1)-(bm.routeZoneSpread||1);
   if((am.routeZoneRank??2)!==(bm.routeZoneRank??2)) return (am.routeZoneRank??2)-(bm.routeZoneRank??2);
+  if((am.routeSpan??9999)!==(bm.routeSpan??9999)) return (am.routeSpan??9999)-(bm.routeSpan??9999);
+  if((am.routeZoneSpread||1)!==(bm.routeZoneSpread||1)) return (am.routeZoneSpread||1)-(bm.routeZoneSpread||1);
+  if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
   const codeCompare=String(am.primaryRouteCode||'').localeCompare(String(bm.primaryRouteCode||''),'en',{numeric:true,sensitivity:'base'});
   if(codeCompare!==0) return codeCompare;
   return (a._originalRank||0)-(b._originalRank||0);
+}
+function compareWorkOrderRowsWithinKind(a,b){
+  const am=a._sortMetrics||{}, bm=b._sortMetrics||{};
+  const ar=WORK_SORT_POLICY.deferProblemOrders&&am.hasHold?2:(am.hasGoldItem?1:0);
+  const br=WORK_SORT_POLICY.deferProblemOrders&&bm.hasHold?2:(bm.hasGoldItem?1:0);
+  if(ar!==br) return ar-br;
+  if((am.routeZoneRank??9999)!==(bm.routeZoneRank??9999)) return (am.routeZoneRank??9999)-(bm.routeZoneRank??9999);
+  if((am.routeSpan??9999)!==(bm.routeSpan??9999)) return (am.routeSpan??9999)-(bm.routeSpan??9999);
+  if((am.routeZoneSpread||1)!==(bm.routeZoneSpread||1)) return (am.routeZoneSpread||1)-(bm.routeZoneSpread||1);
+  if((am.totalItemQty||0)!==(bm.totalItemQty||0)) return (am.totalItemQty||0)-(bm.totalItemQty||0);
+  return (a._originalRank||0)-(b._originalRank||0);
+}
+function buildRouteOptimizedWorkRows(rows){
+  const buckets=new Map();
+  [...rows].sort(compareWorkOrderRows).forEach(row=>{
+    const m=row._sortMetrics||{};
+    const problemRank=WORK_SORT_POLICY.deferProblemOrders&&m.hasHold?2:(m.hasGoldItem?1:0);
+    const key=[problemRank,m.itemKindCount||0].join('|');
+    if(!buckets.has(key)) buckets.set(key,[]);
+    buckets.get(key).push(row);
+  });
+  const result=[];
+  [...buckets.entries()].sort((a,b)=>{
+    const [ap,ak]=a[0].split('|').map(Number);
+    const [bp,bk]=b[0].split('|').map(Number);
+    return ap-bp||ak-bk;
+  }).forEach(([,bucket])=>{
+    const sorted=[...bucket].sort(compareWorkOrderRowsWithinKind);
+    const batches=[];
+    for(let i=0;i<sorted.length;i+=JO_SIZE){
+      const orders=sorted.slice(i,i+JO_SIZE);
+      const starts=orders.map(o=>o._sortMetrics?.startRank??9999);
+      const ends=orders.map(o=>o._sortMetrics?.endRank??9999);
+      batches.push({orders,start:Math.min(...starts),end:Math.max(...ends)});
+    }
+    let prevEnd=result.length?result[result.length-1]._sortMetrics?.endRank??0:0;
+    while(batches.length){
+      let bestIdx=0,bestScore=Infinity;
+      batches.forEach((batch,idx)=>{
+        const score=Math.abs((batch.start??9999)-prevEnd);
+        if(score<bestScore){bestScore=score;bestIdx=idx;}
+      });
+      const [next]=batches.splice(bestIdx,1);
+      result.push(...next.orders.sort(compareWorkOrderRowsWithinKind));
+      prevEnd=next.end;
+    }
+  });
+  return result;
 }
 // TODO(print-sequence-flow): 작업순서 생성 → 그 순서로 송장 출력 → 셀피아 출력순번 재수집 → print_seq_no 저장 흐름을 API/DB 계층에서 연결합니다.
 // original_seq_no는 최초 수집 순번으로 보존하고, print_seq_no가 없을 때 planned_print_seq_no/original_seq_no 순으로 fallback합니다.
@@ -1487,7 +1564,7 @@ function buildOutputOrders(ordersData,itemsByOrd,pickingRows=[]){
     _sortMetrics:getOrderSortMetrics(row,itemsByOrd[row.ord_no]||[],pickingByOrd[String(row.ord_no||'').trim()]||[])
   }));
   const sorted=workSortMode
-    ? rows.sort(compareWorkOrderRows)
+    ? buildRouteOptimizedWorkRows(rows)
     : rows.sort((a,b)=>getOutputOrderValue(a,999999)-getOutputOrderValue(b,999999)||getOrderOriginalRank(a,999999)-getOrderOriginalRank(b,999999));
   return sorted.map((row,i)=>({...row,planned_print_seq_no:i+1}));
 }
@@ -1497,7 +1574,7 @@ function updateWorkSortUI(){
   const summary=document.getElementById('work-sort-summary');
   if(summary){
     summary.textContent=workSortMode
-      ? '정렬 기준: 일반상품 우선 / 상품종류 적은순 / 총수량 적은순 / 골드 뒤로'
+      ? '정렬 기준: 상품종류 우선 / 4개조 동선 묶음 / 조간 이동 최소 / 총수량 보조 / 골드 뒤로'
       : '정렬 기준: 출력순서 우선';
   }
 }
@@ -1853,6 +1930,13 @@ async function loadData(silent=false,preserveView=false){
         item_no:it.item_no||'',
         seller_product_name:it.seller_product_name||it.p_name||'',
         seller_option_name:it.seller_option_name||it.p_option||''
+      });
+    });
+    Object.values(itemsByOrd).forEach(items=>{
+      items.sort((a,b)=>{
+        const cc=compareSelfCodeRoute(a.prodCode||a.code,b.prodCode||b.code);
+        if(cc!==0) return cc;
+        return String(a.code||'').localeCompare(String(b.code||''),'ko',{numeric:true,sensitivity:'base'});
       });
     });
     const todayOrdNos=(ordersData||[]).map(r=>String(r.ord_no).trim()).filter(Boolean);
@@ -2438,7 +2522,12 @@ function renderLeft(){
   sourceOrders.forEach(o=>o.items.forEach((it,idx2)=>{
     flat.push({no:o.no,buyer:o.buyer,recv:o.recv||'',code:it.code,nal:it.nal,qty:it.qty,seq:idx2+1,name:it.name||'',option:it.option||'',seller_option_name:it.seller_option_name||'',prodCode:it.prodCode||'',goldItem:isGold(it),inGoldInv:joGoldNos.has(o.no)&&!isGold(it),location:it.location||''});
   }));
-  flat.sort((a,b)=>{const cc=(a.prodCode||a.code).localeCompare(b.prodCode||b.code,'ko');if(cc!==0)return cc;if(a.no!==b.no)return a.no-b.no;return a.seq-b.seq;});
+  flat.sort((a,b)=>{
+    const cc=compareSelfCodeRoute(a.prodCode||a.code,b.prodCode||b.code);
+    if(cc!==0)return cc;
+    if(a.no!==b.no)return a.no-b.no;
+    return a.seq-b.seq;
+  });
 
   if(viewMode==='gold') flat=flat.filter(f=>f.goldItem);
   else if(viewMode==='short') flat=flat.filter(f=>(shortage[f.no+'-'+f.code]||0)>0);
@@ -5347,7 +5436,7 @@ function renderMisongList(){
       if(!codeMap.has(r.code)) codeMap.set(r.code,[]);
       codeMap.get(r.code).push(r);
     });
-    listEl.innerHTML = [...codeMap.entries()].map(([code,rows])=>{
+    listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(codeToProdCode2[a[0]]||a[0],codeToProdCode2[b[0]]||b[0])).map(([code,rows])=>{
       const totalSh = rows.reduce((s,r)=>s+r.shortage,0);
       const allDoneC = totalSh===0;
       const itemsHtml = rows.map(r=>{
