@@ -1436,7 +1436,15 @@ function normalizeSelfCode(value){
   return String(value||'').trim().replace(/^\[|\]$/g,'').toUpperCase();
 }
 function getRouteBaseCode(value){
-  return normalizeSelfCode(value).replace(/^낱/i,'').replace(/\s+/g,'');
+  const raw=String(value||'').trim().replace(/^낱/i,'').toUpperCase();
+  const bracket=raw.match(/^\[([A-Z]+)\]\s*([A-Z])/);
+  if(bracket){
+    const zone=bracket[1].trim();
+    const aisle=bracket[2].trim();
+    if(zone==='P'||zone==='E'||zone==='H') return zone+aisle;
+    return zone;
+  }
+  return normalizeSelfCode(raw).replace(/^낱/i,'').replace(/[\]\s]+/g,'');
 }
 const PICK_ROUTE_ORDER=[
   'CA',
@@ -1782,7 +1790,7 @@ function downloadSellpiaInvoiceCsv(){
 }
 
 function getZone(code){
-  const c=String(code||'').replace(/^낱/,'').toUpperCase();
+  const c=getRouteBaseCode(code);
   if(c.startsWith('GP')) return null;
   if(c.startsWith('EE')) return 'EE';
   if(c.startsWith('EF')) return 'EF';
