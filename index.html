@@ -1932,13 +1932,8 @@ async function loadData(silent=false,preserveView=false){
         seller_option_name:it.seller_option_name||it.p_option||''
       });
     });
-    Object.values(itemsByOrd).forEach(items=>{
-      items.sort((a,b)=>{
-        const cc=compareSelfCodeRoute(a.prodCode||a.code,b.prodCode||b.code);
-        if(cc!==0) return cc;
-        return String(a.code||'').localeCompare(String(b.code||''),'ko',{numeric:true,sensitivity:'base'});
-      });
-    });
+    // 송장 내부 상품순서는 셀피아/송장 원본 순서 그대로 보존한다.
+    // 동선 정렬은 중앙 피킹 패널의 flat view에서만 적용한다.
     const todayOrdNos=(ordersData||[]).map(r=>String(r.ord_no).trim()).filter(Boolean);
     const {data:pickData}=todayOrdNos.length
       ? await db.from('picking').select('*').in('ord_no',todayOrdNos)
@@ -3928,6 +3923,16 @@ function getDayLabel(elapsed){
 }
 async function setMisongStatus(inv, code, status){
   event&&event.stopPropagation&&event.stopPropagation();
+  if(status==='발송대기'){
+    const seqNo=realToSeq[inv]||inv;
+    if(!confirm(
+      'CS 발송대기는 상태 표시만 변경합니다.\n\n'
+      +'대상: '+workNoText(seqNo)+' / '+code+'\n'
+      +'셀피아 관리메모1, 관리메모2, 배송보류는 여기서 반영하지 않습니다.\n\n'
+      +'검품/포장 완료 후 내일출고 알림 대상이면 미송피킹 화면의 [내일출고 발송대기]를 사용하세요.\n'
+      +'그래도 CS 상태만 발송대기로 표시할까요?'
+    )) return;
+  }
   misongData.forEach(r=>{ if(r.inv===inv && r.code===code){ r.status=status; r.done=(status==='발송완료')?'✓':''; } });
   updateAllCSCounts();
   if(status==='발송완료'){ switchCSStatus('발송완료'); } else { renderCSList(); }
@@ -5011,9 +5016,9 @@ function insp_toggleDone(invNo){
     });
     scheduleRender();
   } else {
-    // 검품완료 취소: '검품완료' → '피킹완료'로 되돌림
+    // 검품완료 취소: '검품완료/메모정리완료' → '피킹완료'로 되돌림
     db.from('shortage').update({status:'피킹완료', memo2_val:'ㅁ', updated_at:new Date().toISOString()})
-      .eq('inv_no',inv_no).eq('status','검품완료').catch(()=>{});
+      .eq('inv_no',inv_no).in('status',['검품완료','메모정리완료']).catch(()=>{});
   }
 }
 
@@ -5537,29 +5542,75 @@ function renderMisongList(){
         </div>
         ${itemsHtml}
         ${!allDone?`<div style="padding:7px 14px;background:#F9F3EC;border-top:1px solid #E8DACE;display:flex;justify-content:flex-end;">
-          <button onclick="event.stopPropagation();setInvWaiting(${seq})" style="padding:4px 12px;border-radius:6px;border:1.5px solid ${isWaiting?'var(--hold)':'var(--hold)'};background:${isWaiting?'var(--hold)':'rgba(184,122,58,0.15)'};color:${isWaiting?'#fff':'var(--hold)'};font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">${isWaiting?'⏸ 발송대기 중 (취소)':'⏸ 발송대기 처리'}</button>
+          <button onclick="event.stopPropagation();setInvWaiting(${seq})" style="padding:4px 12px;border-radius:6px;border:1.5px solid ${isWaiting?'var(--hold)':'var(--hold)'};background:${isWaiting?'var(--hold)':'rgba(184,122,58,0.15)'};color:${isWaiting?'#fff':'var(--hold)'};font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="오늘 발송하지 못한 검품/포장 완료건: 관리메모1 표시, 관리메모2 ㅁ, 배송보류 해제">${isWaiting?'⏸ 내일출고 대기 중 (취소)':'⏸ 내일출고 발송대기'}</button>
         </div>`:''}
       </div>`;
     }).join('');
   }
 }
 
+function getDefaultWaitingMemo(){
+  try{return localStorage.getItem('misongWaitingMemo')||'!!';}catch(e){return '!!';}
+}
+
 async function setInvWaiting(seq){
   const realInv = seqToReal[seq] || String(seq);
   const items = misongPickingData.filter(r=>String(r.seq)===String(seq));
-  if(!items.length){ toast('해당 송장 항목 없음'); return; }
+  const order = ORDERS_ALL.find(o=>String(o.no)===String(seq));
+  const targetItems = order?.items?.length
+    ? order.items.map(it=>({code:it.code,name:it.name||'',qty:it.qty||1}))
+    : items.map(r=>({code:r.code,name:r.name||'',qty:r.qty||1}));
+  if(!targetItems.length){ toast('해당 송장 항목 없음'); return; }
   const isWaiting = misongWaitingSet.has(String(seq));
   const newStatus = isWaiting ? '' : '발송대기';
+  let waitingMemo = '';
+  if(newStatus){
+    waitingMemo = prompt('관리메모1에 남길 발송대기 메모를 입력하세요.\n예: !!, ??, ..', getDefaultWaitingMemo());
+    if(waitingMemo===null) return;
+    waitingMemo = String(waitingMemo).trim() || getDefaultWaitingMemo();
+    const previewCodes=targetItems.slice(0,6).map(it=>it.code).join(', ')+(targetItems.length>6?' 외 '+(targetItems.length-6)+'개':'');
+    if(!confirm(
+      '내일출고 발송대기로 처리할까요?\n\n'
+      +'대상: '+workNoText(seq)+' / '+targetItems.length+'종\n'
+      +'상품: '+previewCodes+'\n'
+      +'관리메모1: '+waitingMemo+'\n'
+      +'관리메모2: ㅁ\n'
+      +'배송보류: 해제\n\n'
+      +'이 상태는 CS 내일출고 알림 대상입니다.'
+    )) return;
+    try{ localStorage.setItem('misongWaitingMemo', waitingMemo); }catch(e){}
+  } else {
+    if(!confirm(workNoText(seq)+' 내일출고 발송대기를 취소하고 피킹완료 상태로 되돌릴까요?')) return;
+  }
   if(newStatus) misongWaitingSet.add(String(seq));
   else misongWaitingSet.delete(String(seq));
   try{ localStorage.setItem('misongWaitingSet', JSON.stringify([...misongWaitingSet])); }catch(e){}
-  items.forEach(r=>{
-    misongData.forEach(d=>{ if(d.inv===realInv&&d.code===r.code) d.status=newStatus; });
-    db.from('shortage').upsert({inv_no:realInv,p_code:r.code,status:newStatus||'배송대기'},{onConflict:'inv_no,p_code'}).catch(()=>{});
+  const ord_no = noMap[seq]?.ord_no || realInv;
+  const now = new Date().toISOString();
+  targetItems.forEach(it=>{
+    const code = it.code;
+    misongData.forEach(d=>{ if(d.inv===realInv&&d.code===code) d.status=newStatus; });
+    if(newStatus){
+      const k=String(seq)+'-'+code;
+      if(holded[k]) delete holded[k];
+      db.from('picking').update({hold:false}).eq('inv_no',realInv).eq('p_code',code).catch(()=>{});
+    }
+    db.from('shortage').upsert({
+      inv_no:realInv,
+      ord_no,
+      p_code:code,
+      p_name:it.name||'',
+      short_qty:0,
+      memo2_val:'ㅁ',
+      drawer_no:newStatus ? waitingMemo : '',
+      status:newStatus||'피킹완료',
+      updated_at:now,
+    },{onConflict:'inv_no,p_code'}).catch(()=>{});
   });
   if(misongData.length) updateAllCSCounts();
   renderMisongList();
-  toast(newStatus==='발송대기' ? '⏸ CS 발송대기 처리됨' : '↩ 발송대기 취소됨');
+  scheduleRender();
+  toast(newStatus==='발송대기' ? '⏸ 발송대기: 메모1 '+waitingMemo+' / 메모2 ㅁ / 보류해제 예약' : '↩ 발송대기 취소됨');
 }
 
 async function cleanMisongPickingDone(){
@@ -5715,3 +5766,4 @@ if('serviceWorker' in navigator){
 </script>
 </body>
 </html>
+
