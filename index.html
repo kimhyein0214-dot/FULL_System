@@ -2282,6 +2282,26 @@ function renderAll(skipLeft){
   if(btLbl) btLbl.textContent=`📦 ${curJo+1}조 주문서`;
 }
 
+function updateHeaderSummaryCounts(){
+  const pickableOrders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)));
+  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>checked[o.no+'-'+it.code])).length;
+  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0).length,0);
+  const holdCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&holded[o.no+'-'+it.code]).length,0);
+  const memoWaitInvNos=new Set();
+  ORDERS_ALL.forEach(o=>{
+    if(o.items.some(it=>!isGold(it)&&((shortage[o.no+'-'+it.code]||0)>0||holded[o.no+'-'+it.code]||String(drawer[o.no]||'').trim()))){
+      const inv=seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||String(o.no);
+      if(inv) memoWaitInvNos.add(String(inv));
+    }
+  });
+  const set=(id,text)=>{const el=document.getElementById(id); if(el) el.textContent=text;};
+  set('hs-t','오늘 주문 '+ORDERS_ALL.length+'건');
+  set('hs-d','피킹완료 '+dAll+'건');
+  set('hs-s','부족항목 '+shortageCnt+'개');
+  set('hs-nd','배송보류 '+holdCnt+'건');
+  set('hs-mu','반영대기 송장 '+memoWaitInvNos.size+'건');
+}
+
 function renderSidebar(){
   const wrap=document.getElementById('jo-side-list');
   if(!wrap||!jos.length){if(wrap)wrap.innerHTML='';return;}
@@ -3601,6 +3621,34 @@ function computeElapsed(rows){
     r.elapsed = diff >= 0 ? diff : 0;
   });
 }
+function dateFromOrdNo(ordNo){
+  const s=String(ordNo||'').trim();
+  const m=s.match(/^(\d{4})(\d{2})(\d{2})/);
+  return m?`${m[1]}-${m[2]}-${m[3]}`:'';
+}
+function shortageRowQty(row){
+  const n=Number(row?.short_qty);
+  if(Number.isFinite(n)&&n>0) return n;
+  const memo=String(row?.memo2_val??'').trim();
+  const m=memo.match(/^\d+$/);
+  return m?Number(memo):0;
+}
+function csRowShortageQty(row){
+  const seqNo=realToSeq[row.inv]||row.inv;
+  const local=shortage[seqNo+'-'+row.code];
+  if(Number(local)>0) return Number(local);
+  return Number(row.shortage)||0;
+}
+function getShortageBaseDate(row,seqNo){
+  return dateFromOrdNo(row?.ord_no)
+    || (seqNo?(noMap[seqNo]?.scraped_at||noMap[seqNo]?.ord_date||''):'')
+    || row?.created_at
+    || row?.created
+    || row?.reg_date
+    || row?.shortage_date
+    || row?.updated_at
+    || '';
+}
 // syncMisongDays 제거 (더미 액션 정리)
 async function loadMisongData(showToast=false){
   const el = document.getElementById('cs-status');
@@ -3613,7 +3661,9 @@ async function loadMisongData(showToast=false){
       const seqNo = realToSeq[r.inv_no]||'';
       const order = seqNo ? ORDERS_ALL.find(o=>String(o.no)===String(seqNo)) : null;
       const k = seqNo+'-'+r.p_code;
-      const dateVal = seqNo ? (noMap[seqNo]?.scraped_at||'') : '';
+      const rowShortage=shortageRowQty(r);
+      if(rowShortage>0) shortage[(seqNo||r.inv_no)+'-'+r.p_code]=rowShortage;
+      const dateVal = getShortageBaseDate(r,seqNo);
       const item = order?.items.find(it=>it.code===r.p_code);
       const buyerName = order?.buyer || r.orderer || '';
       const fullName  = item?.name || r.p_name || '';
@@ -3629,9 +3679,10 @@ async function loadMisongData(showToast=false){
         option:  optionPart,                    // 옵션명
         arrival: r.arrival_date||'',
         status: r.status||'',
+        method: r.method||r.delay_method||r.cs_method||'',
         cs_memo: r.cs_memo||'',
         is14k: r.is_gold?'Y':'',
-        shortage: shortage[k]||0,
+        shortage: shortage[k]||rowShortage,
         drawer: drawer[seqNo]||'',
         buyer: buyerName,
         orderer: buyerName,
@@ -3682,7 +3733,7 @@ function classifyByDay(rows){
   rows.forEach(row=>{
     const seqNo = realToSeq[row.inv] || row.inv;
     const invRows = invCodeMap.get(row.inv)||[];
-    const allReady = invRows.every(rr=>(shortage[seqNo+'-'+rr.code]||0)===0);
+    const allReady = invRows.every(rr=>csRowShortageQty(rr)===0);
     if(allReady){ r['내일출고'].push(row); return; }
     const d = Number(row.elapsed)||0;
     const is14k = String(row.is14k||'').trim()==='Y';
@@ -4408,6 +4459,8 @@ let insp_memoSaveTimer = {};
 let insp_parsedRows = [];
 let insp_parsedChannels = {};
 let inspMemoColW = parseInt(localStorage.getItem('inspMemoColW')||'140');
+let insp_misongCacheReady = false;
+const insp_savingDone = new Set();
 
 function insp_startColResize(e){
   e.preventDefault();
@@ -4665,12 +4718,19 @@ function insp_loadData(){
   insp_goldLabelMap = computeGoldLabelMapFE();
   insp_initialized=true;
   insp_renderAll();
+  insp_loadMisongOrders().then(()=>{
+    insp_misongCacheReady=true;
+    if(insp_tabMode==='all'||insp_tabMode==='misong'){
+      insp_renderAll();
+      insp_renderSidebar();
+    }
+  });
 }
 
 function insp_setTab(t){
   insp_tabMode=t;
   if(t==='misong'){
-    insp_loadMisongOrders().then(()=>{ insp_filteredList=insp_buildMisongList(); insp_focusIdx=0; insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar(); });
+    insp_loadMisongOrders().then(()=>{ insp_misongCacheReady=true; insp_filteredList=insp_buildMisongList(); insp_focusIdx=0; insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar(); });
   }
   ['all','gold','golditem','undone','misong'].forEach(x=>{
     const el=document.getElementById('insp-tab-'+x);
@@ -4692,15 +4752,35 @@ async function insp_loadMisongOrders(){
     _misongOrdersCache = Object.entries(invMap).map(([inv_no,rows])=>{
       const seqNo=realToSeq[inv_no]||'';
       const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
-      const orderItems=order?.items||[];
+      const fallbackItems=rows.map(r=>{
+        const sq=shortageRowQty(r);
+        const key=(seqNo||inv_no)+'-'+r.p_code;
+        if(sq>0) shortage[key]=sq;
+        return {
+          code:r.p_code,
+          prodCode:r.p_code,
+          name:r.p_name||r.p_code||'',
+          qty:Math.max(1,sq||1),
+          shortage:sq,
+          arrival:r.arrival_date||'',
+          status:r.status||''
+        };
+      });
+      const orderItems=order?.items?.length?order.items:fallbackItems;
       return {
         no: seqNo||inv_no,
-        buyer: order?.buyer||'',
+        buyer: order?.buyer||rows[0]?.orderer||'',
+        recv: order?.recv||rows[0]?.orderer||'',
+        invNo: inv_no,
         items: orderItems.map(it=>{
           const sr=rows.find(r=>r.p_code===it.code);
-          return {...it, shortage:shortage[(seqNo||inv_no)+'-'+it.code]||0, arrival:sr?.arrival_date||''};
+          const sq=sr?shortageRowQty(sr):0;
+          return {...it, shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
         }),
-        shortItems: rows.map(r=>({code:r.p_code,shortage:shortage[(seqNo||inv_no)+'-'+r.p_code]||0,arrival:r.arrival_date||''})).filter(it=>it.shortage>0),
+        shortItems: rows.map(r=>{
+          const sq=shortage[(seqNo||inv_no)+'-'+r.p_code]||shortageRowQty(r);
+          return {code:r.p_code,shortage:sq,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
+        }).filter(it=>it.code),
         _isMisong: true
       };
     });
@@ -4711,13 +4791,24 @@ function insp_buildMisongList(){
   return _misongOrdersCache;
 }
 
+function insp_externalMisongOrders(){
+  if(!insp_misongCacheReady) return [];
+  const todayNos=new Set(ORDERS_ALL.map(o=>String(o.no)));
+  const todayInvs=new Set(ORDERS_ALL.map(o=>String(seqToReal[o.no]||o.invNo||'')).filter(Boolean));
+  return _misongOrdersCache.filter(o=>!todayNos.has(String(o.no))&&!todayInvs.has(String(o.invNo||'')));
+}
+
+function insp_allOrdersForStats(){
+  return [...ORDERS_ALL,...insp_externalMisongOrders()];
+}
+
 function insp_getFiltered(){
   let list;
   if(insp_tabMode==='misong') return insp_buildMisongList();
   if(insp_tabMode==='gold') list = ORDERS_ALL.filter(o=>insp_GOLD_NOS.has(o.no));
   else if(insp_tabMode==='golditem') list = ORDERS_ALL.filter(o=>o.items.some(it=>isGold(it)));
-  else if(insp_tabMode==='undone') list = ORDERS_ALL.filter(o=>!inspDone[o.no]);
-  else list = [...ORDERS_ALL];
+  else if(insp_tabMode==='undone') list = insp_allOrdersForStats().filter(o=>!inspDone[o.no]);
+  else list = insp_allOrdersForStats();
   if(insp_searchQuery){
     const q = insp_searchQuery;
     list = list.filter(o=>{
@@ -4744,8 +4835,10 @@ function insp_renderAll(){
 }
 
 function insp_updateStats(){
-  const tot=ORDERS_ALL.length;
-  const don=Object.keys(inspDone).filter(k=>inspDone[k]).length;
+  const statOrders=insp_allOrdersForStats();
+  const validNos=new Set(statOrders.map(o=>String(o.no)));
+  const tot=statOrders.length;
+  const don=Object.keys(inspDone).filter(k=>inspDone[k]&&validNos.has(String(k))).length;
   const pct=tot?Math.round(don/tot*100):0;
   const el=id=>document.getElementById(id);
   if(el('insp-prog-fill')) el('insp-prog-fill').style.width=pct+'%';
@@ -4888,7 +4981,7 @@ function insp_renderDetail(){
     const optName=nameParts.slice(1).join(' / ')||'';
     const _isLabelTab=insp_tabMode==='golditem'||insp_tabMode==='gold';
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
-    const labelBadge=labelDisp&&labelDisp!=='—'?'<span class="insp-label-badge">'+labelDisp+'</span>':'';
+    const optionText=optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>';
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
@@ -4897,7 +4990,7 @@ function insp_renderDetail(){
           +(imgUrl?'<img src="'+imgUrl+'" onerror="this.parentElement.innerHTML=\'🖼\';this.parentElement.classList.remove(\'has-img\')">':'🖼')
         +'</div>'
       +'</td>'
-      +'<td style="min-width:80px;max-width:160px;color:#1A2840;font-size:13px;font-weight:800;vertical-align:middle;">'+(optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>')+labelBadge+'</td>'
+      +'<td style="min-width:80px;max-width:160px;color:#1A2840;font-size:13px;font-weight:800;vertical-align:middle;">'+optionText+'</td>'
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +'<td style="min-width:110px;max-width:200px;color:#888;font-size:11px;font-weight:400;">'+(prodName||'<span style="color:#CCC;">—</span>')+'</td>'
       +'<td style="vertical-align:top;padding-top:6px;width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;max-width:'+inspMemoColW+'px;">'
@@ -4975,9 +5068,23 @@ function insp_adjShort(invNo, code, delta){
     if(wrap) wrap.classList.toggle('has-val',newVal>0);
     el.closest('tr').classList.toggle('misong-row',newVal>0);
   }
-  insp_renderList(); // 왼쪽 패널 미송 뱃지 동기화
+  insp_refreshAfterShortageChange(invNo);
   saveToSheet(invNo,code,!!checked[k],newVal,drawer[invNo]||'',!!holded[k])
-    .catch(()=>{ shortage[k]=old; toast('⚠ 저장 실패'); });
+    .catch(()=>{ shortage[k]=old; insp_refreshAfterShortageChange(invNo); toast('⚠ 저장 실패'); });
+}
+
+function insp_refreshAfterShortageChange(invNo){
+  const curNo=String(invNo);
+  const itemIdx=insp_itemFocusIdx;
+  insp_filteredList=insp_getFiltered();
+  const nextIdx=insp_filteredList.findIndex(o=>String(o.no)===curNo);
+  if(nextIdx>=0) insp_focusIdx=nextIdx;
+  insp_itemFocusIdx=itemIdx;
+  insp_renderList();
+  insp_renderDetail();
+  insp_updateStats();
+  insp_renderSidebar();
+  updateHeaderSummaryCounts();
 }
 
 // 검품탭 미송서랍 저장 (송장의 모든 아이템에 서랍번호 적용)
@@ -4992,33 +5099,50 @@ function insp_saveDrawer(invNo, val){
   });
 }
 
-function insp_toggleDone(invNo){
+async function insp_toggleDone(invNo){
   if(insp_tabMode==='misong') return;
-  inspDone[invNo]=!inspDone[invNo];
-  if(insp_tabMode==='undone'&&inspDone[invNo]){
-    const newList=ORDERS_ALL.filter(o=>!inspDone[o.no]);
-    if(insp_focusIdx>=newList.length) insp_focusIdx=Math.max(0,newList.length-1);
-  }
-  insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar();
-  toast(inspDone[invNo]?'✅ 검품 완료':'↩ 완료 취소');
+  const invKey=String(invNo);
+  if(insp_savingDone.has(invKey)) return;
+  insp_savingDone.add(invKey);
+  const prevDone=!!inspDone[invNo];
+  const nextDone=!prevDone;
+  const renderDoneState=()=>{
+    if(insp_tabMode==='undone'&&inspDone[invNo]){
+      const newList=insp_allOrdersForStats().filter(o=>!inspDone[o.no]);
+      if(insp_focusIdx>=newList.length) insp_focusIdx=Math.max(0,newList.length-1);
+    }
+    insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar();
+  };
+  inspDone[invNo]=nextDone;
+  renderDoneState();
   const inv_no=seqToReal[invNo]||String(invNo);
-  db.from('inspection').upsert({inv_no,p_code:'__done__',passed:!!inspDone[invNo]},{onConflict:'inv_no,p_code'}).catch(()=>{});
-  if(inspDone[invNo]){
-    // 검품완료: '피킹완료' 상태인 shortage → '검품완료' + memo2_val='' (메모 업데이터가 셀피아 메모 클리어)
-    db.from('shortage').update({status:'검품완료', memo2_val:'', updated_at:new Date().toISOString()})
-      .eq('inv_no',inv_no).eq('status','피킹완료').catch(()=>{});
-    // picking: 해당 송장 전체 hold=false (배송보류 해제)
-    const order=ORDERS_ALL.find(o=>String(o.no)===String(invNo));
-    if(order) order.items.forEach(it=>{
-      const k=String(invNo)+'-'+it.code;
-      if(holded[k]){ delete holded[k]; }
-      db.from('picking').update({hold:false}).eq('inv_no',inv_no).eq('p_code',it.code).catch(()=>{});
-    });
-    scheduleRender();
-  } else {
-    // 검품완료 취소: '검품완료/메모정리완료' → '피킹완료'로 되돌림
-    db.from('shortage').update({status:'피킹완료', memo2_val:'ㅁ', updated_at:new Date().toISOString()})
-      .eq('inv_no',inv_no).in('status',['검품완료','메모정리완료']).catch(()=>{});
+  try{
+    await db.from('inspection').upsert({inv_no,p_code:'__done__',passed:nextDone},{onConflict:'inv_no,p_code'});
+    if(nextDone){
+      // 검품완료: '피킹완료' 상태인 shortage → '검품완료' + memo2_val='' (메모 업데이터가 셀피아 메모 클리어)
+      await db.from('shortage').update({status:'검품완료', memo2_val:'', updated_at:new Date().toISOString()})
+        .eq('inv_no',inv_no).eq('status','피킹완료');
+      // picking: 해당 송장 전체 hold=false (배송보류 해제)
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(invNo))||insp_filteredList.find(o=>String(o.no)===String(invNo));
+      if(order) await Promise.all(order.items.map(it=>{
+        const k=String(invNo)+'-'+it.code;
+        if(holded[k]){ delete holded[k]; }
+        return db.from('picking').update({hold:false}).eq('inv_no',inv_no).eq('p_code',it.code);
+      }));
+      scheduleRender();
+      toast('✅ 검품 완료');
+    } else {
+      // 검품완료 취소: '검품완료/메모정리완료' → '피킹완료'로 되돌림
+      await db.from('shortage').update({status:'피킹완료', memo2_val:'ㅁ', updated_at:new Date().toISOString()})
+        .eq('inv_no',inv_no).in('status',['검품완료','메모정리완료']);
+      toast('↩ 완료 취소');
+    }
+  }catch(e){
+    inspDone[invNo]=prevDone;
+    renderDoneState();
+    toast('⚠ 검품 완료 저장 실패: '+(e.message||e));
+  }finally{
+    insp_savingDone.delete(invKey);
   }
 }
 
@@ -5071,9 +5195,11 @@ function insp_scrollToItem(){
 function insp_renderSidebar(){
   const wrap=document.getElementById('jo-side-list');
   if(!wrap) return;
-  const tot=ORDERS_ALL.length;
-  const don=Object.keys(inspDone).filter(k=>inspDone[k]).length;
-  const undone=ORDERS_ALL.filter(o=>!inspDone[o.no]).length;
+  const statOrders=insp_allOrdersForStats();
+  const validNos=new Set(statOrders.map(o=>String(o.no)));
+  const tot=statOrders.length;
+  const don=Object.keys(inspDone).filter(k=>inspDone[k]&&validNos.has(String(k))).length;
+  const undone=statOrders.filter(o=>!inspDone[o.no]).length;
   const gold=ORDERS_ALL.filter(o=>insp_GOLD_NOS.has(o.no)).length;
   const goldItem=ORDERS_ALL.filter(o=>o.items.some(it=>isGold(it))).length;
   const groups=[
