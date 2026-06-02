@@ -965,7 +965,6 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
   <button id="planned-print-export-btn" class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
   <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="토글 등록용 CSV에 필요한 수취인/주소/연락처 보강 현황을 확인합니다">📊 보강현황</button>
   <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="토글 등록용 CSV를 만듭니다. 토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.">📮 토글CSV</button>
-  <button class="abtn work-export-btn" onclick="downloadSellpiaInvoiceCsv()" title="토글 송장 발급 후 셀피아 업로드용 CSV를 만듭니다. 운송장번호 + *주문품목No가 필수입니다.">&#49472;&#54588;&#50500;&#49569;&#51109;CSV</button>
   <button class="abtn zone-aux-btn" onclick="openZoneSortPopup()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역순 송장 배치 현황">📊 구역현황</button>
   <button class="abtn" onclick="showOrderListModal()" style="background:#1A3A6B;">📋 주문리스트</button>
   <span class="work-sort-summary" id="work-sort-summary">정렬 기준: 출력순서</span>
@@ -1593,7 +1592,9 @@ function toggleWorkSort(){
   reloadData();
 }
 function getPlannedPrintOrders(){
-  return [...ORDERS_ALL].sort((a,b)=>(Number(a.plannedPrintSeqNo)||Number(a.no))-(Number(b.plannedPrintSeqNo)||Number(b.no)));
+  // no는 재정렬 이후 화면/작업순서 기준으로 다시 붙는 번호입니다.
+  // 토글CSV는 셀피아 원본 sort_order가 아니라 이 화면 작업번호를 따라야 합니다.
+  return [...ORDERS_ALL].sort((a,b)=>(Number(a.no)||0)-(Number(b.no)||0));
 }
 function getPostOfficePrintOrders(){
   return getPlannedPrintOrders();
@@ -1625,7 +1626,6 @@ function downloadPlannedPrintList(){
 /* ──────────────────────────────────────────────────────────────
    📮 토글 등록용 CSV (작업순서대로) — 헤더 13컬럼 고정, 빈 컬럼은 빈문자열 유지
    토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.
-   셀피아 송장 업로드는 별도 "셀피아송장CSV"에서 운송장번호 + *주문품목No만 사용합니다.
    ────────────────────────────────────────────────────────────── */
 const POST_OFFICE_HEADERS=['운송장번호','주문번호','주문일자','*주문품목No','판매처상품명','판매처옵션명','주문수량','수취인명','수취인연락처','수취인핸드폰','우편번호','주소','주문메모'];
 function isSellerOrderMemoLine(v){
@@ -1678,34 +1678,6 @@ function buildPostOfficeCsvRows(){
     });
   });
   return rows;
-}
-const SELLPIA_INVOICE_HEADERS=['\uC6B4\uC1A1\uC7A5\uBC88\uD638','*\uC8FC\uBB38\uD488\uBAA9No'];
-function getSellpiaInvoiceNo(o){
-  return String(seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||'').trim();
-}
-function getSellpiaUploadItemNo(it){
-  return String(it?.item_no||'').trim();
-}
-function buildSellpiaInvoiceCsvRows(){
-  const rows=[SELLPIA_INVOICE_HEADERS.slice()];
-  ORDERS_ALL.forEach(o=>{
-    const items=(o.items&&o.items.length?o.items:[]);
-    items.forEach(it=>rows.push([getSellpiaInvoiceNo(o),getSellpiaUploadItemNo(it)]));
-  });
-  return rows;
-}
-function validateSellpiaInvoiceCsvRows(rows){
-  const stats={total:0,missingInv:0,missingItemNo:0,legacyItemNo:0,sample:[]};
-  for(let i=1;i<rows.length;i++){
-    const inv=String(rows[i][0]||'').trim();
-    const itemNo=String(rows[i][1]||'').trim();
-    stats.total++;
-    if(!inv) stats.missingInv++;
-    if(!itemNo) stats.missingItemNo++;
-    if(itemNo&&!/^\d+_/.test(itemNo)) stats.legacyItemNo++;
-    if((!inv||!itemNo||!/^\d+_/.test(itemNo))&&stats.sample.length<8){stats.sample.push({row:i+1,inv,itemNo});}
-  }
-  return stats;
 }
 function validatePostOfficeCsvRows(rows){
   /* rows[0] = header. 토글 등록용 검증: 운송장번호는 토글 발급 전 비어 있어도 정상입니다. */
@@ -1766,27 +1738,6 @@ function downloadPostOfficeCsv(){
   const fn='togle_registration_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
   downloadCsv(fn,rows);
   toast('📮 토글 등록 CSV '+(rows.length-1)+'건 (수취인정보 누락 '+stats.missingRequired+')');
-}
-
-function downloadSellpiaInvoiceCsv(){
-  if(!ORDERS_ALL.length){toast('No orders');return;}
-  const rows=buildSellpiaInvoiceCsvRows();
-  const stats=validateSellpiaInvoiceCsvRows(rows);
-  console.log('[SELLPIA-INVOICE] CSV stats',stats);
-  if(stats.missingInv||stats.missingItemNo||stats.legacyItemNo){
-    alert('셀피아 송장 업로드 CSV를 만들 수 없습니다.\n\n'
-      +'전체 행: '+stats.total+'\n'
-      +'운송장번호 누락: '+stats.missingInv+'\n'
-      +'*주문품목No 누락: '+stats.missingItemNo+'\n'
-      +'판매처 prefix 없는 주문품목No: '+stats.legacyItemNo+'\n\n'
-      +'토글에서 송장번호를 받은 뒤, 최신 셀피아 스크래퍼로 *주문품목No가 저장됐는지 확인해주세요.');
-    return;
-  }
-  const pad=n=>String(n).padStart(2,'0');
-  const now=new Date();
-  const fn='sellpia_invoice_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
-  downloadCsv(fn,rows);
-  toast('Sellpia invoice CSV '+(rows.length-1)+' rows');
 }
 
 function getZone(code){
