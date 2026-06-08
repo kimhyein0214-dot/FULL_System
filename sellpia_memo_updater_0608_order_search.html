@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sellpia Memo Updater 0608 - 주문조회 방식</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      background: #111827;
+      color: #f8fafc;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      box-sizing: border-box;
+    }
+    main {
+      width: min(760px, 100%);
+      background: #172033;
+      border: 1px solid #2b3858;
+      border-radius: 12px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .35);
+      padding: 28px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 8px 0;
+      line-height: 1.65;
+      color: #cbd5e1;
+    }
+    .bookmarklet {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 18px;
+      margin: 18px 0 10px;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: #fff;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: 0 10px 28px rgba(59, 130, 246, .3);
+    }
+    button {
+      min-height: 40px;
+      border: 1px solid #42526f;
+      border-radius: 8px;
+      padding: 0 14px;
+      background: #253149;
+      color: #e5e7eb;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    code {
+      color: #bfdbfe;
+      background: #111827;
+      border: 1px solid #27344f;
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+    ul {
+      margin: 14px 0 0;
+      padding-left: 20px;
+      color: #cbd5e1;
+      line-height: 1.7;
+    }
+    .note {
+      margin-top: 18px;
+      border-top: 1px solid #2b3858;
+      padding-top: 16px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    #copy-status {
+      margin-left: 10px;
+      color: #86efac;
+      font-size: 13px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sellpia Memo Updater 0608</h1>
+    <p>
+      셀피아 <code>주문조회(order_search.html)</code> 탭에서 실행하는 메모 업데이터입니다.
+      재고매칭 팝업을 열지 않고 주문조회 AJAX로만 관리메모, 관리메모2, 배송보류를 반영합니다.
+    </p>
+    <a id="bookmarklet" class="bookmarklet" href="#">Sellpia Memo Updater 0608</a>
+    <div>
+      <button id="copy" type="button">북마클릿 주소 복사</button>
+      <span id="copy-status"></span>
+    </div>
+    <ul>
+      <li>관리메모는 송장 내 전체 상품에 반영합니다.</li>
+      <li>관리메모2는 해당 송장 안의 해당 상품 행에만 반영합니다.</li>
+      <li>배송보류 설정/해제는 해당 송장 상세 행 전체를 대상으로 처리합니다.</li>
+      <li>DB는 조회만 하고, 셀피아 반영은 <code>order_search.ajax.html</code>로 처리합니다.</li>
+    </ul>
+    <p class="note">
+      사용법: 위 파란 버튼을 북마크바로 끌어다 놓은 뒤, 셀피아 주문조회 탭에서 클릭하세요.
+      주문조회 화면이 아닌 곳에서 실행하면 동작하지 않습니다.
+    </p>
+  </main>
+
+  <script id="bookmarklet-source" type="text/plain">
+(function(){
+  (async function SellpiaMemoUpdater0608(){
+    const CONFIG = {
+      supabaseUrl: 'https://vgxocngpykhlkosiaeew.supabase.co',
+      supabaseKey: 'sb_publishable_XVnKGJo66GZiYTq5Ivu8dA_SjBVvX0g',
+      searchTimeout: 9000,
+      detailTimeout: 9000,
+      ajaxDelay: 250
+    };
+    const PAGE_OK = /\/order_search\.html/i.test(location.pathname);
+    if (!PAGE_OK) {
+      alert('셀피아 주문조회(order_search.html) 탭에서 실행해주세요.');
+      return;
+    }
+    if (document.getElementById('smu0608-overlay')) {
+      alert('이미 실행 중입니다.');
+      return;
+    }
+    if (!window.jQuery) {
+      alert('jQuery를 찾을 수 없습니다. 주문조회 페이지 로딩 후 다시 실행해주세요.');
+      return;
+    }
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const $id = id => document.getElementById(id);
+    const today = () => new Date().toISOString().slice(0, 10);
+    const escHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+    const normal = value => String(value ?? '').trim();
+    const uniq = list => [...new Set(list.filter(Boolean).map(v => String(v)))];
+    const waitFor = async (predicate, timeout, interval = 120) => {
+      const started = Date.now();
+      let lastError = null;
+      while (Date.now() - started < timeout) {
+        try {
+          const value = predicate();
+          if (value) return value;
+        } catch (err) {
+          lastError = err;
+        }
+        await sleep(interval);
+      }
+      throw new Error(lastError ? lastError.message : '대기 시간이 초과되었습니다.');
+    };
+    async function dbRequest(path) {
+      const res = await fetch(CONFIG.supabaseUrl + '/rest/v1/' + path, {
+        method: 'GET',
+        headers: {
+          apikey: CONFIG.supabaseKey,
+          Authorization: 'Bearer ' + CONFIG.supabaseKey,
+          'Content-Type': 'application/json',
+          Range: '0-9999'
+        }
+      });
+      if (!res.ok) throw new Error('DB 조회 오류: ' + await res.text());
+      const text = await res.text();
+      return text ? JSON.parse(text) : [];
+    }
+    async function dbRowsByInvoiceOrOrder(table, invNo, ordNo, select) {
+      const inv = encodeURIComponent(invNo || '');
+      const ord = encodeURIComponent(ordNo || '');
+      try {
+        return await dbRequest(`${table}?or=(inv_no.eq.${inv},ord_no.eq.${ord})&select=${select}`);
+      } catch (err) {
+        addLog(`  DB fallback(${table}): ${err.message.slice(0, 80)}`);
+        const fallbackSelect = select.split(',').filter(col => col !== 'inv_no').join(',');
+        return await dbRequest(`${table}?ord_no=eq.${ord}&select=${fallbackSelect}`);
+      }
+    }
+    function getGridLength(gridName) {
+      const grid = window[gridName];
+      if (!grid || !grid.getData) return 0;
+      const data = grid.getData();
+      if (!data) return 0;
+      if (typeof data.getLength === 'function') return data.getLength();
+      if (Array.isArray(data)) return data.length;
+      return 0;
+    }
+    function getGridItem(gridName, index) {
+      const grid = window[gridName];
+      if (!grid || !grid.getData) return null;
+      const data = grid.getData();
+      if (!data) return null;
+      if (typeof data.getItem === 'function') return data.getItem(index);
+      return data[index] || null;
+    }
+    function getGridRows(gridName) {
+      const rows = [];
+      const len = getGridLength(gridName);
+      for (let i = 0; i < len; i++) {
+        const item = getGridItem(gridName, i);
+        if (item) rows.push({ index: i, item });
+      }
+      return rows;
+    }
+    function rowBlob(row) {
+      return Object.values(row || {}).map(value => String(value ?? '')).join(' ');
+    }
+    function triggerValue(el, value) {
+      if (!el) return;
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      try { window.jQuery(el).val(value).trigger('input').trigger('change'); } catch (_) {}
+    }
+    function chooseInvoiceSearchMode() {
+      const candidates = [
+        '#search_delinum', '#search_t_delinum_radio', '#search_s_delinum',
+        'input[type="radio"][value="delinum"]', 'input[type="radio"][value="송장No"]'
+      ];
+      for (const selector of candidates) {
+        const el = document.querySelector(selector);
+        if (el) {
+          el.checked = true;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return;
+        }
+      }
+    }
+    async function searchInvoice(invNo) {
+      if (!window.grid7 || !window.grid8 || typeof window.view_order_detail !== 'function') {
+        throw new Error('주문조회 grid/view_order_detail 함수를 찾을 수 없습니다. 페이지 로딩 후 다시 실행해주세요.');
+      }
+      chooseInvoiceSearchMode();
+      const input = document.querySelector('#search_t_delinum, input[name="search_t_delinum"]');
+      if (!input) throw new Error('송장번호 검색 입력칸(#search_t_delinum)을 찾을 수 없습니다.');
+      if (typeof window.clear_input === 'function') {
+        window.clear_input('search_t_delinum');
+      }
+      triggerValue(input, invNo);
+      const before = rowBlob(getGridItem('grid7', 0));
+      if (typeof window.search_order === 'function') {
+        window.search_order();
+      } else {
+        const btn = document.querySelector('#search_b, input[value="검색"], button');
+        if (!btn) throw new Error('검색 버튼을 찾을 수 없습니다.');
+        btn.click();
+      }
+      const hit = await waitFor(() => {
+        const rows = getGridRows('grid7');
+        if (!rows.length) return false;
+        const hit = rows.find(({ item }) => rowBlob(item).includes(String(invNo)));
+        if (hit) return hit;
+        const firstBlob = rowBlob(rows[0].item);
+        if (firstBlob && firstBlob !== before) {
+          addLog('  검색 결과는 바뀌었지만 grid 데이터에서 송장번호를 확인하지 못했습니다.');
+        }
+        return false;
+      }, CONFIG.searchTimeout);
+      return hit;
+    }
+    async function openOrderDetail(orderHit) {
+      const row = orderHit.item;
+      const rowIndex = orderHit.index;
+      const ordNo = normal(row.ord_no || row.o_ord_no || row.order_no || row.ordNo);
+      const sellerId = normal(row.seller_id || row.provider_uid || row.p_provider_uid || row.p_seller_id);
+      if (!ordNo) throw new Error('검색 결과에서 주문번호(ord_no)를 찾지 못했습니다.');
+      if (!sellerId) throw new Error('검색 결과에서 판매처 uid(seller_id)를 찾지 못했습니다.');
+      try {
+        window.grid7.scrollRowIntoView(rowIndex);
+        window.grid7.setSelectedRows([rowIndex]);
+        window.grid7.setActiveCell(rowIndex, 0);
+      } catch (_) {}
+      window.view_order_detail(sellerId, ordNo);
+      await waitFor(() => {
+        const rows = detailRows();
+        return rows.length && rows.some(item => normal(item.ord_no) === ordNo) ? rows : false;
+      }, CONFIG.detailTimeout);
+      return { ordNo, sellerId, rows: detailRows().filter(item => normal(item.ord_no) === ordNo) };
+    }
+    function detailRows() {
+      return getGridRows('grid8').map(({ item }) => item).filter(Boolean);
+    }
+    function rowItemNo(row) {
+      return normal(row.item_no || row.o_item_no || row.ord_item_no);
+    }
+    function rowSellerId(row) {
+      return normal(row.p_provider_uid || row.provider_uid || row.seller_id);
+    }
+    function rowProductCode(row) {
+      return normal(row.p_code || row.product_code || row.c_p_code);
+    }
+    function rowOwnCode(row) {
+      return normal(row.p_dpcode || row.p_dp_code || row.c_dp_code);
+    }
+    function updateGridRow(row, fields) {
+      Object.assign(row, fields);
+      try {
+        if (window.dataView8 && typeof window.dataView8.updateItem === 'function' && row.id !== undefined) {
+          window.dataView8.updateItem(row.id, row);
+        }
+      } catch (_) {}
+      try { window.grid8.invalidate(); window.grid8.render(); } catch (_) {}
+    }
+    function postSellpia(params) {
+      return new Promise((resolve, reject) => {
+        window.jQuery.ajax({
+          url: 'order_search.ajax.html',
+          type: 'POST',
+          data: params,
+          traditional: true,
+          success: data => resolve(data),
+          error: xhr => reject(new Error(xhr.responseText || xhr.statusText || 'Sellpia AJAX 오류'))
+        });
+      });
+    }
+    async function updateMemo(type, row, memo, allRows) {
+      const sellerId = rowSellerId(row);
+      const itemNo = rowItemNo(row);
+      const ordNo = normal(row.ord_no);
+      if (!sellerId || !itemNo || !ordNo) {
+        throw new Error(`메모 반영 필수값 누락: seller=${sellerId}, item=${itemNo}, ord=${ordNo}`);
+      }
+      await postSellpia({
+        mode: 'updateordermemos',
+        seller_id: sellerId,
+        item_no: itemNo,
+        ord_no: ordNo,
+        type,
+        memo: memo ?? '',
+        memo_mod_all: allRows ? 'Y' : 'N'
+      });
+      if (type === 'o_shop_memo') {
+        const rows = allRows ? detailRows().filter(r => normal(r.ord_no) === ordNo) : [row];
+        rows.forEach(r => updateGridRow(r, { o_shop_memo: memo ?? '', shop_memo: memo ?? '' }));
+      }
+      if (type === 'o_shop_memo2') {
+        updateGridRow(row, { o_shop_memo2: memo ?? '', shop_memo2: memo ?? '' });
+      }
+      await sleep(CONFIG.ajaxDelay);
+    }
+    async function setDeliveryHold(rows, hold) {
+      const ordNo = normal(rows[0] && rows[0].ord_no);
+      const targets = rows.filter(row => {
+        const delayed = row.d_status === true || normal(row.o_status).includes('배송보류');
+        return hold ? !delayed : delayed;
+      });
+      if (!ordNo || !targets.length) {
+        addLog(`  배송보류 ${hold ? '설정' : '해제'} 대상 없음`);
+        return;
+      }
+      const items = targets.map(row => rowSellerId(row) + '_' + rowItemNo(row)).filter(item => !item.startsWith('_') && !item.endsWith('_'));
+      if (!items.length) throw new Error('배송보류 처리 item 목록을 만들지 못했습니다.');
+      await postSellpia({
+        mode: 'setorderdelidelay',
+        ono: ordNo,
+        items,
+        set_type: hold ? 'Y' : 'N'
+      });
+      targets.forEach(row => updateGridRow(row, {
+        d_status: !!hold,
+        o_status: hold ? '배송보류' : normal(row.o_status).replace('배송보류', '').trim()
+      }));
+      await sleep(CONFIG.ajaxDelay);
+    }
+    function isDoneStatus(status) {
+      return ['검품완료', '메모정리완료'].includes(normal(status));
+    }
+    function isWaitingStatus(status) {
+      return ['발송대기', '피킹완료'].includes(normal(status));
+    }
+    function buildTask(invNo, ordNo, shortageRows, pickingRows) {
+      const task = {
+        invNo,
+        ordNo,
+        drawerNo: '',
+        memo2Map: new Map(),
+        clear: false,
+        hold: false,
+        hasDbData: (shortageRows.length + pickingRows.length) > 0
+      };
+      for (const row of pickingRows) {
+        if (row.hold) task.hold = true;
+        if (!task.drawerNo && normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY') task.drawerNo = normal(row.drawer_no);
+      }
+      for (const row of shortageRows) {
+        const status = normal(row.status);
+        if (isDoneStatus(status)) task.clear = true;
+        const drawer = normal(row.drawer_no);
+        if (!task.drawerNo && drawer && drawer !== 'EMPTY') task.drawerNo = drawer;
+        const pCode = normal(row.p_code);
+        const qty = Number(row.short_qty || 0);
+        const memo2Val = normal(row.memo2_val);
+        if (!pCode || task.clear) continue;
+        if (qty > 0) task.memo2Map.set(pCode, String(qty));
+        else if (isWaitingStatus(status) && memo2Val) task.memo2Map.set(pCode, memo2Val);
+      }
+      if (task.clear) {
+        task.drawerNo = '';
+        task.memo2Map.clear();
+        task.hold = false;
+      } else if (task.memo2Map.size || task.drawerNo) {
+        task.hold = true;
+      }
+      return task;
+    }
+    function matchMemo2Rows(rows, memo2Map) {
+      const result = [];
+      for (const row of rows) {
+        const pCode = rowProductCode(row);
+        if (memo2Map.has(pCode)) result.push({ row, memo: memo2Map.get(pCode), code: pCode });
+      }
+      return result;
+    }
+    async function buildTaskFromInvoice(invNo) {
+      addLog(`검색: ${invNo}`);
+      const hit = await searchInvoice(invNo);
+      const detail = await openOrderDetail(hit);
+      const shortageRows = await dbRowsByInvoiceOrOrder(
+        'shortage',
+        invNo,
+        detail.ordNo,
+        'inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val'
+      );
+      const pickingRows = await dbRowsByInvoiceOrOrder(
+        'picking',
+        invNo,
+        detail.ordNo,
+        'inv_no,ord_no,hold,drawer_no'
+      );
+      return { detail, task: buildTask(invNo, detail.ordNo, shortageRows || [], pickingRows || []) };
+    }
+    async function collectDateTasks(date) {
+      const d0 = date.replace(/-/g, '');
+      const d1Obj = new Date(date + 'T00:00:00');
+      d1Obj.setDate(d1Obj.getDate() + 1);
+      const d1 = d1Obj.toISOString().slice(0, 10).replace(/-/g, '');
+      let shortageRows;
+      try {
+        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val`);
+      } catch (err) {
+        addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
+        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=ord_no,short_qty,drawer_no,status,p_code,memo2_val`);
+      }
+      if (!shortageRows.length) return [];
+      const ordNos = uniq(shortageRows.map(row => row.ord_no));
+      let pickingRows = [];
+      if (ordNos.length) {
+        try {
+          pickingRows = await dbRequest(`picking?ord_no=in.(${ordNos.map(encodeURIComponent).join(',')})&select=inv_no,ord_no,hold,drawer_no`);
+        } catch (err) {
+          addLog(`  DB fallback(picking date): ${err.message.slice(0, 80)}`);
+          pickingRows = await dbRequest(`picking?ord_no=in.(${ordNos.map(encodeURIComponent).join(',')})&select=ord_no,hold,drawer_no`);
+        }
+      }
+      const byOrd = new Map();
+      for (const row of shortageRows) {
+        const ord = normal(row.ord_no);
+        if (!ord) continue;
+        if (!byOrd.has(ord)) byOrd.set(ord, { invNo: normal(row.inv_no), shortageRows: [], pickingRows: [] });
+        const bucket = byOrd.get(ord);
+        if (!bucket.invNo && row.inv_no) bucket.invNo = normal(row.inv_no);
+        bucket.shortageRows.push(row);
+      }
+      for (const row of pickingRows) {
+        const ord = normal(row.ord_no);
+        if (!ord) continue;
+        if (!byOrd.has(ord)) byOrd.set(ord, { invNo: normal(row.inv_no), shortageRows: [], pickingRows: [] });
+        const bucket = byOrd.get(ord);
+        if (!bucket.invNo && row.inv_no) bucket.invNo = normal(row.inv_no);
+        bucket.pickingRows.push(row);
+      }
+      return [...byOrd.entries()].map(([ordNo, bucket]) => ({
+        invNo: bucket.invNo,
+        ordNo,
+        task: buildTask(bucket.invNo, ordNo, bucket.shortageRows, bucket.pickingRows)
+      })).filter(item => item.invNo);
+    }
+    async function applyTask(task, options, detailFromSingle) {
+      const invNo = task.invNo;
+      let detail = detailFromSingle;
+      if (!detail) {
+        const hit = await searchInvoice(invNo);
+        detail = await openOrderDetail(hit);
+      }
+      const rows = detail.rows.length ? detail.rows : detailRows().filter(row => normal(row.ord_no) === detail.ordNo);
+      if (!rows.length) throw new Error('상세 상품 행이 없습니다.');
+      const firstRow = rows[0];
+      const actions = [];
+      if (options.doMemo1) {
+        await updateMemo('o_shop_memo', firstRow, task.clear ? '' : task.drawerNo, true);
+        actions.push(task.clear ? '관리메모 삭제' : `관리메모=${task.drawerNo || '-'}`);
+      }
+      if (options.doMemo2) {
+        if (task.clear) {
+          const targets = rows.filter(row => normal(row.o_shop_memo2 || row.shop_memo2));
+          for (const row of targets) await updateMemo('o_shop_memo2', row, '', false);
+          actions.push(`관리메모2 삭제 ${targets.length}건`);
+        } else {
+          const matched = matchMemo2Rows(rows, task.memo2Map);
+          for (const item of matched) await updateMemo('o_shop_memo2', item.row, item.memo, false);
+          actions.push(`관리메모2 ${matched.length}건`);
+          const unmatchedCodes = [...task.memo2Map.keys()].filter(code => !matched.some(item => item.code === code));
+          if (unmatchedCodes.length) addLog(`  상품코드 미매칭: ${unmatchedCodes.join(', ')}`);
+        }
+      }
+      if (options.doHold) {
+        await setDeliveryHold(rows, !!task.hold);
+        actions.push(task.hold ? '배송보류 설정' : '배송보류 해제');
+      }
+      return actions.join(' / ') || '변경 없음';
+    }
+    function buildOverlay() {
+      const overlay = document.createElement('div');
+      overlay.id = 'smu0608-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.86);display:flex;align-items:center;justify-content:center;font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;color:#f8fafc;';
+      overlay.innerHTML = `
+        <section style="width:min(520px,92vw);background:#172033;border:1px solid #334155;border-radius:14px;padding:24px;box-shadow:0 26px 90px rgba(0,0,0,.45);">
+          <h2 style="margin:0 0 6px;font-size:18px;letter-spacing:0;">Sellpia Memo Updater 0608</h2>
+          <div style="margin:0 0 16px;color:#94a3b8;font-size:12px;">주문조회 AJAX 방식 · DB 읽기 전용</div>
+          <div id="smu0608-form">
+            <label style="display:block;margin:0 0 6px;color:#cbd5e1;font-size:12px;">운송장번호</label>
+            <input id="smu0608-inv" placeholder="1건만 처리할 때 입력" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
+            <label style="display:block;margin:14px 0 6px;color:#cbd5e1;font-size:12px;">날짜</label>
+            <input id="smu0608-date" type="date" value="${today()}" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
+            <div style="display:flex;gap:12px;margin:14px 0 18px;flex-wrap:wrap;">
+              <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo1" type="checkbox" checked> 관리메모</label>
+              <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo2" type="checkbox" checked> 관리메모2</label>
+              <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-hold" type="checkbox" checked> 배송보류</label>
+            </div>
+            <button id="smu0608-start" style="width:100%;height:42px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:900;cursor:pointer;">시작</button>
+          </div>
+          <div id="smu0608-work" style="display:none;">
+            <div id="smu0608-status" style="white-space:pre-line;line-height:1.5;color:#e5e7eb;font-size:13px;min-height:42px;"></div>
+            <div style="height:7px;border-radius:999px;background:#0f172a;overflow:hidden;margin:12px 0;"><div id="smu0608-bar" style="height:100%;width:0%;background:#3b82f6;transition:width .2s;"></div></div>
+            <pre id="smu0608-log" style="max-height:260px;overflow:auto;background:#0f172a;border:1px solid #273449;border-radius:8px;color:#a7f3d0;padding:10px;font-size:11px;line-height:1.45;white-space:pre-wrap;"></pre>
+            <button id="smu0608-stop" style="width:100%;height:38px;border:0;border-radius:8px;background:#ef4444;color:#fff;font-weight:900;cursor:pointer;">중단</button>
+          </div>
+          <button id="smu0608-close" style="width:100%;height:36px;margin-top:12px;border:1px solid #475569;border-radius:8px;background:transparent;color:#94a3b8;cursor:pointer;">닫기</button>
+        </section>`;
+      document.body.appendChild(overlay);
+      return overlay;
+    }
+    const overlay = buildOverlay();
+    const logEl = $id('smu0608-log');
+    let stopped = false;
+    function addLog(msg) {
+      if (!logEl) return;
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setStatus(msg) {
+      $id('smu0608-status').textContent = msg;
+    }
+    function setBar(done, total) {
+      $id('smu0608-bar').style.width = total ? Math.round(done / total * 100) + '%' : '0%';
+    }
+    $id('smu0608-close').onclick = () => overlay.remove();
+    $id('smu0608-stop').onclick = () => {
+      stopped = true;
+      $id('smu0608-stop').textContent = '중단 중...';
+      $id('smu0608-stop').disabled = true;
+    };
+    $id('smu0608-start').onclick = async () => {
+      const invNo = normal($id('smu0608-inv').value);
+      const date = normal($id('smu0608-date').value);
+      const options = {
+        doMemo1: $id('smu0608-memo1').checked,
+        doMemo2: $id('smu0608-memo2').checked,
+        doHold: $id('smu0608-hold').checked
+      };
+      if (!invNo && !date) {
+        alert('운송장번호 또는 날짜를 입력해주세요.');
+        return;
+      }
+      if (!invNo && !confirm(`${date} 날짜의 미송 데이터를 주문조회에서 순차 반영합니다. 계속할까요?`)) return;
+      $id('smu0608-form').style.display = 'none';
+      $id('smu0608-work').style.display = 'block';
+      stopped = false;
+      try {
+        if (invNo) {
+          setStatus(`1건 처리 준비\n${invNo}`);
+          const built = await buildTaskFromInvoice(invNo);
+          setStatus(`1건 반영 중\n주문번호 ${built.detail.ordNo}`);
+          const result = await applyTask(built.task, options, built.detail);
+          setBar(1, 1);
+          setStatus(`완료\n${result}`);
+          addLog(`완료: ${invNo} / ${result}`);
+          return;
+        }
+        setStatus(`${date} 데이터 조회 중`);
+        const tasks = await collectDateTasks(date);
+        if (!tasks.length) {
+          setStatus('처리할 데이터가 없습니다.');
+          return;
+        }
+        addLog(`처리 대상 ${tasks.length}건`);
+        let ok = 0;
+        let fail = 0;
+        for (let i = 0; i < tasks.length; i++) {
+          if (stopped) break;
+          const item = tasks[i];
+          setStatus(`[${i + 1}/${tasks.length}] ${item.invNo}\n주문번호 ${item.ordNo}`);
+          try {
+            const result = await applyTask(item.task, options);
+            addLog(`✓ ${item.invNo} / ${result}`);
+            ok++;
+          } catch (err) {
+            addLog(`✗ ${item.invNo || item.ordNo}: ${err.message}`);
+            fail++;
+          }
+          setBar(i + 1, tasks.length);
+          await sleep(150);
+        }
+        setStatus(`완료\n성공 ${ok}건 / 실패 ${fail}건${stopped ? ' / 중단됨' : ''}`);
+      } catch (err) {
+        setStatus('오류\n' + err.message);
+        addLog(err.stack || err.message);
+      }
+    };
+  })();
+})();
+  </script>
+  <script>
+    const source = document.getElementById('bookmarklet-source').textContent.trim();
+    const href = 'javascript:' + encodeURIComponent(source);
+    const link = document.getElementById('bookmarklet');
+    link.href = href;
+    document.getElementById('copy').addEventListener('click', async () => {
+      await navigator.clipboard.writeText(href);
+      const status = document.getElementById('copy-status');
+      status.textContent = '복사됨';
+      setTimeout(() => { status.textContent = ''; }, 1800);
+    });
+  </script>
+</body>
+</html>
