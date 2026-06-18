@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0618-insp-misong-row-v1';
+const CACHE_NAME = 'picking-system-0618-sidebar-collapse-v1';
 const APP_ASSETS = [
   './',
   './index.html',

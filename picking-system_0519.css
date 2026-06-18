@@ -4034,3 +4034,29 @@ body{
     font-size:17px !important;
   }
 }
+
+/* Sidebar collapse must win over the sheet/tablet width overrides above. */
+.main.sb-collapsed{
+  grid-template-columns:28px minmax(0,1fr) 282px !important;
+}
+.main.sb-collapsed .sidebar{
+  width:28px !important;
+  max-width:28px !important;
+  min-width:0 !important;
+  padding:0 !important;
+  align-items:center !important;
+  overflow:hidden !important;
+}
+.main.sb-collapsed .sidebar-inner{
+  display:none !important;
+}
+.main.sb-collapsed .sb-collapse-strip{
+  display:flex !important;
+  width:100% !important;
+}
+
+@media (max-width: 1368px) and (orientation: landscape){
+  .main.sb-collapsed{
+    grid-template-columns:28px minmax(0,1fr) 236px !important;
+  }
+}
