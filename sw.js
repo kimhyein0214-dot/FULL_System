@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0618-sidebar-collapse-v1';
+const CACHE_NAME = 'picking-system-0618-sidebar-collapse-v2';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css',
+  './picking-system_0519.css?v=0618-sidebar-collapse-v2',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
