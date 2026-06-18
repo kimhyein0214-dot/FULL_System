@@ -4932,7 +4932,7 @@ function insp_renderDetail(){
       const optName=nameParts.slice(1).join(' / ')||'';
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
-        +'<td style="text-align:center;width:80px;">'
+        +'<td style="text-align:center;width:132px;">'
           +'<div class="insp-photo-cell'+(imgUrl?' has-img':'')+'">'
             +(imgUrl?'<img src="'+imgUrl+'" onerror="this.parentElement.innerHTML=\'🖼\';this.parentElement.classList.remove(\'has-img\')">'  :'🖼')
           +'</div>'
@@ -4963,7 +4963,7 @@ function insp_renderDetail(){
         +'<table class="insp-table" id="insp-main-table">'
           +'<thead><tr>'
             +'<th style="width:28px;text-align:center;font-size:10px;">No</th>'
-            +'<th style="width:80px;text-align:center;">사진</th>'
+            +'<th style="width:132px;text-align:center;">사진</th>'
             +'<th style="min-width:80px;">옵션명</th>'
             +'<th style="text-align:center;width:50px;">수량</th>'
             +'<th style="min-width:110px;">상품명</th>'
@@ -5004,7 +5004,7 @@ function insp_renderDetail(){
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
-      +'<td style="text-align:center;width:80px;">'
+      +'<td style="text-align:center;width:132px;">'
         +'<div class="insp-photo-cell'+(imgUrl?' has-img':'')+'" onclick="insp_openZoomIdx('+i+')" title="0키: 확대">'
           +(imgUrl?'<img src="'+imgUrl+'" onerror="this.parentElement.innerHTML=\'🖼\';this.parentElement.classList.remove(\'has-img\')">':'🖼')
         +'</div>'
@@ -5057,7 +5057,7 @@ function insp_renderDetail(){
         +'<thead><tr>'
           +'<th style="width:28px;text-align:center;font-size:10px;color:#7C7D81;">No</th>'
           +((insp_tabMode==='golditem'||insp_tabMode==='gold')?'<th style="width:60px;text-align:center;font-size:10px;color:#B8860B;background:#FFFBF0;">라벨번호</th>':'')
-          +'<th style="width:80px;text-align:center;">사진</th>'
+          +'<th style="width:132px;text-align:center;">사진</th>'
           +'<th style="min-width:80px;">옵션명</th>'
           +'<th style="text-align:center;width:50px;">수량</th>'
           +'<th style="min-width:110px;">상품명</th>'

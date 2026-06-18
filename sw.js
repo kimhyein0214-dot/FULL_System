@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0618-misong-v3';
+const CACHE_NAME = 'picking-system-0618-photo-fit-v2';
 const APP_ASSETS = [
   './',
   './index.html',
