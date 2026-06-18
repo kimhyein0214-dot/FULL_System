@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0618-insp-focus-v1';
+const CACHE_NAME = 'picking-system-0618-insp-nowrap-v1';
 const APP_ASSETS = [
   './',
   './index.html',

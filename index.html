@@ -5053,7 +5053,7 @@ function insp_renderDetail(){
       +'<button class="insp-dh-done-btn'+(done?' done':'')+'" onclick="insp_toggleDone('+order.no+')">'+(done?'✅ 완료':'완료 처리')+'</button>'
     +'</div>'
     +'<div class="insp-table-wrap">'
-      +'<table class="insp-table" id="insp-main-table">'
+      +'<table class="insp-table'+((insp_tabMode==='golditem'||insp_tabMode==='gold')?' has-label-col':'')+'" id="insp-main-table">'
         +'<thead><tr>'
           +'<th style="width:28px;text-align:center;font-size:10px;color:#7C7D81;">No</th>'
           +((insp_tabMode==='golditem'||insp_tabMode==='gold')?'<th style="width:60px;text-align:center;font-size:10px;color:#B8860B;background:#FFFBF0;">라벨번호</th>':'')
