@@ -4037,26 +4037,29 @@ body{
 
 /* Sidebar collapse must win over the sheet/tablet width overrides above. */
 .main.sb-collapsed{
-  grid-template-columns:28px minmax(0,1fr) 282px !important;
+  grid-template-columns:0 minmax(0,1fr) 282px !important;
 }
 .main.sb-collapsed .sidebar{
-  width:28px !important;
-  max-width:28px !important;
+  width:0 !important;
+  max-width:0 !important;
   min-width:0 !important;
   padding:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
   align-items:center !important;
   overflow:hidden !important;
+  pointer-events:none !important;
 }
 .main.sb-collapsed .sidebar-inner{
   display:none !important;
 }
 .main.sb-collapsed .sb-collapse-strip{
-  display:flex !important;
-  width:100% !important;
+  display:none !important;
 }
 
 @media (max-width: 1368px) and (orientation: landscape){
   .main.sb-collapsed{
-    grid-template-columns:28px minmax(0,1fr) 236px !important;
+    grid-template-columns:0 minmax(0,1fr) 236px !important;
   }
 }

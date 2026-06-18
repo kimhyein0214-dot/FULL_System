@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0618-sidebar-collapse-v2">
+<link rel="stylesheet" href="picking-system_0519.css?v=0618-sidebar-option-v3">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -4910,6 +4910,21 @@ function insp_clickItem(i){
   insp_renderList(); insp_renderDetail();
 }
 
+function insp_itemDisplayParts(it){
+  const rawName=String(it?.name||it?.p_name||it?.seller_product_name||'').trim();
+  let option=String(it?.option||it?.seller_option_name||it?.p_option||'').trim();
+  let product=rawName;
+  if(!option&&rawName.includes(' / ')){
+    const parts=rawName.split(' / ');
+    product=parts.shift()||'';
+    option=parts.join(' / ').trim();
+  }
+  if(option&&product.endsWith(' / '+option)){
+    product=product.slice(0,-(' / '+option).length).trim();
+  }
+  return {prodName:product, optName:option};
+}
+
 function insp_renderDetail(){
   const panel=document.getElementById('insp-detail-panel');
   if(!panel) return;
@@ -4927,9 +4942,7 @@ function insp_renderDetail(){
       const shortInfo = (order.shortItems||[]).find(s=>s.code===it.code);
       const is14k=isGold(it);
       const imgUrl=photoMap&&photoMap[it.code]?photoMap[it.code]:'';
-      const nameParts=(it.name||'').split(' / ');
-      const prodName=nameParts[0]||'';
-      const optName=nameParts.slice(1).join(' / ')||'';
+      const {prodName,optName}=insp_itemDisplayParts(it);
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
         +'<td style="text-align:center;width:132px;">'
@@ -4995,9 +5008,7 @@ function insp_renderDetail(){
     const memoId='insp-memo-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal=insp_itemMemos[insp_memoKey(order.no,it.code)]||'';
     const imgUrl=it.imageUrl||(photoMap&&photoMap[it.code])||'';
-    const nameParts=(it.name||'').split(' / ');
-    const prodName=nameParts[0]||'';
-    const optName=nameParts.slice(1).join(' / ')||'';
+    const {prodName,optName}=insp_itemDisplayParts(it);
     const _isLabelTab=insp_tabMode==='golditem'||insp_tabMode==='gold';
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
     const optionText=optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>';
