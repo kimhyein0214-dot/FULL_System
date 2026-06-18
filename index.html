@@ -1337,6 +1337,7 @@ try{
 }catch(e){}
 let jos=[], josInfo=[];
 let checked={},shortage={},drawer={},holded={},memoData={};
+let shortageDate={}; // no-code -> first/known shortage date
 let seqToReal={}; // print_seq_no/work_seq_no → 실제 우체국 송장번호
 let realToSeq={}; // 실제 우체국 송장번호 → print_seq_no/work_seq_no
 var insp_itemMemos = {}; // 검품메모 (피킹메모와 연동)
@@ -1897,6 +1898,9 @@ async function loadData(silent=false,preserveView=false){
     const {data:pickData}=todayOrdNos.length
       ? await db.from('picking').select('*').in('ord_no',todayOrdNos)
       : {data:[]};
+    const {data:shortageRows}=todayOrdNos.length
+      ? await db.from('shortage').select('*').in('ord_no',todayOrdNos)
+      : {data:[]};
     const outputOrders=buildOutputOrders(ordersData,itemsByOrd,pickData||[]);
 
     // 3. 작업번호 부여 + 브릿지맵
@@ -1946,13 +1950,13 @@ async function loadData(silent=false,preserveView=false){
     });
 
     // 4.5 셀피아 관리메모 → drawer/shortage 초기 시딩 (picking 테이블이 덮어씌움)
-    shortage={}; drawer={};
+    shortage={}; shortageDate={}; drawer={};
     (itemsData||[]).forEach(it=>{
       const no=ordToNo[it.ord_no]; if(!no) return;
       const memo1=cleanSellpiaManageMemo(it.o_shop_memo);
       const memo2=cleanSellpiaManageMemo(it.o_shop_memo2);
       if(memo1&&!drawer[no]) drawer[no]=memo1;
-      if(memo2){const qty=parseInt(memo2)||0; if(qty>0&&qty<10000) shortage[no+'-'+(it.p_code||'')]=qty;}
+      if(memo2){const qty=parseInt(memo2)||0; if(qty>0&&qty<10000){const k=no+'-'+(it.p_code||''); shortage[k]=qty; shortageDate[k]=selectedDate;}}
     });
 
     // 5. picking 테이블 → checked/shortage/drawer/holded/memo (스크래퍼 시딩값 위에 덮어씌움)
@@ -1965,10 +1969,17 @@ async function loadData(silent=false,preserveView=false){
       _pickedOrdNos.add(String(noMap[no]?.ord_no||''));
       const k=no+'-'+row.p_code;
       if(row.is_checked) checked[k]=true;
-      if((row.shortage_qty||0)>0) shortage[k]=row.shortage_qty;
+      if((row.shortage_qty||0)>0){ shortage[k]=row.shortage_qty; if(row.shortage_date||row.created_at||row.created||row.updated_at) shortageDate[k]=row.shortage_date||row.created_at||row.created||row.updated_at; }
       if(row.drawer_no) drawer[no]=row.drawer_no;
       if(row.hold) holded[k]=true;
       if(row.memo) memoData[k]=row.memo;
+    });
+    (shortageRows||[]).forEach(row=>{
+      const no=invToNo[row.inv_no]||ordToNo[row.ord_no]; if(!no||!row.p_code) return;
+      const k=no+'-'+row.p_code;
+      const q=shortageRowQty(row);
+      if(q>0&&!shortage[k]) shortage[k]=q;
+      if(q>0) shortageDate[k]=getShortageBaseDate(row,no)||shortageDate[k]||selectedDate;
     });
     ORDERS_ALL.forEach(o=>{
       // 표시용 최신 상태 보정. 정렬 자체는 번호 안정성을 위해 로딩 초기에 계산한 planned_print_seq_no를 사용합니다.
@@ -2319,14 +2330,15 @@ function renderRightDetail(no){
   const detailRealInv=displayInvoiceNo(no,order);
   document.getElementById('rp-dr').innerHTML=`<div class="rp-dr-main"><span class="rp-dr-lbl">서랍번호</span><button class="rp-dr-btn${drVal?' has-val':''}" onclick="openKeypad('${no}','${esc(drVal)}',this)">${drVal?drVal:'서랍번호 입력'}</button></div>${detailRealInv?`<div class="rp-real-invoice">송장 ${esc(detailRealInv)}</div>`:''}`;
 
-  document.getElementById('rp-scroll').innerHTML=order.items.map((it,idx)=>{
+  const detailItems=mergeOrderItemsForDisplay(order);
+  document.getElementById('rp-scroll').innerHTML=detailItems.map((it,idx)=>{
     const c=multi[it.prodCode||it.code]||{b:'#B0BEC5'};
     const gItem=isGold(it);
     const done2=checked[no+'-'+it.code], isHold=!!holded[no+'-'+it.code], shVal=shortage[no+'-'+it.code]||0;
-    const seq=idx+1;
-    const itemTitle=itemNameWithOption(it);
+    const seq=it.seqLabel||idx+1;
+    const itemTitle=it.displayName||itemNameWithOption(it);
     const canCheck=!gItem&&!isHold;
-    return `<div class="rp-item${gItem?' gold':''}${done2?' done':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><button class="rp-check-btn${done2?' checked':''}" ${canCheck?`onclick="event.stopPropagation();tog(${no},'${esc(it.code)}')"`:'disabled'}>${done2?'✓':''}</button><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:18px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' 골드':''} ${renderLocationBadge(it.location)}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
+    return `<div class="rp-item${gItem?' gold':''}${done2?' done':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><button class="rp-check-btn${done2?' checked':''}" ${canCheck?`onclick="event.stopPropagation();tog(${no},'${esc(it.code)}')"`:'disabled'}>${done2?'✓':''}</button><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:24px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' 골드':''} ${renderLocationBadge(it.location)}${it.mergedCount>1?` <span class="merge-badge">${it.mergedCount}줄</span>`:''}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
   }).join('');
 }
 
@@ -2477,6 +2489,55 @@ function buildMultiMap(jo){
   return multi;
 }
 
+function uniqText(list){
+  return [...new Set((list||[]).map(v=>String(v||'').trim()).filter(Boolean))];
+}
+function buildMergedItemName(rows){
+  rows=rows||[];
+  if(!rows.length) return '';
+  const fullNames=uniqText(rows.map(itemNameWithOption));
+  if(fullNames.length<=1) return fullNames[0]||'';
+  const baseName=String(rows[0].name||'').trim();
+  const options=uniqText(rows.map(r=>r.seller_option_name||r.option));
+  if(baseName&&options.length){
+    const optText=options.slice(0,3).join(' · ')+(options.length>3?' 외 '+(options.length-3):'');
+    return baseName+' / '+optText;
+  }
+  return fullNames[0]+' 외 '+(fullNames.length-1);
+}
+function mergeSameInvoiceCodeRows(rows){
+  const groups=new Map();
+  (rows||[]).forEach(row=>{
+    const key=[row.no,row.code].join('||');
+    if(!groups.has(key)) groups.set(key,[]);
+    groups.get(key).push(row);
+  });
+  const merged=[];
+  groups.forEach(group=>{
+    const base={...group[0]};
+    const seqs=group.map(r=>r.seq).filter(v=>v!==undefined&&v!==null);
+    base.qty=group.reduce((sum,r)=>sum+(Number(r.qty)||1),0);
+    base.seq=seqs[0]??base.seq;
+    base.seqLabel=seqs.length>1?seqs.join('·'):base.seq;
+    base.mergedCount=group.length;
+    base.displayName=buildMergedItemName(group);
+    base.optionSummary=uniqText(group.map(r=>r.seller_option_name||r.option));
+    return merged.push(base);
+  });
+  return merged;
+}
+function mergeOrderItemsForDisplay(order){
+  if(!order||!order.items) return [];
+  return mergeSameInvoiceCodeRows(order.items.map((it,idx)=>({
+    ...it,
+    no:order.no,
+    buyer:order.buyer||'',
+    recv:order.recv||'',
+    seq:idx+1,
+    prodCode:it.prodCode||''
+  })));
+}
+
 function renderLeft(){
   const wrap=document.getElementById('stack-wrap');
   if(!wrap) return;
@@ -2511,6 +2572,7 @@ function renderLeft(){
     const noDrawerNos=new Set(src.filter(o=>o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0)&&!String(drawer[o.no]||'').trim()).map(o=>o.no));
     flat=flat.filter(f=>noDrawerNos.has(f.no));
   }
+  flat=mergeSameInvoiceCodeRows(flat);
 
   const joShort=reg.some(o=>o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0));
   // getJoLabel은 송장당 1회만 호출 (O(n²) → O(n))
@@ -2552,7 +2614,7 @@ function renderLeft(){
     const cellColor=done?'#00CC66':f.goldItem?'var(--gold)':isHold?'#E65100':isM?c.t:'var(--text)';
 
     const joLabel=_joLabelCache.get(f.no)||'';
-    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
+    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
         <div class="pr-photo-wrap"><div class="pr-photo">${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div>
@@ -2560,7 +2622,7 @@ function renderLeft(){
       <div class="deck-content">
         <div class="deck-card-head">
           <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${_locBadge}${_pairBadge}</div>
-          <div class="deck-card-name">${esc(itemNameWithOption(f))}</div>
+          <div class="deck-card-name">${esc(f.displayName||itemNameWithOption(f))}${f.mergedCount>1?` <span class="merge-badge">${f.mergedCount}줄 병합</span>`:''}</div>
           <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
         </div>
         <div class="deck-card-body">
@@ -2569,7 +2631,7 @@ function renderLeft(){
               <span class="pr-cell-lbl">수량</span><span class="pr-cell-val">${f.qty}개</span>
               ${f.inGoldInv?'<span class="gold-invoice-mini">골드송장</span>':''}
             </div>
-            <div class="pr-cell order-cell">${renderJoSlots(f.no,f.seq)}</div>
+            <div class="pr-cell order-cell">${renderJoSlots(f.no,f.seqLabel??f.seq)}</div>
           </div>
           <div class="deck-actions">
             <div class="pr-cell pr-memo-cell" onclick="event.stopPropagation()"><span class="pr-cell-lbl">메모</span><input class="pr-field-input" type="text" placeholder="—" value="${esc(memoData[f.no+'-'+f.code]||'')}" onclick="event.stopPropagation()" onblur="saveMemo(${f.no},'${esc(f.code)}',this.value)"></div>
@@ -2600,10 +2662,7 @@ function initDeckScroll(sc){
   sc.onwheel=(e)=>{
     const target=e.target;
     if(target?.closest?.('input,textarea,select')) return;
-    e.preventDefault();
-    if(sc._deckWheelLock) return;
-    const dir=e.deltaY>0?1:-1;
-    moveDeck(sc,dir);
+    sc._deckWheelLock=false;
   };
   sc.addEventListener('touchstart',e=>{ sc._deckTouchY=e.touches?.[0]?.clientY||0; },{passive:true});
   sc.addEventListener('touchend',e=>{
@@ -2611,8 +2670,7 @@ function initDeckScroll(sc){
     const diff=(sc._deckTouchY||0)-endY;
     if(Math.abs(diff)>24){
       sc._deckIgnoreClick=true;
-      moveDeck(sc,diff>0?1:-1);
-      setTimeout(()=>{sc._deckIgnoreClick=false;},280);
+      setTimeout(()=>{sc._deckIgnoreClick=false;},120);
     }
   },{passive:true});
 }
@@ -2653,11 +2711,7 @@ function handleDeckCardClick(e,no,card){
   const sc=card.closest('.deck-scroll');
   if(sc?._deckIgnoreClick) return;
   selectInv(no);
-  if(sc&&!card.classList.contains('deck-current')){
-    sc._deckWheelLock=true;
-    centerDeckCard(sc,card,'smooth');
-    setTimeout(()=>{sc._deckWheelLock=false;updateDeckFocus(sc);},260);
-  }else if(sc){
+  if(sc){
     updateDeckFocus(sc);
   }
 }
@@ -2678,7 +2732,7 @@ function scrollDeckAfterToggle(no,code){
   const cards=[...sc.querySelectorAll('.pick-row')];
   const idx=cards.indexOf(row);
   const next=cards.slice(idx+1).find(card=>!card.classList.contains('is-gold')&&!card.classList.contains('is-hold'))||cards[idx+1];
-  if(next) setTimeout(()=>centerDeckCard(sc,next,'smooth'),120);
+  if(next) setTimeout(()=>next.scrollIntoView({block:'nearest',behavior:'smooth'}),80);
 }
 
 function openZoneSortPopup(){
@@ -2785,6 +2839,9 @@ function selectInv(no){
   document.querySelectorAll('.inv-card').forEach(c=>{
     c.classList.toggle('selected', Number(c.dataset.inv)===no);
   });
+  document.querySelectorAll('.pick-row[data-inv]').forEach(row=>{
+    row.classList.toggle('is-selected', Number(row.dataset.inv)===no);
+  });
   renderRightDetail(no);
 }
 
@@ -2886,12 +2943,14 @@ function renderJoSlots(invNo, seq){
   if(!info) return '';
   const size=Math.min(info.total,JO_SIZE);
   const slotCols=[];
+  const seqText=seq!=null?String(seq):'';
+  const isMultiSeq=seqText.length>1;
   for(let i=0;i<size;i++){
     const active=i===info.pos;
     slotCols.push(
       `<div class="jo-slot-col">`
       +`<span class="jo-slot-num">${i+1}</span>`
-      +`<div class="jo-slot${active?' active':''}">${active&&seq!=null?seq:''}</div>`
+      +`<div class="jo-slot${active?' active':''}${active&&isMultiSeq?' multi':''}">${active?seqText:''}</div>`
       +`</div>`
     );
   }
@@ -2962,13 +3021,14 @@ function syncMisongItem(no, code){
   const k=no+'-'+code;
   const sh=shortage[k]||0;
   const dr=String(drawer[no]||'');
+  if(sh>0&&!shortageDate[k]) shortageDate[k]=new Date().toISOString();
   const idx=misongPickingData.findIndex(r=>r.seq===no&&r.code===code);
   if(sh>0){
-    if(idx>=0){ misongPickingData[idx].shortage=sh; misongPickingData[idx].drawer=dr; }
+    if(idx>=0){ misongPickingData[idx].shortage=sh; misongPickingData[idx].drawer=dr; misongPickingData[idx].shortageDate=shortageDate[k]||misongPickingData[idx].shortageDate||''; }
     else{
       const order=ORDERS_ALL.find(o=>o.no===no);
       const item=order?.items.find(it=>it.code===code);
-      if(order&&item) misongPickingData.push({seq:no,code,name:item.name||'',buyer:order.buyer||'',shortage:sh,drawer:dr});
+      if(order&&item) misongPickingData.push({seq:no,code,name:item.name||'',buyer:order.buyer||'',shortage:sh,drawer:dr,shortageDate:shortageDate[k]||selectedDate});
     }
   } else {
     if(idx>=0) misongPickingData[idx].shortage=0;
@@ -3939,7 +3999,7 @@ async function setMisongStatus(inv, code, status){
       'CS 발송대기는 상태 표시만 변경합니다.\n\n'
       +'대상: '+workNoText(seqNo)+' / '+code+'\n'
       +'셀피아 관리메모1, 관리메모2, 배송보류는 여기서 반영하지 않습니다.\n\n'
-      +'검품/포장 완료 후 내일출고 알림 대상이면 미송피킹 화면의 [내일출고 발송대기]를 사용하세요.\n'
+      +'검품/포장 완료 후 내일출고 알림 대상이면 검품 탭에서 처리하세요.\n'
       +'그래도 CS 상태만 발송대기로 표시할까요?'
     )) return;
   }
@@ -5438,8 +5498,6 @@ function setupRealtime(){
 let misongPickingData = [];
 let misongViewMode = 'inv'; // 'inv' | 'code'
 let misongSearchQ = '';
-let misongWaitingSet = new Set(); // 발송대기 처리된 seq Set
-try{ const s=localStorage.getItem('misongWaitingSet'); if(s) misongWaitingSet=new Set(JSON.parse(s)); }catch(e){}
 
 function setMisongView(mode){
   misongViewMode = mode;
@@ -5458,13 +5516,81 @@ async function loadMisongPickingData(showToast=false){
       o.items.forEach(it=>{
         const k=o.no+'-'+it.code;
         const sh=shortage[k]||0;
-        if(sh>0) misongPickingData.push({seq:o.no,code:it.code,name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||''});
+        if(sh>0) misongPickingData.push({seq:o.no,code:it.code,name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
       });
     });
   }
   renderMisongList();
   renderMisongSidebar();
   if(showToast) toast('✅ 미송피킹 '+misongPickingData.length+'건');
+}
+
+function formatMiniDate(value){
+  const raw=String(value||'').trim();
+  if(!raw) return '';
+  const ord=raw.match(/^(\d{4})(\d{2})(\d{2})/);
+  let y,m,d;
+  if(ord){ y=Number(ord[1]); m=Number(ord[2]); d=Number(ord[3]); }
+  else{
+    const ko=raw.match(/^(\d{4})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})/);
+    if(ko){ y=Number(ko[1]); m=Number(ko[2]); d=Number(ko[3]); }
+    else{
+      return '';
+    }
+  }
+  if(!y||!m||!d||m<1||m>12||d<1||d>31) return '';
+  const dt=new Date(y,m-1,d);
+  if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d) return '';
+  const nowY=new Date().getFullYear();
+  return y&&y!==nowY ? String(y).slice(2)+'/'+m+'/'+d : m+'/'+d;
+}
+function renderMisongDateBadge(row){
+  const label=formatMiniDate(row?.shortageDate||row?.date||row?.created_at||row?.updated_at);
+  return label?`<span class="misong-date-badge">미송 ${label}</span>`:'';
+}
+function htmlEsc(s){
+  return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function getMisongMaps(){
+  const codeToProdCode = {};
+  const invItemSeqMap = {};
+  const itemNameMap = {};
+  if(ORDERS_ALL && ORDERS_ALL.length){
+    ORDERS_ALL.forEach(o=>{
+      o.items.forEach((it, idx)=>{
+        const key=String(o.no)+'-'+it.code;
+        if(it.code && it.prodCode) codeToProdCode[it.code] = it.prodCode;
+        invItemSeqMap[key] = idx + 1;
+        itemNameMap[key] = itemNameWithOption(it);
+      });
+    });
+  }
+  return {codeToProdCode,invItemSeqMap,itemNameMap};
+}
+function renderMisongItemRow(r,maps,extraClass=''){
+  const isDone=r.shortage===0;
+  const prodCode = maps.codeToProdCode[r.code]||r.code;
+  const imgUrl = photoMap[prodCode]||photoMap[r.code]||'';
+  const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
+  const itemName = maps.itemNameMap[String(r.seq)+'-'+r.code]||r.name||'';
+  const imgHtml = imgUrl
+    ? `<img src="${imgUrl}" class="misong-thumb-img" loading="lazy" onerror="this.style.display='none';this.parentNode.textContent='🖼'">`
+    : '🖼';
+  const e2 = s=>String(s||'').replace(/'/g,"\\'");
+  return `<div class="misong-row ${isDone?'done':''} ${extraClass}">
+    <button class="misong-check ${isDone?'checked':''}" onclick="${isDone?`adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',1)`: `completeMisong('${e2(r.seq)}','${e2(r.code)}')`}" title="${isDone?'완료 취소':'완료'}">${isDone?'✓':''}</button>
+    <div class="misong-thumb" onclick="${imgUrl?`zoomPhoto('${imgUrl.replace(/'/g,"\\'")}')`:''}">${imgHtml}</div>
+    <div class="misong-seq">${itemSeq||'—'}</div>
+    <div class="misong-main">
+      <div class="misong-code-line"><span class="misong-code">${htmlEsc(prodCode)}</span>${renderMisongDateBadge(r)}</div>
+      <div class="misong-name">${htmlEsc(itemName)}</div>
+    </div>
+    <div class="misong-short-ctrl">
+      <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',-1)">−</button>
+      <span class="${isDone?'done':'short'}">${isDone?'✓':r.shortage}</span>
+      <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',1)">+</button>
+    </div>
+  </div>`;
 }
 
 function renderMisongList(){
@@ -5496,7 +5622,7 @@ function renderMisongList(){
     ? searched.filter(r=>r.shortage===0)
     : misongViewMode==='nodrawer'
       ? searched.filter(r=>r.shortage>0&&!String(drawer[r.seq]||r.drawer||'').trim())
-      : searched.filter(r=>r.shortage>0);
+      : searched;
 
   if(!filtered.length){
     const emptyMsg = q ? '검색 결과 없음'
@@ -5508,61 +5634,39 @@ function renderMisongList(){
   }
 
   const e2 = s=>String(s||'').replace(/'/g,"\\'");
+  const maps = getMisongMaps();
 
   if(misongViewMode==='code'){
     // 자사코드별 보기
-    const codeToProdCode2 = {};
-    const invItemSeqMap2 = {};
-    if(ORDERS_ALL && ORDERS_ALL.length){
-      ORDERS_ALL.forEach(o=>{
-        o.items.forEach((it, idx)=>{
-          if(it.code && it.prodCode) codeToProdCode2[it.code] = it.prodCode;
-          invItemSeqMap2[String(o.no)+'-'+it.code] = idx + 1;
-        });
-      });
-    }
     const codeMap = new Map();
     filtered.forEach(r=>{
       if(!codeMap.has(r.code)) codeMap.set(r.code,[]);
       codeMap.get(r.code).push(r);
     });
-    listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(codeToProdCode2[a[0]]||a[0],codeToProdCode2[b[0]]||b[0])).map(([code,rows])=>{
+    listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(maps.codeToProdCode[a[0]]||a[0],maps.codeToProdCode[b[0]]||b[0])).map(([code,rows])=>{
       const totalSh = rows.reduce((s,r)=>s+r.shortage,0);
       const allDoneC = totalSh===0;
+      const prodCode = maps.codeToProdCode[code]||code;
       const itemsHtml = rows.map(r=>{
-        const isDone=r.shortage===0;
-        const dr=String(r.drawer||'').trim();
-        const prodCode2 = codeToProdCode2[r.code]||r.code;
-        const imgUrl2 = photoMap[prodCode2]||photoMap[r.code]||'';
-        const itemSeq2 = invItemSeqMap2[String(r.seq)+'-'+r.code]||'';
-        const imgHtml2 = imgUrl2
-          ? `<img src="${imgUrl2}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;" loading="lazy" onerror="this.style.display='none';this.parentNode.textContent='🖼'">`
-          : '🖼';
-        return `<div style="display:grid;grid-template-columns:44px 52px 1fr 130px 110px auto;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #D9CBBA;background:${isDone?'#EEE8DF':'#FFF8F0'};">
-          <div onclick="${imgUrl2?`zoomPhoto('${imgUrl2.replace(/'/g,"\\'")}')`:''}" style="width:44px;height:44px;border-radius:8px;border:1.5px solid #D9CBBA;background:#F2E3D0;display:flex;align-items:center;justify-content:center;font-size:18px;color:#B1C7DE;overflow:hidden;${imgUrl2?'cursor:pointer;':''}flex-shrink:0;">${imgHtml2}</div>
-          <div style="text-align:center;">
-            <div style="font-size:26px;font-weight:900;letter-spacing:1px;color:${itemSeq2?'var(--active)':'#B1C7DE'};">${itemSeq2||'—'}</div>
+        const dr=String(drawer[r.seq]||r.drawer||'').trim();
+        const realInv=seqToReal[r.seq]||'';
+        return `<div class="misong-code-row">
+          <div class="misong-drawer-pill ${dr?'':'empty'}" onclick="event.stopPropagation();openKeypad('${e2(r.seq)}','${e2(dr)}',this)" title="서랍번호 입력">${dr||'서랍입력'}</div>
+          <div class="misong-code-meta" onclick="openPopup('${e2(r.seq)}')">
+            <strong>${htmlEsc(r.seq)}번</strong>
+            <span>${htmlEsc(r.buyer||'')}</span>
+            ${realInv?`<em>${htmlEsc(realInv)}</em>`:''}
           </div>
-          <span style="font-size:11px;color:#888;cursor:pointer;" onclick="openPopup(${r.seq})">${r.seq}번 · ${r.buyer||''}</span>
-          <div style="text-align:center;">
-            <div style="font-size:20px;font-weight:900;letter-spacing:1px;color:${dr?'var(--active)':'#B1C7DE'};">${dr||'—'}</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:4px;justify-content:center;">
-            <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',-1)" style="width:28px;height:28px;border-radius:6px;border:1px solid #D9CBBA;background:#F2E3D0;color:#2A2A2A;font-size:16px;cursor:pointer;">−</button>
-            <span style="min-width:32px;text-align:center;font-size:16px;font-weight:900;color:${isDone?'var(--done)':'var(--short)'};">${isDone?'✓':r.shortage}</span>
-            <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',1)" style="width:28px;height:28px;border-radius:6px;border:1px solid #D9CBBA;background:#F2E3D0;color:#2A2A2A;font-size:16px;cursor:pointer;">+</button>
-          </div>
-          ${isDone?'<button onclick="adjMisongShortage(\''+e2(r.seq)+'\',\''+e2(r.code)+'\',1)" style="padding:4px 10px;border-radius:6px;border:1.5px solid #D9CBBA;background:#F2E3D0;color:#888;font-size:11px;font-weight:700;cursor:pointer;" title="완료 취소">↩</button>':'<button onclick="completeMisong(\''+e2(r.seq)+'\',\''+e2(r.code)+'\')" style="padding:4px 10px;border-radius:6px;border:none;background:var(--done);color:#fff;font-size:11px;font-weight:700;cursor:pointer;">완료</button>'}
+          ${renderMisongItemRow({...r,drawer:dr},maps,'code-mode')}
         </div>`;
       }).join('');
-      return `<div style="border:1.5px solid #D9CBBA;border-radius:10px;overflow:hidden;margin:8px;${allDoneC?'opacity:0.5;':''}">
-        <div style="padding:10px 16px;background:#F2E3D0;display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;">
-          <span style="font-size:16px;font-weight:900;color:${allDoneC?'var(--done)':'#2A2A2A'};">${codeToProdCode2[code]||code}</span>
-          <span style="font-size:11px;color:#888;">${rows.length}건</span>
-          <span style="font-size:14px;font-weight:900;color:${allDoneC?'var(--done)':'var(--short)'};">${allDoneC?'✓ 완료':'부족 합계 '+totalSh}</span>
-        </div>
-        <div style="display:grid;grid-template-columns:44px 52px 1fr 130px 110px auto;gap:0;padding:4px 14px;background:#EEE8DF;font-size:10px;color:#888;font-weight:700;">
-          <span></span><span style="text-align:center;">#</span><span>송장·주문자</span><span style="text-align:center;">서랍번호</span><span style="text-align:center;">부족수량</span><span></span>
+      return `<div class="misong-group ${allDoneC?'done':''}">
+        <div class="misong-group-head code-head">
+          <div>
+            <strong>${htmlEsc(prodCode)}</strong>
+            <span>${rows.length}건</span>
+          </div>
+          <b class="${allDoneC?'done':'short'}">${allDoneC?'완료':'부족 '+totalSh}</b>
         </div>
         ${itemsHtml}
       </div>`;
@@ -5570,17 +5674,6 @@ function renderMisongList(){
 
   } else {
     // 송장별 보기 (기본)
-    // 상품코드 → prodCode 맵 및 전체 순서 번호 맵 구성
-    const codeToProdCode = {};
-    const invItemSeqMap = {};  // invNo-code → 해당 송장 내 상품 순서
-    if(ORDERS_ALL && ORDERS_ALL.length){
-      ORDERS_ALL.forEach(o=>{
-        o.items.forEach((it, idx)=>{
-          if(it.code && it.prodCode) codeToProdCode[it.code] = it.prodCode;
-          invItemSeqMap[String(o.no)+'-'+it.code] = idx + 1;
-        });
-      });
-    }
     const invMap = new Map();
     filtered.forEach(r=>{
       if(!invMap.has(r.seq)) invMap.set(r.seq,[]);
@@ -5590,112 +5683,26 @@ function renderMisongList(){
       const first=rows[0];
       const allDone=rows.every(r=>r.shortage===0);
       const dr=String(drawer[seq]||first.drawer||'').trim();
-      const itemsHtml = rows.map(r=>{
-        const isDone=r.shortage===0;
-        const prodCode = codeToProdCode[r.code]||r.code;
-        const imgUrl = photoMap[prodCode]||photoMap[r.code]||'';
-        const itemSeq = invItemSeqMap[String(r.seq)+'-'+r.code]||'';
-        const imgHtml = imgUrl
-          ? `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;" loading="lazy" onerror="this.style.display='none';this.parentNode.textContent='🖼'">`
-          : '🖼';
-        return `<div style="display:grid;grid-template-columns:44px 52px 1fr 115px auto;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #D9CBBA;background:${isDone?'#EEE8DF':'#FFF8F0'};">
-          <div onclick="${imgUrl?`zoomPhoto('${imgUrl.replace(/'/g,"\\'")}')`:''}" style="width:44px;height:44px;border-radius:8px;border:1.5px solid #D9CBBA;background:#F2E3D0;display:flex;align-items:center;justify-content:center;font-size:18px;color:#B1C7DE;overflow:hidden;${imgUrl?'cursor:pointer;':''}flex-shrink:0;">${imgHtml}</div>
-          <div style="text-align:center;">
-            <div style="font-size:26px;font-weight:900;letter-spacing:1px;color:${itemSeq?'var(--active)':'#B1C7DE'};">${itemSeq||'—'}</div>
+      const realInv=seqToReal[seq]||'';
+      const totalSh=rows.reduce((s,r)=>s+(r.shortage||0),0);
+      const itemsHtml = rows.map(r=>renderMisongItemRow({...r,drawer:dr},maps)).join('');
+      return `<div class="misong-group ${allDone&&misongViewMode!=='done'?'dim':''}">
+        <div class="misong-group-head">
+          <div class="misong-drawer-pill ${dr?'':'empty'}" onclick="event.stopPropagation();openKeypad('${e2(seq)}','${e2(dr)}',this)" title="서랍번호 입력">${dr||'서랍입력'}</div>
+          <div class="misong-inv-title" onclick="openPopup('${e2(seq)}')">
+            <strong>${htmlEsc(first.buyer||'')}</strong>
+            ${realInv?`<span>${htmlEsc(realInv)}</span>`:''}
           </div>
-          <div>
-            <span style="font-size:12px;font-weight:800;color:${isDone?'#999':'#2A2A2A'};">${prodCode}</span>
-            <span style="font-size:11px;color:#888;margin-left:6px;">${r.name||''}</span>
+          <div class="misong-head-stats">
+            <span>${rows.length}종</span>
+            <b class="${allDone?'done':'short'}">${allDone?'완료':'부족 '+totalSh}</b>
           </div>
-          <div style="display:flex;align-items:center;gap:4px;justify-content:center;">
-            <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',-1)" style="width:30px;height:30px;border-radius:7px;border:1px solid #D9CBBA;background:#F2E3D0;color:#2A2A2A;font-size:17px;cursor:pointer;">−</button>
-            <span style="min-width:34px;text-align:center;font-size:17px;font-weight:900;color:${isDone?'var(--done)':'var(--short)'};">${isDone?'✓':r.shortage}</span>
-            <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',1)" style="width:30px;height:30px;border-radius:7px;border:1px solid #D9CBBA;background:#F2E3D0;color:#2A2A2A;font-size:17px;cursor:pointer;">+</button>
-          </div>
-          ${isDone?'<button onclick="adjMisongShortage(\''+e2(r.seq)+'\',\''+e2(r.code)+'\',1)" style="padding:5px 10px;border-radius:6px;border:1.5px solid #D9CBBA;background:#F2E3D0;color:#888;font-size:11px;font-weight:700;cursor:pointer;" title="완료 취소">↩</button>':'<button onclick="completeMisong(\''+e2(r.seq)+'\',\''+e2(r.code)+'\')" style="padding:5px 10px;border-radius:6px;border:none;background:var(--done);color:#fff;font-size:11px;font-weight:700;cursor:pointer;">완료</button>'}
-        </div>`;
-      }).join('');
-      // 발송대기 상태 확인
-      const isWaiting = misongWaitingSet.has(String(seq));
-      return `<div style="border:1.5px solid ${isWaiting?'var(--hold)':'#D9CBBA'};border-radius:10px;overflow:hidden;margin:8px;${allDone&&misongViewMode!=='done'?'opacity:0.5;':''}">
-        <div style="padding:10px 16px;background:${allDone?'#EEE8DF':isWaiting?'rgba(184,122,58,0.08)':'#F2E3D0'};display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:12px;">
-          <div style="font-size:16px;font-weight:900;color:${allDone?'var(--done)':'#2A2A2A'};cursor:pointer;" onclick="openPopup(${seq})">${seq}번 · ${first.buyer||''} ${allDone?'✓':''}</div>
-          <div onclick="event.stopPropagation();openKeypad(${seq},'${dr}',this)" style="text-align:center;cursor:pointer;padding:4px 8px;border-radius:8px;border:1.5px solid ${dr?'#B1C7DE':'#E05252'};background:${dr?'transparent':'rgba(224,82,82,0.07)'};transition:background 0.12s;" title="서랍번호 입력">
-            <div style="font-size:${dr?'26':'14'}px;font-weight:900;letter-spacing:2px;color:${dr?'var(--active)':'var(--short)'};">${dr||'서랍입력'}</div>
-          </div>
-          <span style="font-size:12px;color:#888;">${rows.length}종</span>
+          <div class="misong-work-no" onclick="openPopup('${e2(seq)}')" title="작업순서번호">${htmlEsc(seq)}번</div>
         </div>
         ${itemsHtml}
-        ${!allDone?`<div style="padding:7px 14px;background:#F9F3EC;border-top:1px solid #E8DACE;display:flex;justify-content:flex-end;">
-          <button onclick="event.stopPropagation();setInvWaiting(${seq})" style="padding:4px 12px;border-radius:6px;border:1.5px solid ${isWaiting?'var(--hold)':'var(--hold)'};background:${isWaiting?'var(--hold)':'rgba(184,122,58,0.15)'};color:${isWaiting?'#fff':'var(--hold)'};font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;" title="오늘 발송하지 못한 검품/포장 완료건: 관리메모1 표시, 관리메모2 ㅁ, 배송보류 해제">${isWaiting?'⏸ 내일출고 대기 중 (취소)':'⏸ 내일출고 발송대기'}</button>
-        </div>`:''}
       </div>`;
     }).join('');
   }
-}
-
-function getDefaultWaitingMemo(){
-  try{return localStorage.getItem('misongWaitingMemo')||'!!';}catch(e){return '!!';}
-}
-
-async function setInvWaiting(seq){
-  const realInv = seqToReal[seq] || String(seq);
-  const items = misongPickingData.filter(r=>String(r.seq)===String(seq));
-  const order = ORDERS_ALL.find(o=>String(o.no)===String(seq));
-  const targetItems = order?.items?.length
-    ? order.items.map(it=>({code:it.code,name:it.name||'',qty:it.qty||1}))
-    : items.map(r=>({code:r.code,name:r.name||'',qty:r.qty||1}));
-  if(!targetItems.length){ toast('해당 송장 항목 없음'); return; }
-  const isWaiting = misongWaitingSet.has(String(seq));
-  const newStatus = isWaiting ? '' : '발송대기';
-  let waitingMemo = '';
-  if(newStatus){
-    waitingMemo = prompt('관리메모1에 남길 발송대기 메모를 입력하세요.\n예: !!, ??, ..', getDefaultWaitingMemo());
-    if(waitingMemo===null) return;
-    waitingMemo = String(waitingMemo).trim() || getDefaultWaitingMemo();
-    const previewCodes=targetItems.slice(0,6).map(it=>it.code).join(', ')+(targetItems.length>6?' 외 '+(targetItems.length-6)+'개':'');
-    if(!confirm(
-      '내일출고 발송대기로 처리할까요?\n\n'
-      +'대상: '+workNoText(seq)+' / '+targetItems.length+'종\n'
-      +'상품: '+previewCodes+'\n'
-      +'관리메모1: '+waitingMemo+'\n'
-      +'관리메모2: ㅁ\n'
-      +'배송보류: 해제\n\n'
-      +'이 상태는 CS 내일출고 알림 대상입니다.'
-    )) return;
-    try{ localStorage.setItem('misongWaitingMemo', waitingMemo); }catch(e){}
-  } else {
-    if(!confirm(workNoText(seq)+' 내일출고 발송대기를 취소하고 피킹완료 상태로 되돌릴까요?')) return;
-  }
-  if(newStatus) misongWaitingSet.add(String(seq));
-  else misongWaitingSet.delete(String(seq));
-  try{ localStorage.setItem('misongWaitingSet', JSON.stringify([...misongWaitingSet])); }catch(e){}
-  const ord_no = noMap[seq]?.ord_no || realInv;
-  const now = new Date().toISOString();
-  targetItems.forEach(it=>{
-    const code = it.code;
-    misongData.forEach(d=>{ if(d.inv===realInv&&d.code===code) d.status=newStatus; });
-    if(newStatus){
-      const k=String(seq)+'-'+code;
-      if(holded[k]) delete holded[k];
-      db.from('picking').update({hold:false}).eq('inv_no',realInv).eq('p_code',code).catch(()=>{});
-    }
-    db.from('shortage').upsert({
-      inv_no:realInv,
-      ord_no,
-      p_code:code,
-      p_name:it.name||'',
-      short_qty:0,
-      memo2_val:'ㅁ',
-      drawer_no:newStatus ? waitingMemo : '',
-      status:newStatus||'피킹완료',
-      updated_at:now,
-    },{onConflict:'inv_no,p_code'}).catch(()=>{});
-  });
-  if(misongData.length) updateAllCSCounts();
-  renderMisongList();
-  scheduleRender();
-  toast(newStatus==='발송대기' ? '⏸ 발송대기: 메모1 '+waitingMemo+' / 메모2 ㅁ / 보류해제 예약' : '↩ 발송대기 취소됨');
 }
 
 async function cleanMisongPickingDone(){
@@ -5710,7 +5717,7 @@ async function cleanMisongPickingDone(){
 
 const _adjMisongTimer={};
 function adjMisongShortage(seq, code, delta){
-  const row=misongPickingData.find(r=>r.seq===seq&&r.code===code);
+  const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
   if(!row) return;
   const prev=row.shortage;
   row.shortage=Math.max(0,row.shortage+delta);
@@ -5720,7 +5727,7 @@ function adjMisongShortage(seq, code, delta){
 }
 
 function completeMisong(seq, code){
-  const row=misongPickingData.find(r=>r.seq===seq&&r.code===code);
+  const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
   if(!row) return;
   const prev=row.shortage;
   row.shortage=0;
@@ -5737,7 +5744,7 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     if(error) throw error;
     // shortage 테이블 동기화
     if(newShortage>0){
-      const order=ORDERS_ALL.find(o=>o.no===seq);
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(seq));
       const item=order?.items.find(it=>it.code===code);
       await db.from('shortage').upsert({
         inv_no, ord_no:_ord2,
@@ -5757,7 +5764,7 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     const k=String(seq)+'-'+code;
     if(newShortage===0) delete shortage[k]; else shortage[k]=newShortage;
   }catch(e){
-    const row=misongPickingData.find(r=>r.seq===seq&&r.code===code);
+    const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
     if(row&&prevShortage!==undefined){ row.shortage=prevShortage; renderMisongList(); }
     toast('⚠ 저장 실패: '+e.message);
   }
