@@ -4029,8 +4029,22 @@ body{
     gap:6px !important;
   }
   .deck-content .deck-card-body{
-    grid-template-columns:48px 118px minmax(74px,1fr) 94px !important;
-    column-gap:5px !important;
+    grid-template-columns:max-content max-content !important;
+    justify-content:start !important;
+    align-items:end !important;
+    column-gap:6px !important;
+  }
+  .deck-content .deck-main{
+    grid-template-columns:54px 132px !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:max-content !important;
+  }
+  .deck-content .deck-actions{
+    grid-template-columns:144px 92px !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:max-content !important;
   }
   .deck-card-body .pr-cell{
     height:52px !important;
@@ -4040,7 +4054,15 @@ body{
     font-size:22px !important;
   }
   .deck-card-body .short-cell{
-    width:94px !important;
+    width:92px !important;
+    min-width:92px !important;
+  }
+  .deck-card-body .pr-drawer-cell{
+    width:144px !important;
+    min-width:144px !important;
+  }
+  .deck-card-body .pr-drawer-btn{
+    font-size:12px !important;
   }
   .deck-card-body .sq-btn{
     width:22px !important;
@@ -4400,5 +4422,82 @@ body{
   }
   .inv-card{
     flex:0 0 170px !important;
+  }
+}
+
+/* 0619 tablet landscape compact pass: keep the phone-like picking-first density. */
+@media (min-width: 641px) and (max-width: 1100px) and (orientation: landscape){
+  .main,
+  .main.sb-collapsed{
+    grid-template-columns:1fr !important;
+    gap:0 !important;
+  }
+  .sidebar,
+  .main.sb-collapsed .sidebar,
+  .right-panel{
+    display:none !important;
+  }
+  .left-panel{
+    grid-column:1 !important;
+    width:100% !important;
+    max-width:100% !important;
+  }
+  .stack-wrap{
+    padding:0 !important;
+  }
+  .deck-scroll{
+    padding:3px !important;
+  }
+  .deck-scroll .pick-row{
+    grid-template-columns:154px minmax(0,1fr) !important;
+    column-gap:6px !important;
+    padding:5px 6px !important;
+    margin-bottom:4px !important;
+  }
+  .deck-photo-rail{
+    grid-template-columns:24px 124px !important;
+    gap:5px !important;
+  }
+  .deck-photo-rail .pr-circle{
+    width:24px !important;
+    height:24px !important;
+    min-width:24px !important;
+    min-height:24px !important;
+    border-width:2px !important;
+    border-radius:4px !important;
+  }
+  .deck-content .deck-card-head{
+    grid-template-columns:minmax(0,1fr) auto !important;
+    gap:2px 6px !important;
+    padding-bottom:4px !important;
+  }
+  .deck-card-name{
+    grid-column:1 / -1 !important;
+    white-space:normal !important;
+    display:-webkit-box !important;
+    -webkit-line-clamp:2 !important;
+    -webkit-box-orient:vertical !important;
+    overflow:hidden !important;
+  }
+  .deck-content .deck-card-body{
+    grid-template-columns:max-content max-content !important;
+    justify-content:start !important;
+    column-gap:6px !important;
+    padding-top:0 !important;
+  }
+  .deck-content .deck-main{
+    grid-template-columns:54px 132px !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:max-content !important;
+  }
+  .deck-content .deck-actions{
+    grid-template-columns:144px 92px !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:max-content !important;
+  }
+  .deck-card-body .pr-cell{
+    height:48px !important;
   }
 }
