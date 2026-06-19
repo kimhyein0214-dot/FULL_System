@@ -4076,3 +4076,326 @@ body{
     grid-template-columns:0 minmax(0,1fr) 236px !important;
   }
 }
+
+/* 0619 phone picking pass: S26-class portrait layout.
+   Keep the picking list usable first; other tabs keep the desktop structure. */
+@media (max-width: 640px) and (orientation: portrait){
+  html,
+  body{
+    width:100% !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+  }
+  body{
+    padding:4px !important;
+    gap:4px !important;
+  }
+  .header{
+    min-height:0 !important;
+    padding:5px !important;
+    gap:4px !important;
+    flex-wrap:wrap !important;
+    overflow:visible !important;
+  }
+  .header h1{
+    font-size:13px !important;
+    max-width:120px !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+  }
+  .hdiv,
+  .work-sort-summary,
+  #planned-print-export-btn,
+  .postoffice-enrich-btn,
+  #hs-nd,
+  #hs-mu{
+    display:none !important;
+  }
+  .sb-toggle-btn{
+    width:28px !important;
+    height:28px !important;
+    font-size:12px !important;
+  }
+  #date-picker{
+    width:126px !important;
+    height:28px !important;
+    padding:3px 6px !important;
+    font-size:11px !important;
+  }
+  .abtn,
+  .work-export-btn{
+    height:28px !important;
+    padding:3px 7px !important;
+    font-size:10px !important;
+  }
+  .header > div[style*="display:flex"]{
+    gap:2px !important;
+  }
+  .hstats{
+    order:20 !important;
+    width:100% !important;
+    margin-left:0 !important;
+    gap:3px !important;
+    overflow-x:auto !important;
+    padding-bottom:1px !important;
+  }
+  .hstats::-webkit-scrollbar{
+    display:none !important;
+  }
+  .hstat{
+    flex:0 0 auto !important;
+    padding:5px 7px !important;
+    font-size:10px !important;
+  }
+  .prog{
+    padding:4px 7px !important;
+  }
+  .prog-wrap{
+    gap:6px !important;
+  }
+  .prog-txt{
+    font-size:10px !important;
+  }
+  .main,
+  .main.sb-collapsed{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    grid-template-rows:minmax(0,1fr) !important;
+    gap:0 !important;
+    min-width:0 !important;
+    overflow:hidden !important;
+  }
+  .sidebar,
+  .main.sb-collapsed .sidebar,
+  .right-panel{
+    display:none !important;
+  }
+  .left-panel{
+    min-width:0 !important;
+    width:100% !important;
+    max-width:100% !important;
+    grid-column:1 !important;
+    border-radius:5px !important;
+  }
+  .panel-hdr{
+    padding:6px 8px !important;
+  }
+  .panel-hdr h2{
+    font-size:12px !important;
+  }
+  .sub-tab-bar{
+    display:flex !important;
+    overflow-x:auto !important;
+    padding:0 4px !important;
+    white-space:nowrap !important;
+  }
+  .sub-tab-bar::-webkit-scrollbar{
+    display:none !important;
+  }
+  .sub-tab{
+    flex:0 0 auto !important;
+    padding:7px 9px !important;
+    font-size:11px !important;
+  }
+  .stack-wrap{
+    padding:0 !important;
+    min-width:0 !important;
+  }
+  .stack-main,
+  .deck-scroll,
+  .deck-scroll .pick-row,
+  .deck-content{
+    min-width:0 !important;
+    max-width:100% !important;
+  }
+  .deck-scroll{
+    padding:3px !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    scroll-snap-type:none !important;
+  }
+  .deck-scroll .pick-row{
+    display:grid !important;
+    grid-template-columns:154px minmax(0,1fr) !important;
+    column-gap:6px !important;
+    row-gap:5px !important;
+    width:100% !important;
+    margin:0 0 4px !important;
+    padding:6px !important;
+    border-radius:4px !important;
+  }
+  .deck-photo-rail{
+    grid-template-columns:24px 124px !important;
+    gap:5px !important;
+    align-items:center !important;
+  }
+  .deck-photo-rail .pr-check{
+    padding:0 !important;
+  }
+  .deck-photo-rail .pr-circle{
+    width:24px !important;
+    height:24px !important;
+    min-width:24px !important;
+    min-height:24px !important;
+    border-width:2px !important;
+    border-radius:4px !important;
+    font-size:11px !important;
+  }
+  .deck-photo-rail .pr-photo-wrap,
+  .deck-photo-rail .pr-photo,
+  .deck-photo-rail .pr-photo img{
+    width:124px !important;
+  }
+  .deck-photo-rail .pr-photo{
+    height:86px !important;
+    border-radius:5px !important;
+  }
+  .deck-photo-rail .pr-photo img{
+    height:86px !important;
+    object-fit:cover !important;
+    border-radius:3px !important;
+  }
+  .deck-content{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:5px !important;
+  }
+  .deck-content .deck-card-head{
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) auto !important;
+    gap:2px 5px !important;
+    align-items:start !important;
+    padding:0 0 4px !important;
+  }
+  .deck-card-title{
+    min-width:0 !important;
+  }
+  .deck-card-title .csh-code{
+    font-size:14px !important;
+    white-space:normal !important;
+    word-break:keep-all !important;
+    overflow-wrap:anywhere !important;
+    line-height:1.15 !important;
+  }
+  .deck-card-name{
+    grid-column:1 / -1 !important;
+    font-size:10px !important;
+    line-height:1.25 !important;
+    white-space:normal !important;
+    display:-webkit-box !important;
+    -webkit-line-clamp:2 !important;
+    -webkit-box-orient:vertical !important;
+    overflow:hidden !important;
+  }
+  .deck-card-meta{
+    justify-self:end !important;
+    font-size:9px !important;
+    gap:2px !important;
+    max-width:110px !important;
+  }
+  .deck-content .deck-card-body{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:5px !important;
+    padding:0 !important;
+  }
+  .deck-content .deck-main,
+  .deck-content .deck-actions{
+    display:grid !important;
+    grid-template-columns:58px minmax(0,1fr) !important;
+    gap:5px !important;
+    min-width:0 !important;
+  }
+  .deck-content .deck-actions{
+    grid-template-columns:minmax(0,1fr) 88px !important;
+  }
+  .deck-card-body .pr-cell{
+    height:44px !important;
+    min-width:0 !important;
+    padding:4px 5px !important;
+    border-radius:4px !important;
+  }
+  .deck-card-body .qty-cell .pr-cell-val{
+    font-size:21px !important;
+    line-height:1 !important;
+  }
+  .deck-card-body .pr-cell-lbl{
+    font-size:9px !important;
+    line-height:1 !important;
+  }
+  .deck-card-body .order-cell{
+    overflow:hidden !important;
+  }
+  .deck-card-body .jo-slots{
+    gap:2px !important;
+    margin-left:0 !important;
+  }
+  .deck-card-body .jo-slot{
+    width:26px !important;
+    height:30px !important;
+    border-radius:4px !important;
+  }
+  .deck-card-body .jo-slot-num{
+    font-size:8px !important;
+  }
+  .deck-card-body .jo-slot-val{
+    font-size:14px !important;
+  }
+  .deck-card-body .pr-memo-cell{
+    max-width:none !important;
+  }
+  .deck-card-body .pr-field-input{
+    font-size:11px !important;
+  }
+  .deck-card-body .short-cell{
+    width:88px !important;
+    min-width:88px !important;
+  }
+  .deck-card-body .short-ctrl-row{
+    gap:3px !important;
+  }
+  .deck-card-body .sq-btn{
+    width:22px !important;
+    height:22px !important;
+    font-size:16px !important;
+  }
+  .deck-card-body .sq-val{
+    min-width:14px !important;
+    font-size:16px !important;
+  }
+  .bulk-short-btn{
+    display:none !important;
+  }
+  .loc-badge,
+  .nal-badge,
+  .pair-badge,
+  .ch-badge,
+  .merge-badge{
+    font-size:8px !important;
+    padding:1px 4px !important;
+    margin-left:2px !important;
+  }
+  .bottom-tray{
+    max-height:28px !important;
+    border-radius:5px !important;
+  }
+  .bottom-tray.open{
+    max-height:42vh !important;
+  }
+  .bottom-tray.open.expanded{
+    max-height:58vh !important;
+  }
+  .bt-handle{
+    height:28px !important;
+    min-height:28px !important;
+  }
+  .bt-content{
+    padding:0 5px 6px !important;
+  }
+  .jo-scroll{
+    padding:5px !important;
+  }
+  .inv-card{
+    flex:0 0 170px !important;
+  }
+}
