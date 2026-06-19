@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0619-mobile-picking-v2';
+const CACHE_NAME = 'picking-system-0619-drawer-card-v1';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0619-mobile-picking-v2',
+  './picking-system_0519.css?v=0619-drawer-card-v1',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
