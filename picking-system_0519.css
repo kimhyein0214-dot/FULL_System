@@ -4077,9 +4077,9 @@ body{
   }
 }
 
-/* 0619 phone picking pass: S26-class portrait layout.
-   Keep the picking list usable first; other tabs keep the desktop structure. */
-@media (max-width: 640px) and (orientation: portrait){
+/* 0619 portrait picking pass: phone/tablet portrait uses the picking-first layout.
+   Keep landscape tablets on the dense desktop-like workflow. */
+@media (max-width: 1100px) and (orientation: portrait){
   html,
   body{
     width:100% !important;
