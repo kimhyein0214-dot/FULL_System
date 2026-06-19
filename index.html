@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0619-tablet-sidebar-swipe-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0619-drawer-product-ui-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -791,14 +791,6 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
         <button class="kp-btn" onclick="kpInput('7')">7</button><button class="kp-btn" onclick="kpInput('8')">8</button><button class="kp-btn" onclick="kpInput('9')">9</button>
         <button class="kp-btn" style="visibility:hidden"></button><button class="kp-btn" onclick="kpInput('0')">0</button><button class="kp-btn" style="visibility:hidden"></button>
       </div>
-      <div class="kp-presets">
-        <button class="kp-btn kp-preset" onclick="kpSet('ㅁ')">ㅁ</button>
-        <button class="kp-btn kp-preset" onclick="kpSet('ㅁㅁ')">ㅁㅁ</button>
-        <button class="kp-btn kp-preset" onclick="kpSet('ㅁㅇ')">ㅁㅇ</button>
-        <button class="kp-btn kp-preset" onclick="kpSet('ㅁㅈ')">ㅁㅈ</button>
-        <button class="kp-btn kp-preset" onclick="kpSet('ㅁㅋ')">ㅁㅋ</button>
-        <button class="kp-btn kp-preset" onclick="kpSet('ㅁㅅ')">ㅁㅅ</button>
-      </div>
     </div>
     <div class="kp-bottom">
       <button class="kp-btn kp-del" onclick="kpDel()">⌫</button><button class="kp-btn kp-clear" onclick="kpClear()">지우기</button><button class="kp-btn kp-done" onclick="kpDone()">✓ 확인</button>
@@ -1510,6 +1502,12 @@ function itemNameWithOption(it){
   if(name&&option) return name+' / '+option;
   return name||option||'상품명 없음';
 }
+function itemNameOnly(it){
+  return String(it?.name||it?.p_name||'').trim()||'상품명 없음';
+}
+function itemOptionOnly(it){
+  return String(it?.option||it?.p_option||it?.seller_option_name||'').trim();
+}
 function displayInvoiceNo(no,order=null){
   return String(seqToReal[no]||order?.invNo||order?.inv_no||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
 }
@@ -1900,11 +1898,29 @@ const CH_INFO={
   ably:{label:'에이블리',cls:'ch-ably'}, smart:{label:'스마트스토어',cls:'ch-smart'},
   coupang:{label:'쿠팡',cls:'ch-coupang'}, other:{label:'기타',cls:'ch-other'}
 };
+const DRAWER_PREFIX_BY_CHANNEL={makeshop:'ㅁㅁ', smart:'ㅁㅅ', ably:'ㅁㅇ', coupang:'ㅁㅋ', zigzag:'ㅁㅈ'};
 function chBadge(invNo){
   const ch=orderChannel[invNo];
   if(!ch) return '';
   const info=CH_INFO[ch]||CH_INFO.other;
   return '<span class="ch-badge '+info.cls+'">'+info.label+'</span>';
+}
+function getDrawerChannel(invNo){
+  const no=Number(invNo);
+  const saved=orderChannel[invNo]||orderChannel[no];
+  if(saved) return saved;
+  const order=ORDERS_ALL.find(o=>Number(o.no)===no);
+  return detectChannelFromSeller(order?.seller)||'other';
+}
+function getDrawerPrefix(invNo){
+  return DRAWER_PREFIX_BY_CHANNEL[getDrawerChannel(invNo)]||'';
+}
+function drawerDigitsOnly(value){
+  return String(value||'').trim().replace(/^(ㅁ[ㅁㅅㅇㅋㅈㅐ]?)/,'').replace(/\D/g,'');
+}
+function normalizeDrawerValue(invNo,value){
+  const digits=drawerDigitsOnly(value);
+  return digits ? getDrawerPrefix(invNo)+digits : '';
 }
 
 // ── 파일 파싱 상태 ──
@@ -2619,16 +2635,33 @@ function mergeSameInvoiceCodeRows(rows){
   });
   return merged;
 }
+function annotateSameProductRows(rows){
+  const counts=new Map();
+  (rows||[]).forEach(row=>{
+    const key=[row.no,row.code].join('||');
+    counts.set(key,(counts.get(key)||0)+1);
+  });
+  const seen=new Map();
+  return (rows||[]).map(row=>{
+    const key=[row.no,row.code].join('||');
+    const total=counts.get(key)||1;
+    if(total<2) return row;
+    const index=seen.get(key)||0;
+    seen.set(key,index+1);
+    const pos=index===0?'group-start':index===total-1?'group-end':'group-middle';
+    return {...row,sameProductClass:' same-product-group '+pos,sameProductTotal:total,sameProductIndex:index};
+  });
+}
 function mergeOrderItemsForDisplay(order){
   if(!order||!order.items) return [];
-  return mergeSameInvoiceCodeRows(order.items.map((it,idx)=>({
+  return order.items.map((it,idx)=>({
     ...it,
     no:order.no,
     buyer:order.buyer||'',
     recv:order.recv||'',
     seq:idx+1,
     prodCode:it.prodCode||''
-  })));
+  }));
 }
 
 function renderLeft(){
@@ -2665,7 +2698,7 @@ function renderLeft(){
     const noDrawerNos=new Set(src.filter(o=>o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0)&&!String(drawer[o.no]||'').trim()).map(o=>o.no));
     flat=flat.filter(f=>noDrawerNos.has(f.no));
   }
-  flat=mergeSameInvoiceCodeRows(flat);
+  flat=annotateSameProductRows(flat);
 
   const joShort=reg.some(o=>o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0));
   // getJoLabel은 송장당 1회만 호출 (O(n²) → O(n))
@@ -2705,18 +2738,23 @@ function renderLeft(){
     const _anchorAttr=seenCodeAnchors.has(_codeId)?'':` id="code-${_codeId}"`;
     seenCodeAnchors.add(_codeId);
     const cellColor=done?'#00CC66':f.goldItem?'var(--gold)':isHold?'#E65100':isM?c.t:'var(--text)';
+    const optionText=itemOptionOnly(f);
+    const statusCellHtml=(f.goldItem&&viewMode!=='gold')
+      ?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:var(--gold);font-weight:900;">골드 담당자 처리</span></div>'
+      :isHold
+        ?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:#E65100;font-weight:900;">보류됨</span></div>'
+        :`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`;
 
-    const joLabel=_joLabelCache.get(f.no)||'';
     const drVal=drawer[f.no]||'';
-    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
+    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
         <div class="pr-photo-wrap"><div class="pr-photo">${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div>
       </div>
       <div class="deck-content">
         <div class="deck-card-head">
-          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${_locBadge}${_pairBadge}</div>
-          <div class="deck-card-name">${esc(f.displayName||itemNameWithOption(f))}${f.mergedCount>1?` <span class="merge-badge">${f.mergedCount}줄 병합</span>`:''}</div>
+          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${optionText?`<span class="deck-card-option">${esc(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
+          <div class="deck-card-name">${esc(itemNameOnly(f))}</div>
           <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
         </div>
         <div class="deck-card-body">
@@ -2728,8 +2766,8 @@ function renderLeft(){
             <div class="pr-cell order-cell">${renderJoSlots(f.no,f.seqLabel??f.seq)}</div>
           </div>
           <div class="deck-actions">
+            ${statusCellHtml}
             <div class="pr-cell pr-memo-cell pr-drawer-cell" onclick="event.stopPropagation();openKeypad(${f.no},'${esc(drVal)}',this)"><span class="pr-cell-lbl">서랍</span><button class="pr-drawer-btn${drVal?' has-val':''}" type="button">${drVal?esc(drVal):'서랍번호'}</button></div>
-            ${(f.goldItem&&viewMode!=='gold')?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:var(--gold);font-weight:900;">골드 담당자 처리</span></div>':isHold?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:#E65100;font-weight:900;">보류됨</span></div>':`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`}
           </div>
         </div>
       </div>
@@ -3219,8 +3257,8 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
 let kpMode='drawer', kpInvNo=null, kpCurVal='', kpAnchorEl=null;
 let activeKeypadTarget=null, currentKeypadValue='';
 function getKeypadRule(mode){
-  const numericModes=new Set(['jo','inv-seq','inv-real','hold-qty','hold-price','jo-assign']);
-  return {numeric:numericModes.has(mode),maxLen:mode==='inv-real'?13:mode==='drawer'?24:10,min:mode==='drawer'?null:0};
+  const numericModes=new Set(['drawer','jo','inv-seq','inv-real','hold-qty','hold-price','jo-assign']);
+  return {numeric:numericModes.has(mode),maxLen:mode==='inv-real'?13:mode==='drawer'?8:10,min:mode==='drawer'?null:0};
 }
 function renderKeypadValue(){
   kpCurVal=currentKeypadValue;
@@ -3228,8 +3266,10 @@ function renderKeypadValue(){
   if(el) el.textContent=currentKeypadValue||'-';
 }
 function openKeypad(invNo, currentVal, anchorEl){
-  openKeypadSession('drawer',invNo,currentVal||'',anchorEl);
-  document.getElementById('kp-label').textContent=workNoText(invNo)+' 서랍번호';
+  openKeypadSession('drawer',invNo,drawerDigitsOnly(currentVal||''),anchorEl);
+  const prefix=getDrawerPrefix(invNo);
+  const labelSuffix=prefix?`서랍번호 (${prefix} 자동)`:'서랍번호';
+  document.getElementById('kp-label').textContent=workNoText(invNo)+' '+labelSuffix;
 }
 
 function openSbKeypad(mode){
@@ -3316,14 +3356,16 @@ function kpDone(){
 
   if(kpMode==='drawer'){
     if(kpInvNo===null)return;
-    let no=kpInvNo; drawer[no]=v; kpInvNo=null;
+    let no=kpInvNo;
+    const drawerVal=normalizeDrawerValue(no,v);
+    drawer[no]=drawerVal; kpInvNo=null;
     no=Number(no);
     // misongPickingData drawer 동기화
-    misongPickingData.forEach(r=>{ if(r.seq===no) r.drawer=v; });
+    misongPickingData.forEach(r=>{ if(r.seq===no) r.drawer=drawerVal; });
     const _mp=document.getElementById('misong-panel');
     if(_mp&&_mp.style.display!=='none'){ renderMisongList(); renderMisongSidebar(); }
     const order=ORDERS_ALL.find(o=>Number(o.no)===no);
-    if(order) order.items.forEach(it=>saveToSheet(no,it.code,!!checked[no+'-'+it.code],shortage[no+'-'+it.code]||0,v,!!holded[no+'-'+it.code]).catch(()=>toast('⚠ 서랍번호 저장 실패 (네트워크 확인)')));
+    if(order) order.items.forEach(it=>saveToSheet(no,it.code,!!checked[no+'-'+it.code],shortage[no+'-'+it.code]||0,drawerVal,!!holded[no+'-'+it.code]).catch(()=>toast('⚠ 서랍번호 저장 실패 (네트워크 확인)')));
     renderAll(); return;
   }
 
