@@ -4425,6 +4425,86 @@ body{
   }
 }
 
+/* 0619 tablet portrait pass: keep all picking controls on one row, with a toggleable sidebar. */
+@media (min-width: 641px) and (max-width: 1100px) and (orientation: portrait){
+  .main{
+    display:grid !important;
+    grid-template-columns:178px minmax(0,1fr) !important;
+    grid-template-rows:minmax(0,1fr) !important;
+    gap:4px !important;
+    overflow:hidden !important;
+  }
+  .main.sb-collapsed{
+    grid-template-columns:minmax(0,1fr) !important;
+    gap:0 !important;
+  }
+  .sidebar{
+    display:flex !important;
+    grid-column:1 !important;
+    width:178px !important;
+    min-width:178px !important;
+    max-width:178px !important;
+    padding:5px !important;
+    border-radius:5px !important;
+    background:#fff !important;
+    box-shadow:none !important;
+    pointer-events:auto !important;
+  }
+  .main.sb-collapsed .sidebar{
+    display:none !important;
+  }
+  .sidebar-inner{
+    display:flex !important;
+    opacity:1 !important;
+    pointer-events:auto !important;
+  }
+  .main.sb-collapsed .sidebar-inner{
+    display:none !important;
+  }
+  .left-panel{
+    grid-column:2 !important;
+  }
+  .main.sb-collapsed .left-panel{
+    grid-column:1 !important;
+  }
+  .right-panel{
+    display:none !important;
+  }
+  .deck-content .deck-card-body{
+    display:flex !important;
+    flex-direction:row !important;
+    flex-wrap:nowrap !important;
+    align-items:center !important;
+    justify-content:start !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:none !important;
+    padding:0 !important;
+  }
+  .deck-content .deck-main{
+    display:grid !important;
+    grid-template-columns:54px 120px !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:max-content !important;
+  }
+  .deck-content .deck-actions{
+    display:grid !important;
+    grid-template-columns:120px 86px !important;
+    gap:5px !important;
+    width:max-content !important;
+    max-width:max-content !important;
+  }
+  .deck-card-body .pr-drawer-cell{
+    width:120px !important;
+    min-width:120px !important;
+  }
+  .deck-card-body .short-cell{
+    width:86px !important;
+    min-width:86px !important;
+  }
+}
+
 /* 0619 tablet landscape compact pass: keep the phone-like picking-first density. */
 @media (min-width: 900px) and (max-width: 1368px) and (orientation: landscape){
   .main,

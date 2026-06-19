@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0619-tablet-landscape-row-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0619-tablet-portrait-row-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -5537,13 +5537,25 @@ function toggleTrayExpand(e){
   setTrayExpanded(!trayExpanded);
 }
 
-let sbCollapsed = false;
-function toggleSidebar(){
-  sbCollapsed = !sbCollapsed;
+const tabletPortraitSidebarMq = window.matchMedia('(min-width: 641px) and (max-width: 1100px) and (orientation: portrait)');
+let sidebarTouched = false;
+let sbCollapsed = tabletPortraitSidebarMq.matches;
+function applySidebarState(){
   document.querySelector('.main').classList.toggle('sb-collapsed', sbCollapsed);
   const btn = document.getElementById('sb-toggle-btn');
   if(btn) btn.textContent = sbCollapsed ? '▶' : '◀';
 }
+function toggleSidebar(){
+  sidebarTouched = true;
+  sbCollapsed = !sbCollapsed;
+  applySidebarState();
+}
+applySidebarState();
+tabletPortraitSidebarMq.addEventListener('change', e=>{
+  if(sidebarTouched) return;
+  sbCollapsed = e.matches;
+  applySidebarState();
+});
 
 // 모바일 뷰포트 높이 보정 (100vh 주소창 이슈)
 function fixVh(){
