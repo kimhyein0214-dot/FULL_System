@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0619-togle-workorder-v4';
+const CACHE_NAME = 'picking-system-0619-no-deck-current-v1';
 const APP_ASSETS = [
   './',
   './index.html',

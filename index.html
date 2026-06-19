@@ -2708,11 +2708,8 @@ function handleDeckCardClick(e,no,card){
 function updateDeckFocus(sc){
   const cards=[...sc.querySelectorAll('.pick-row')];
   if(!cards.length) return;
-  const focusIdx=getDeckFocusIndex(sc);
   cards.forEach((card,i)=>{
-    card.classList.toggle('deck-current',i===focusIdx);
-    card.classList.toggle('deck-near',Math.abs(i-focusIdx)===1);
-    card.classList.toggle('deck-far',Math.abs(i-focusIdx)>1);
+    card.classList.remove('deck-current','deck-near','deck-far');
   });
 }
 function scrollDeckAfterToggle(no,code){
