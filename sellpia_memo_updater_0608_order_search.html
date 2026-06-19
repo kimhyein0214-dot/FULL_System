@@ -354,6 +354,10 @@
         if (!rows.length) return false;
         const hit = rows.find(({ item }) => rowBlob(item).includes(String(invNo)));
         if (hit) return hit;
+        if (rows.length === 1) {
+          addLog('  검색 결과 1건: grid 데이터에 송장번호가 없어도 해당 행으로 진행');
+          return rows[0];
+        }
         const firstBlob = rowBlob(rows[0].item);
         if (firstBlob && firstBlob !== before) {
           addLog('  검색 결과는 바뀌었지만 grid 데이터에서 송장번호를 확인하지 못했습니다.');
