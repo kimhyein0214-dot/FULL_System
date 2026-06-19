@@ -4470,8 +4470,8 @@ body{
   .deck-content .deck-card-head{
     grid-column:1 !important;
     grid-row:1 !important;
-    width:clamp(300px, 39vw, 430px) !important;
-    max-width:430px !important;
+    width:100% !important;
+    max-width:none !important;
     grid-template-columns:minmax(0,1fr) auto !important;
     gap:2px 6px !important;
     padding-bottom:0 !important;
@@ -4485,36 +4485,49 @@ body{
     overflow:hidden !important;
   }
   .deck-content .deck-card-body{
-    grid-column:2 !important;
-    grid-row:1 !important;
-    grid-template-columns:max-content max-content !important;
+    grid-column:1 !important;
+    grid-row:2 !important;
+    display:flex !important;
+    flex-direction:row !important;
+    flex-wrap:nowrap !important;
     justify-content:start !important;
-    align-content:start !important;
-    align-self:start !important;
-    column-gap:6px !important;
+    align-items:center !important;
+    gap:5px !important;
     padding-top:0 !important;
+    width:max-content !important;
+    max-width:none !important;
   }
   .deck-content{
     display:grid !important;
-    grid-template-columns:max-content max-content !important;
-    grid-template-rows:auto !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:auto auto !important;
     align-items:start !important;
     justify-content:start !important;
-    column-gap:8px !important;
+    row-gap:4px !important;
   }
   .deck-content .deck-main{
-    grid-template-columns:54px 132px !important;
+    display:grid !important;
+    grid-template-columns:54px 120px !important;
     gap:5px !important;
     width:max-content !important;
     max-width:max-content !important;
   }
   .deck-content .deck-actions{
-    grid-template-columns:144px 92px !important;
+    display:grid !important;
+    grid-template-columns:120px 86px !important;
     gap:5px !important;
     width:max-content !important;
     max-width:max-content !important;
   }
   .deck-card-body .pr-cell{
     height:48px !important;
+  }
+  .deck-card-body .pr-drawer-cell{
+    width:120px !important;
+    min-width:120px !important;
+  }
+  .deck-card-body .short-cell{
+    width:86px !important;
+    min-width:86px !important;
   }
 }
