@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0619-tablet-portrait-row-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0619-tablet-sidebar-swipe-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -2282,6 +2282,8 @@ function switchJo(i){
 function initSwipe(){
   const el=document.getElementById('stack-wrap');
   if(!el) return;
+  if(el.dataset.swipeBound==='1') return;
+  el.dataset.swipeBound='1';
   let sx=0,sy=0,st=0;
   el.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;st=Date.now();},{passive:true});
   el.addEventListener('touchend',e=>{
@@ -5537,9 +5539,9 @@ function toggleTrayExpand(e){
   setTrayExpanded(!trayExpanded);
 }
 
-const tabletPortraitSidebarMq = window.matchMedia('(min-width: 641px) and (max-width: 1100px) and (orientation: portrait)');
+const tabletSidebarMq = window.matchMedia('(min-width: 641px) and (max-width: 1368px)');
 let sidebarTouched = false;
-let sbCollapsed = tabletPortraitSidebarMq.matches;
+let sbCollapsed = tabletSidebarMq.matches;
 function applySidebarState(){
   document.querySelector('.main').classList.toggle('sb-collapsed', sbCollapsed);
   const btn = document.getElementById('sb-toggle-btn');
@@ -5551,7 +5553,7 @@ function toggleSidebar(){
   applySidebarState();
 }
 applySidebarState();
-tabletPortraitSidebarMq.addEventListener('change', e=>{
+tabletSidebarMq.addEventListener('change', e=>{
   if(sidebarTouched) return;
   sbCollapsed = e.matches;
   applySidebarState();

@@ -4507,20 +4507,47 @@ body{
 
 /* 0619 tablet landscape compact pass: keep the phone-like picking-first density. */
 @media (min-width: 900px) and (max-width: 1368px) and (orientation: landscape){
-  .main,
+  .main{
+    grid-template-columns:178px minmax(0,1fr) !important;
+    gap:4px !important;
+  }
   .main.sb-collapsed{
-    grid-template-columns:1fr !important;
+    grid-template-columns:minmax(0,1fr) !important;
     gap:0 !important;
   }
-  .sidebar,
-  .main.sb-collapsed .sidebar,
+  .sidebar{
+    display:flex !important;
+    grid-column:1 !important;
+    width:178px !important;
+    min-width:178px !important;
+    max-width:178px !important;
+    padding:5px !important;
+    border-radius:5px !important;
+    background:#fff !important;
+    box-shadow:none !important;
+    pointer-events:auto !important;
+  }
+  .main.sb-collapsed .sidebar{
+    display:none !important;
+  }
+  .sidebar-inner{
+    display:flex !important;
+    opacity:1 !important;
+    pointer-events:auto !important;
+  }
+  .main.sb-collapsed .sidebar-inner{
+    display:none !important;
+  }
   .right-panel{
     display:none !important;
   }
   .left-panel{
-    grid-column:1 !important;
+    grid-column:2 !important;
     width:100% !important;
     max-width:100% !important;
+  }
+  .main.sb-collapsed .left-panel{
+    grid-column:1 !important;
   }
   .stack-wrap{
     padding:0 !important;
