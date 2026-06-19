@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0618-sidebar-option-v3">
+<link rel="stylesheet" href="picking-system_0519.css?v=0619-togle-workorder-v4">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -959,12 +959,10 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
     <button id="ampm-am"  class="abtn" onclick="setSession('AM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오전</button>
     <button id="ampm-pm"  class="abtn" onclick="setSession('PM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오후</button>
   </div>
-  <!-- TODO(zone-sort): 작업순서 출력 흐름이 기본이므로 구역순은 보조 기능으로 유지하되 상단 기본 노출에서는 제외합니다. -->
-  <button id="zone-sort-btn" class="abtn zone-aux-btn" onclick="toggleZoneSort()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역별 자동 배치">🗂️ 구역순</button>
-  <button id="work-sort-btn" class="abtn work-sort-btn" onclick="toggleWorkSort()" title="송장 출력 전 작업순서: 일반상품 우선 → 상품종류 적은순 → 총수량 적은순 → 골드 뒤로">🧭 작업순서</button>
+  <!-- 작업순서는 기본 고정입니다. 별도 보기 전환 버튼을 두지 않습니다. -->
   <button id="planned-print-export-btn" class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
   <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="토글 등록용 CSV에 필요한 수취인/주소/연락처 보강 현황을 확인합니다">📊 보강현황</button>
-  <button class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="토글 등록용 CSV를 만듭니다. 토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.">📮 토글CSV</button>
+  <button id="postoffice-csv-export-btn" class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="토글 등록용 CSV를 작업순서대로 만듭니다.">📮 토글CSV</button>
   <button class="abtn zone-aux-btn" onclick="openZoneSortPopup()" style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);" title="보조 기능: 구역순 송장 배치 현황">📊 구역현황</button>
   <button class="abtn" onclick="showOrderListModal()" style="background:#1A3A6B;">📋 주문리스트</button>
   <span class="work-sort-summary" id="work-sort-summary">정렬 기준: 출력순서</span>
@@ -1380,8 +1378,7 @@ try{localStorage.removeItem('pickingManualJo');}catch(e){}
 
 // ── 구역순 정렬 ──────────────────────────────────────────────
 let zoneSortMode=false, zoneSortedOrders=null;
-const _savedWorkSortMode=localStorage.getItem('pickingWorkSortMode');
-let workSortMode=_savedWorkSortMode===null?true:_savedWorkSortMode==='1';
+let workSortMode=true;
 const WORK_SORT_POLICY={deferProblemOrders:true};
 function getOutputOrderValue(row, fallback){
   // 출력순서 컬럼이 생기면 우선 사용하고, 없으면 현재 수집 순서(sort_order) 기반으로 안전하게 유지합니다.
@@ -1571,26 +1568,23 @@ function buildOutputOrders(ordersData,itemsByOrd,pickingRows=[]){
     _originalRank:getOrderOriginalRank(row,i+1),
     _sortMetrics:getOrderSortMetrics(row,itemsByOrd[row.ord_no]||[],pickingByOrd[String(row.ord_no||'').trim()]||[])
   }));
-  const sorted=workSortMode
-    ? buildRouteOptimizedWorkRows(rows)
-    : rows.sort((a,b)=>getOutputOrderValue(a,999999)-getOutputOrderValue(b,999999)||getOrderOriginalRank(a,999999)-getOrderOriginalRank(b,999999));
+  const sorted=buildRouteOptimizedWorkRows(rows);
   return sorted.map((row,i)=>({...row,planned_print_seq_no:i+1}));
 }
 function updateWorkSortUI(){
+  workSortMode=true;
+  localStorage.setItem('pickingWorkSortMode','1');
   const btn=document.getElementById('work-sort-btn');
-  if(btn) btn.classList.toggle('active',workSortMode);
+  if(btn) btn.remove();
   const summary=document.getElementById('work-sort-summary');
   if(summary){
-    summary.textContent=workSortMode
-      ? '정렬 기준: 상품종류 우선 / 4개조 동선 묶음 / 조간 이동 최소 / 총수량 보조 / 골드 뒤로'
-      : '정렬 기준: 출력순서 우선';
+    summary.textContent='정렬 기준: 상품종류 우선 / 4개조 동선 묶음 / 조간 이동 최소 / 총수량 보조 / 골드 뒤로';
   }
 }
 function toggleWorkSort(){
-  workSortMode=!workSortMode;
-  localStorage.setItem('pickingWorkSortMode',workSortMode?'1':'0');
+  workSortMode=true;
+  localStorage.setItem('pickingWorkSortMode','1');
   updateWorkSortUI();
-  reloadData();
 }
 function getPlannedPrintOrders(){
   // no는 재정렬 이후 화면/작업순서 기준으로 다시 붙는 번호입니다.
@@ -1625,10 +1619,9 @@ function downloadPlannedPrintList(){
 }
 
 /* ──────────────────────────────────────────────────────────────
-   📮 토글 등록용 CSV (작업순서대로) — 헤더 13컬럼 고정, 빈 컬럼은 빈문자열 유지
-   토글 등록 전에는 운송장번호가 비어 있어도 정상입니다.
+   📮 토글 등록용 CSV (작업순서대로) — 헤더 12컬럼 고정, 빈 컬럼은 빈문자열 유지
    ────────────────────────────────────────────────────────────── */
-const POST_OFFICE_HEADERS=['운송장번호','주문번호','주문일자','*주문품목No','판매처상품명','판매처옵션명','주문수량','수취인명','수취인연락처','수취인핸드폰','우편번호','주소','주문메모'];
+const POST_OFFICE_HEADERS=['주문번호','주문일자','주문품목No','판매처상품명','판매처옵션명','주문수량','수취인명','수취인연락처','수취인핸드폰','우편번호','주소','주문메모'];
 function isSellerOrderMemoLine(v){
   const s=String(v||'').trim();
   if(!s) return false;
@@ -1671,7 +1664,7 @@ function buildPostOfficeCsvRows(){
     items.forEach(it=>{
       const v=getPostOfficeOrderValues(o,it);
       rows.push([
-        v.inv_no, v.ord_no, v.order_date, v.order_item_no,
+        v.ord_no, v.order_date, v.order_item_no,
         v.seller_product_name, v.seller_option_name, v.qty,
         v.receiver_name, v.receiver_tel, v.receiver_mobile,
         v.zipcode, v.receiver_address, v.order_memo
@@ -1681,29 +1674,27 @@ function buildPostOfficeCsvRows(){
   return rows;
 }
 function validatePostOfficeCsvRows(rows){
-  /* rows[0] = header. 토글 등록용 검증: 운송장번호는 토글 발급 전 비어 있어도 정상입니다. */
-  const stats={total:0,missingName:0,missingTel:0,missingMobile:0,missingZip:0,missingAddr:0,missingMemo:0,missingOrdNo:0,missingInvNo:0,missingItemNo:0,badItemNo:0,missingRequired:0,sample:[]};
+  const stats={total:0,missingName:0,missingTel:0,missingMobile:0,missingZip:0,missingAddr:0,missingMemo:0,missingOrdNo:0,missingItemNo:0,badItemNo:0,missingRequired:0,sample:[]};
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
     stats.total++;
-    if(!String(r[0]||'').trim()) stats.missingInvNo++;
-    if(!String(r[1]||'').trim()) stats.missingOrdNo++;
-    const ordNo=String(r[1]||'').trim();
-    const itemNo=String(r[3]||'').trim();
+    if(!String(r[0]||'').trim()) stats.missingOrdNo++;
+    const ordNo=String(r[0]||'').trim();
+    const itemNo=String(r[2]||'').trim();
     if(!itemNo) stats.missingItemNo++;
     if(itemNo&&ordNo&&itemNo===ordNo) stats.badItemNo++;
-    if(!String(r[7]||'').trim()) stats.missingName++;
-    if(!String(r[8]||'').trim()) stats.missingTel++;
-    if(!String(r[9]||'').trim()) stats.missingMobile++;
-    if(!String(r[10]||'').trim()) stats.missingZip++;
-    if(!String(r[11]||'').trim()) stats.missingAddr++;
-    if(!String(r[12]||'').trim()) stats.missingMemo++;
+    if(!String(r[6]||'').trim()) stats.missingName++;
+    if(!String(r[7]||'').trim()) stats.missingTel++;
+    if(!String(r[8]||'').trim()) stats.missingMobile++;
+    if(!String(r[9]||'').trim()) stats.missingZip++;
+    if(!String(r[10]||'').trim()) stats.missingAddr++;
+    if(!String(r[11]||'').trim()) stats.missingMemo++;
     /* 토글 등록 전 필수: 수취인명 + 연락처(전화/핸드폰 중 하나) + 우편번호 + 주소 */
-    const hasTel=String(r[8]||'').trim()||String(r[9]||'').trim();
-    const required=String(r[7]||'').trim()&&hasTel&&String(r[10]||'').trim()&&String(r[11]||'').trim()&&itemNo&&itemNo!==ordNo;
+    const hasTel=String(r[7]||'').trim()||String(r[8]||'').trim();
+    const required=String(r[6]||'').trim()&&hasTel&&String(r[9]||'').trim()&&String(r[10]||'').trim()&&itemNo&&itemNo!==ordNo;
     if(!required){
       stats.missingRequired++;
-      if(stats.sample.length<8) stats.sample.push({row:i+1,ord:r[1],itemNo:r[3],name:r[7],tel:r[8],mobile:r[9],zip:r[10],addr:r[11]});
+      if(stats.sample.length<8) stats.sample.push({row:i+1,ord:r[0],itemNo:r[2],name:r[6],tel:r[7],mobile:r[8],zip:r[9],addr:r[10]});
     }
   }
   return stats;
@@ -1711,18 +1702,17 @@ function validatePostOfficeCsvRows(rows){
 function showPostOfficeEnrichmentStatus(){
   if(!ORDERS_ALL.length){toast('⚠ 주문 데이터 없음');return;}
   const total=ORDERS_ALL.length;
-  let enriched=0,missingAddr=0,missingTel=0,missingZip=0,missingInvOrders=0;
+  let enriched=0,missingAddr=0,missingTel=0,missingZip=0;
   ORDERS_ALL.forEach(o=>{
     if(o.enrichedAt) enriched++;
     if(!String(o.receiverAddress||'').trim()) missingAddr++;
     if(!String(o.receiverTel||'').trim()&&!String(o.receiverMobile||'').trim()) missingTel++;
     if(!String(o.zipcode||'').trim()) missingZip++;
-    if(!String(seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||'').trim()) missingInvOrders++;
   });
   const csvRows=buildPostOfficeCsvRows();
   const csvStats=validatePostOfficeCsvRows(csvRows);
-  const msg=`📮 토글 등록 CSV 준비 현황\n\n총 주문: ${total}\nCSV 상품행: ${csvStats.total}\n보강 완료(enriched_at): ${enriched}\n주소 누락: ${missingAddr}\n연락처(전화/핸드폰 모두) 누락: ${missingTel}\n우편번호 누락: ${missingZip}\n토글 발급 전 송장번호 빈 주문: ${missingInvOrders}\n토글 발급 전 송장번호 빈 CSV행: ${csvStats.missingInvNo}\n*주문품목No 누락: ${csvStats.missingItemNo}\n주문번호로 잘못 들어간 품목No: ${csvStats.badItemNo}\n\n※ 송장번호 빈 값은 토글 등록 전이면 정상입니다.`;
-  console.log('[TOGLE] registration CSV status',{total,enriched,missingAddr,missingTel,missingZip,missingInvOrders,csvStats});
+  const msg=`📮 토글 등록 CSV 준비 현황\n\n총 주문: ${total}\nCSV 상품행: ${csvStats.total}\n보강 완료(enriched_at): ${enriched}\n주소 누락: ${missingAddr}\n연락처(전화/핸드폰 모두) 누락: ${missingTel}\n우편번호 누락: ${missingZip}\n주문품목No 누락: ${csvStats.missingItemNo}\n주문번호로 잘못 들어간 품목No: ${csvStats.badItemNo}`;
+  console.log('[TOGLE] registration CSV status',{total,enriched,missingAddr,missingTel,missingZip,csvStats});
   alert(msg);
 }
 function downloadPostOfficeCsv(){
@@ -1731,7 +1721,7 @@ function downloadPostOfficeCsv(){
   const stats=validatePostOfficeCsvRows(rows);
   console.log('[TOGLE] registration CSV stats',stats);
   if(stats.missingRequired>0){
-    const proceed=confirm(`토글 등록에 필요한 수취인 정보가 없는 행이 있습니다.\n\n총 ${stats.total}행 중 ${stats.missingRequired}행 필수정보 누락\n - 수취인명 누락: ${stats.missingName}\n - 연락처(전화/핸드폰 모두) 누락: ${Math.min(stats.missingTel,stats.missingMobile)}\n - 우편번호 누락: ${stats.missingZip}\n - 주소 누락: ${stats.missingAddr}\n - *주문품목No 누락: ${stats.missingItemNo}\n - 주문번호로 잘못 들어간 품목No: ${stats.badItemNo}\n\n※ 운송장번호 빈 값은 토글 등록 전이면 정상입니다.\n\n그래도 다운로드 하시겠습니까?`);
+    const proceed=confirm(`토글 등록에 필요한 수취인 정보가 없는 행이 있습니다.\n\n총 ${stats.total}행 중 ${stats.missingRequired}행 필수정보 누락\n - 수취인명 누락: ${stats.missingName}\n - 연락처(전화/핸드폰 모두) 누락: ${Math.min(stats.missingTel,stats.missingMobile)}\n - 우편번호 누락: ${stats.missingZip}\n - 주소 누락: ${stats.missingAddr}\n - 주문품목No 누락: ${stats.missingItemNo}\n - 주문번호로 잘못 들어간 품목No: ${stats.badItemNo}\n\n그래도 다운로드 하시겠습니까?`);
     if(!proceed){toast('🚫 취소: 주문정보 보강 후 다시 시도하세요');return;}
   }
   const pad=n=>String(n).padStart(2,'0');

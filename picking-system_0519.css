@@ -2104,6 +2104,19 @@ textarea{
   display:none !important;
 }
 
+#postoffice-csv-export-btn{
+  display:inline-flex !important;
+  background:#E03131 !important;
+  border-color:#C92A2A !important;
+  color:#FFFFFF !important;
+  font-weight:900 !important;
+  box-shadow:0 2px 8px rgba(224,49,49,0.22) !important;
+}
+#postoffice-csv-export-btn:hover{
+  background:#C92A2A !important;
+  color:#FFFFFF !important;
+}
+
 /* 0519 visibility fixes: header date and right-panel real invoice */
 #date-picker{
   background:#FFFFFF !important;

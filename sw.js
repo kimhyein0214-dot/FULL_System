@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0618-sidebar-option-v3';
+const CACHE_NAME = 'picking-system-0619-togle-workorder-v4';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0618-sidebar-option-v3',
+  './picking-system_0519.css?v=0619-togle-workorder-v4',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
