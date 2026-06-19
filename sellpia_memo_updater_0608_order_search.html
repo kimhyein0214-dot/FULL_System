@@ -219,7 +219,33 @@
       el.dispatchEvent(new Event('change', { bubbles: true }));
       try { window.jQuery(el).val(value).trigger('input').trigger('change'); } catch (_) {}
     }
+    function isVisible(el) {
+      return !!(el && (el.offsetParent || el.getClientRects().length));
+    }
+    function isInvoiceText(value) {
+      const text = normal(value).toLowerCase();
+      return text.includes('송장') || text.includes('delinum') || text.includes('invoice') || text.includes('deli');
+    }
+    function isInvoiceOptionText(value) {
+      const text = normal(value).toLowerCase();
+      return text.includes('송장') || text.includes('delinum') || text.includes('invoice');
+    }
+    function isTextInput(el) {
+      if (!el || String(el.tagName).toLowerCase() !== 'input') return false;
+      const type = String(el.type || 'text').toLowerCase();
+      return !['hidden', 'radio', 'checkbox', 'button', 'submit', 'reset', 'date'].includes(type) && !el.disabled;
+    }
+    function textInputAfter(control) {
+      if (!control) return null;
+      for (let scope = control.parentElement, depth = 0; scope && depth < 5; scope = scope.parentElement, depth++) {
+        const inputs = [...scope.querySelectorAll('input')].filter(el => isTextInput(el) && isVisible(el));
+        const after = inputs.find(el => !!(control.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+        if (after) return after;
+      }
+      return null;
+    }
     function chooseInvoiceSearchMode() {
+      let pickedControl = null;
       const candidates = [
         '#search_delinum', '#search_t_delinum_radio', '#search_s_delinum',
         'input[type="radio"][value="delinum"]', 'input[type="radio"][value="송장No"]'
@@ -229,8 +255,68 @@
         if (el) {
           el.checked = true;
           el.dispatchEvent(new Event('change', { bubbles: true }));
-          return;
+          pickedControl = el;
+          break;
         }
+      }
+      if (!pickedControl) {
+        const labels = [...document.querySelectorAll('label')];
+        const label = labels.find(el => isInvoiceText(el.textContent));
+        const target = label && (label.control || (label.getAttribute('for') ? document.getElementById(label.getAttribute('for')) : null));
+        if (target && String(target.type || '').toLowerCase() === 'radio') {
+          target.checked = true;
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          pickedControl = target;
+        }
+      }
+      const selects = [...document.querySelectorAll('select')].filter(isVisible);
+      for (const select of selects) {
+        const option = [...select.options].find(opt => isInvoiceOptionText(opt.textContent) || isInvoiceOptionText(opt.value));
+        if (!option) continue;
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        try { window.jQuery(select).val(option.value).trigger('change'); } catch (_) {}
+        pickedControl = select;
+        break;
+      }
+      return pickedControl;
+    }
+    function findInvoiceInput(pickedControl) {
+      const directSelectors = [
+        '#search_t_delinum', 'input[name="search_t_delinum"]',
+        '#search_delinum_text', 'input[name="search_delinum_text"]',
+        '#search_delinum', 'input[name="search_delinum"]',
+        'input[id*="delinum" i]', 'input[name*="delinum" i]',
+        'input[id*="invoice" i]', 'input[name*="invoice" i]',
+        'input[id*="deli" i][type="text"]', 'input[name*="deli" i][type="text"]'
+      ];
+      for (const selector of directSelectors) {
+        const el = document.querySelector(selector);
+        if (isTextInput(el) && isVisible(el)) return el;
+      }
+      const nearPicked = textInputAfter(pickedControl);
+      if (nearPicked) return nearPicked;
+      const invoiceSelect = [...document.querySelectorAll('select')].find(select => {
+        const option = select.options[select.selectedIndex];
+        return isVisible(select) && option && (isInvoiceOptionText(option.textContent) || isInvoiceOptionText(option.value));
+      });
+      const nearSelect = textInputAfter(invoiceSelect);
+      if (nearSelect) return nearSelect;
+      const checkedInvoiceRadio = [...document.querySelectorAll('input[type="radio"]')].find(radio => {
+        const label = radio.id ? document.querySelector(`label[for="${radio.id}"]`) : null;
+        return radio.checked && (isInvoiceText(radio.value) || isInvoiceText(label && label.textContent));
+      });
+      const nearRadio = textInputAfter(checkedInvoiceRadio);
+      if (nearRadio) return nearRadio;
+      return null;
+    }
+    async function runOrderSearch() {
+      if (typeof window.search_order === 'function') {
+        await Promise.resolve(window.search_order());
+      } else {
+        const btn = document.querySelector('#search_b, #btn_search, input[value="검색"], button');
+        if (!btn) throw new Error('검색 버튼을 찾을 수 없습니다.');
+        btn.click();
       }
     }
     async function applyOrderSearchDate(date, runSearch) {
@@ -250,33 +336,19 @@
       triggerValue(end, date);
       addLog(`  주문조회 검색일자 적용: ${date} ~ ${date}`);
       if (!runSearch) return;
-      if (typeof window.search_order === 'function') {
-        window.search_order();
-      } else {
-        const btn = document.querySelector('#search_b, #btn_search, input[value="검색"], button');
-        if (btn) btn.click();
-      }
+      await runOrderSearch();
       await sleep(900);
     }
     async function searchInvoice(invNo) {
       if (!window.grid7 || !window.grid8 || typeof window.view_order_detail !== 'function') {
         throw new Error('주문조회 grid/view_order_detail 함수를 찾을 수 없습니다. 페이지 로딩 후 다시 실행해주세요.');
       }
-      chooseInvoiceSearchMode();
-      const input = document.querySelector('#search_t_delinum, input[name="search_t_delinum"]');
-      if (!input) throw new Error('송장번호 검색 입력칸(#search_t_delinum)을 찾을 수 없습니다.');
-      if (typeof window.clear_input === 'function') {
-        window.clear_input('search_t_delinum');
-      }
+      const pickedControl = chooseInvoiceSearchMode();
+      const input = findInvoiceInput(pickedControl);
+      if (!input) throw new Error('송장번호 검색 입력칸을 찾을 수 없습니다.');
       triggerValue(input, invNo);
       const before = rowBlob(getGridItem('grid7', 0));
-      if (typeof window.search_order === 'function') {
-        window.search_order();
-      } else {
-        const btn = document.querySelector('#search_b, input[value="검색"], button');
-        if (!btn) throw new Error('검색 버튼을 찾을 수 없습니다.');
-        btn.click();
-      }
+      await runOrderSearch();
       const hit = await waitFor(() => {
         const rows = getGridRows('grid7');
         if (!rows.length) return false;
