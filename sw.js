@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0619-tablet-landscape-dense-v2';
+const CACHE_NAME = 'picking-system-0619-tablet-landscape-dense-v3';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0619-tablet-landscape-dense-v2',
+  './picking-system_0519.css?v=0619-tablet-landscape-dense-v3',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
