@@ -1244,6 +1244,13 @@ const APP_CONFIG={
   dbMode:'supabase',
   supabaseUrl:'https://vgxocngpykhlkosiaeew.supabase.co',
   supabaseKey:'sb_publishable_XVnKGJo66GZiYTq5Ivu8dA_SjBVvX0g',
+  imageCatalog:{
+    enabled:true,
+    supabaseUrl:'https://bpgvqmtsjgegnrdzmpep.supabase.co',
+    supabaseKey:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwZ3ZxbXRzamdlZ25yZHptcGVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjc0NTIsImV4cCI6MjA5NzMwMzQ1Mn0.tIxMFEUqALi2gywDxKJpxEZ9qcGhYRw8QJeMtRjKFDI',
+    view:'sellpia_product_images_public',
+    preferStorage:true
+  },
   apiBaseUrl:'',
   batchSize:50,
   popupDelay:800,
@@ -1254,6 +1261,10 @@ const SB_KEY=APP_CONFIG.supabaseKey;
 const GAS_IMG='https://script.google.com/macros/s/AKfycbxqnNkRuSReXYaAymVRPU3G-UVjayNR5mdpCShGRJ07CQO8hHC9ZQjzIHlDQpjloyo/exec';
 const API=GAS_IMG; // 이미지/업로드 호환용 (일부 함수에서 여전히 참조)
 const db=supabase.createClient(SB_URL,SB_KEY);
+const IMAGE_CATALOG_CONFIG=APP_CONFIG.imageCatalog||{};
+const imageCatalogDb=(IMAGE_CATALOG_CONFIG.enabled&&IMAGE_CATALOG_CONFIG.supabaseUrl&&IMAGE_CATALOG_CONFIG.supabaseKey)
+  ? supabase.createClient(IMAGE_CATALOG_CONFIG.supabaseUrl,IMAGE_CATALOG_CONFIG.supabaseKey)
+  : null;
 
 function dbHeaders(extra={}){
   return {apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json',...extra};
@@ -1291,6 +1302,99 @@ async function dbDelete(table,filter){
   return dbRequest(table,{method:'DELETE',query:filter,headers:{Prefer:'return=minimal'}});
 }
 async function dbRpc(fn,body={}){return dbRequest('rpc/'+fn,{method:'POST',body});}
+
+function chunkArray(arr,size=800){
+  const chunks=[];
+  for(let i=0;i<arr.length;i+=size) chunks.push(arr.slice(i,i+size));
+  return chunks;
+}
+function compactCodes(values){
+  return [...new Set((values||[]).map(v=>String(v||'').trim()).filter(Boolean))];
+}
+function imageUrlFromRow(row){
+  if(!row) return '';
+  return row.storage_public_url||row.image_url||row.source_image_url||'';
+}
+function applyImageRows(rows,{preferExisting=false}={}){
+  let applied=0;
+  (rows||[]).forEach(row=>{
+    const url=imageUrlFromRow(row);
+    if(!url) return;
+    const keys=compactCodes([row.p_code,row.own_code]);
+    keys.forEach(key=>{
+      if(preferExisting&&photoMap[key]) return;
+      photoMap[key]=url;
+      applied++;
+    });
+  });
+  return applied;
+}
+async function fetchPrProductImages(codes){
+  const rows=[];
+  for(const chunk of chunkArray(codes)){
+    const {data,error}=await db.from('products').select('p_code,own_code,image_url').in('p_code',chunk);
+    if(error) throw new Error(error.message);
+    rows.push(...(data||[]));
+  }
+  return rows;
+}
+async function fetchSystemImageCatalog(codes){
+  if(!imageCatalogDb) return [];
+  const view=IMAGE_CATALOG_CONFIG.view||'sellpia_product_images_public';
+  const byKey=new Map();
+  for(const chunk of chunkArray(codes)){
+    const {data:pRows,error:pError}=await imageCatalogDb
+      .from(view)
+      .select('p_code,own_code,storage_public_url,source_image_url,upload_status')
+      .in('p_code',chunk);
+    if(pError) throw new Error(pError.message);
+    (pRows||[]).forEach(row=>byKey.set('p:'+row.p_code,row));
+    const {data:oRows,error:oError}=await imageCatalogDb
+      .from(view)
+      .select('p_code,own_code,storage_public_url,source_image_url,upload_status')
+      .in('own_code',chunk);
+    if(oError) throw new Error(oError.message);
+    (oRows||[]).forEach(row=>byKey.set('o:'+row.own_code,row));
+  }
+  return [...byKey.values()];
+}
+async function loadProductImagesForCodes(rawCodes){
+  const codes=compactCodes(rawCodes);
+  const stats={requested:codes.length,prApplied:0,catalogApplied:0,errors:[]};
+  if(!codes.length) return stats;
+  let prRows=[];
+  try{
+    prRows=await fetchPrProductImages(codes);
+    stats.prApplied=applyImageRows(prRows,{preferExisting:false});
+  }catch(e){
+    stats.errors.push('PR_system products: '+e.message);
+  }
+  try{
+    const catalogCodes=compactCodes([
+      ...codes,
+      ...prRows.flatMap(row=>[row.p_code,row.own_code])
+    ]);
+    const catalogRows=await fetchSystemImageCatalog(catalogCodes);
+    stats.catalogApplied=applyImageRows(catalogRows,{preferExisting:false});
+    const catalogByOwnCode=new Map();
+    catalogRows.forEach(row=>{
+      const url=imageUrlFromRow(row);
+      if(row.own_code&&url) catalogByOwnCode.set(String(row.own_code).trim(),url);
+    });
+    prRows.forEach(row=>{
+      const url=catalogByOwnCode.get(String(row.own_code||'').trim());
+      if(!url) return;
+      compactCodes([row.p_code,row.own_code]).forEach(key=>{
+        photoMap[key]=url;
+        stats.catalogApplied++;
+      });
+    });
+  }catch(e){
+    stats.errors.push('System_v1 image catalog: '+e.message);
+  }
+  try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
+  return stats;
+}
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
   if(dp) dp.value=selectedDate;
@@ -2004,16 +2108,13 @@ async function loadData(silent=false,preserveView=false){
     // 검품탭 메모 캐시 동기화 (3분 새로고침 후 stale 방지)
     Object.assign(insp_itemMemos, memoData);
 
-    // 7. 이미지 백그라운드 로드 (DB products)
+    // 7. 이미지 백그라운드 로드 (PR_system products + System_v1 Supabase Storage catalog)
     const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.map(it=>it.code||'').filter(Boolean)))];
     if(allProdCodes.length){
-      db.from('products').select('p_code,image_url').in('p_code',allProdCodes)
-        .then(({data:imgData})=>{
-          if(imgData&&imgData.length){
-            imgData.forEach(r=>{photoMap[r.p_code]=r.image_url;});
-            try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
-            renderLeft();
-          }
+      loadProductImagesForCodes(allProdCodes)
+        .then((stats)=>{
+          if(stats.prApplied||stats.catalogApplied) renderLeft();
+          if(stats.errors.length) console.warn('image load warning',stats.errors);
         });
     }
 
@@ -5343,18 +5444,16 @@ function insp_exportLabelCSV(){
 }
 
 async function insp_linkImages(){
-  // DB products 테이블에서 이미지 로드
+  // PR_system products + System_v1 Supabase Storage catalog에서 이미지 로드
   toast('⏳ 사진 새로고침 중...',3000);
   const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.map(it=>it.code||'').filter(Boolean)))];
   if(!allProdCodes.length){ toast('⚠ 상품코드 없음'); return; }
   try{
-    const {data:imgData,error}=await db.from('products').select('p_code,image_url').in('p_code',allProdCodes);
-    if(error) throw new Error(error.message);
-    if(imgData&&imgData.length){
-      imgData.forEach(r=>{photoMap[r.p_code]=r.image_url;});
-      try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
+    const stats=await loadProductImagesForCodes(allProdCodes);
+    if(stats.prApplied||stats.catalogApplied){
       renderLeft();
-      toast('✅ 사진 연동 완료! '+imgData.length+'개');
+      const msg='✅ 사진 연동 완료! PR '+stats.prApplied.toLocaleString()+' / System_v1 '+stats.catalogApplied.toLocaleString();
+      toast(stats.errors.length?msg+' (일부 경고 있음)':msg);
     } else toast('⚠ 연동된 사진 없음');
   }catch(e){toast('❌ 사진 연동 실패: '+e.message);}
 }
