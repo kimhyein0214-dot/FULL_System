@@ -4751,7 +4751,7 @@ let _misongOrdersCache = [];  // getMisongOrders 캐시
 
 async function insp_loadMisongOrders(){
   try{
-    const {data:shRows,error}=await db.from('shortage').select('*');
+    const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
     const invMap={};
     (shRows||[]).forEach(r=>{ if(!invMap[r.inv_no]) invMap[r.inv_no]=[]; invMap[r.inv_no].push(r); });
@@ -5509,14 +5509,56 @@ function setMisongView(mode){
 async function loadMisongPickingData(showToast=false){
   if(showToast) toast('⏳ 미송피킹 불러오는 중...',4000);
   misongPickingData = [];
+  const pushedKeys = new Set();
+  const addMisongPickingRow = row => {
+    if(!row || !row.code) return;
+    const invKey = String(row.invNo||seqToReal[row.seq]||row.seq||'').trim();
+    const key = (invKey||String(row.seq||''))+'-'+row.code;
+    if(pushedKeys.has(key)) return;
+    pushedKeys.add(key);
+    misongPickingData.push(row);
+  };
   if(ORDERS_ALL && ORDERS_ALL.length){
     ORDERS_ALL.forEach(o=>{
       o.items.forEach(it=>{
         const k=o.no+'-'+it.code;
         const sh=shortage[k]||0;
-        if(sh>0) misongPickingData.push({seq:o.no,code:it.code,name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
+        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:it.code,name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
       });
     });
+  }
+  try{
+    const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
+    if(error) throw error;
+    const terminalStatuses = new Set(['검품완료','메모정리완료','발송완료']);
+    (shRows||[]).forEach(r=>{
+      const status=String(r.status||'').trim();
+      if(terminalStatuses.has(status)) return;
+      const sh=shortageRowQty(r);
+      const shouldShow = sh>0 || status==='피킹완료';
+      if(!shouldShow || !r.p_code) return;
+      const seqNo = realToSeq[r.inv_no]||String(r.inv_no||r.ord_no||'');
+      const order = realToSeq[r.inv_no] ? ORDERS_ALL.find(o=>String(o.no)===String(realToSeq[r.inv_no])) : null;
+      const item = order?.items.find(it=>it.code===r.p_code);
+      const k = seqNo+'-'+r.p_code;
+      if(sh>0) shortage[k]=sh;
+      if(r.drawer_no&&!drawer[seqNo]) drawer[seqNo]=r.drawer_no;
+      addMisongPickingRow({
+        seq: seqNo,
+        invNo: r.inv_no||'',
+        ordNo: r.ord_no||'',
+        code: r.p_code,
+        name: item ? itemNameWithOption(item) : (r.p_name||''),
+        buyer: order?.buyer||r.orderer||'',
+        shortage: sh,
+        drawer: drawer[seqNo]||r.drawer_no||'',
+        shortageDate: getShortageBaseDate(r,realToSeq[r.inv_no]||'')||selectedDate,
+        status
+      });
+    });
+  }catch(e){
+    console.warn('미송피킹 전체 미송 로드 실패:', e);
+    if(showToast) toast('⚠ 과거 미송 로드 실패: '+(e.message||e));
   }
   renderMisongList();
   renderMisongSidebar();
@@ -5608,7 +5650,7 @@ function renderMisongList(){
   // 검색 필터
   const q = misongSearchQ;
   const searched = q ? misongPickingData.filter(r=>{
-    const realInv = String(seqToReal[r.seq]||'').toLowerCase();
+    const realInv = String(seqToReal[r.seq]||r.invNo||'').toLowerCase();
     return String(r.seq).includes(q)
       || realInv.includes(q)
       || String(r.code||'').toLowerCase().includes(q)
@@ -5647,7 +5689,7 @@ function renderMisongList(){
       const prodCode = maps.codeToProdCode[code]||code;
       const itemsHtml = rows.map(r=>{
         const dr=String(drawer[r.seq]||r.drawer||'').trim();
-        const realInv=seqToReal[r.seq]||'';
+        const realInv=seqToReal[r.seq]||r.invNo||'';
         return `<div class="misong-code-row">
           <div class="misong-drawer-pill ${dr?'':'empty'}" onclick="event.stopPropagation();openKeypad('${e2(r.seq)}','${e2(dr)}',this)" title="서랍번호 입력">${dr||'서랍입력'}</div>
           <div class="misong-code-meta" onclick="openPopup('${e2(r.seq)}')">
@@ -5681,7 +5723,7 @@ function renderMisongList(){
       const first=rows[0];
       const allDone=rows.every(r=>r.shortage===0);
       const dr=String(drawer[seq]||first.drawer||'').trim();
-      const realInv=seqToReal[seq]||'';
+      const realInv=seqToReal[seq]||first.invNo||'';
       const totalSh=rows.reduce((s,r)=>s+(r.shortage||0),0);
       const itemsHtml = rows.map(r=>renderMisongItemRow({...r,drawer:dr},maps)).join('');
       return `<div class="misong-group ${allDone&&misongViewMode!=='done'?'dim':''}">
@@ -5736,18 +5778,19 @@ function completeMisong(seq, code){
 
 async function saveMisongShortage(seq, code, newShortage, prevShortage){
   try{
-    const inv_no=seqToReal[seq]||String(seq);
-    const _ord2=noMap[seq]?.ord_no||inv_no;
+    const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
+    const inv_no=row?.invNo||seqToReal[seq]||String(seq);
+    const _ord2=row?.ordNo||noMap[seq]?.ord_no||inv_no;
     const {error}=await db.from('picking').upsert({inv_no,ord_no:_ord2,p_code:code,shortage_qty:newShortage},{onConflict:'inv_no,p_code'});
     if(error) throw error;
     // shortage 테이블 동기화
     if(newShortage>0){
-      const order=ORDERS_ALL.find(o=>String(o.no)===String(seq));
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(seq)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no));
       const item=order?.items.find(it=>it.code===code);
       await db.from('shortage').upsert({
         inv_no, ord_no:_ord2,
-        orderer: order?.buyer||'',
-        p_code: code, p_name: item?.name||'',
+        orderer: order?.buyer||row?.buyer||'',
+        p_code: code, p_name: item ? itemNameWithOption(item) : (row?.name||''),
         short_qty: newShortage, memo2_val: String(newShortage), is_gold: isGold(item||code),
         status: '배송대기', updated_at: new Date().toISOString(),
       },{onConflict:'inv_no,p_code'});
