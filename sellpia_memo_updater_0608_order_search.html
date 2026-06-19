@@ -233,6 +233,31 @@
         }
       }
     }
+    async function applyOrderSearchDate(date, runSearch) {
+      if (!date) return;
+      const dateType = document.querySelector('#date_type, select[name="date_type"]');
+      if (dateType) {
+        dateType.value = 'collect_date';
+        dateType.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      const start = document.querySelector('#search_date_s, input[name="search_date_s"]');
+      const end = document.querySelector('#search_date_e, input[name="search_date_e"]');
+      if (!start || !end) {
+        addLog('  날짜 검색 필드 없음: DB 날짜 기준으로만 대상 선정');
+        return;
+      }
+      triggerValue(start, date);
+      triggerValue(end, date);
+      addLog(`  주문조회 검색일자 적용: ${date} ~ ${date}`);
+      if (!runSearch) return;
+      if (typeof window.search_order === 'function') {
+        window.search_order();
+      } else {
+        const btn = document.querySelector('#search_b, #btn_search, input[value="검색"], button');
+        if (btn) btn.click();
+      }
+      await sleep(900);
+    }
     async function searchInvoice(invNo) {
       if (!window.grid7 || !window.grid8 || typeof window.view_order_detail !== 'function') {
         throw new Error('주문조회 grid/view_order_detail 함수를 찾을 수 없습니다. 페이지 로딩 후 다시 실행해주세요.');
@@ -372,8 +397,11 @@
     function isDoneStatus(status) {
       return ['검품완료', '메모정리완료'].includes(normal(status));
     }
-    function isWaitingStatus(status) {
-      return ['발송대기', '피킹완료'].includes(normal(status));
+    function isPickedStatus(status) {
+      return normal(status) === '피킹완료';
+    }
+    function isNextShipStatus(status) {
+      return normal(status) === '발송대기';
     }
     function buildTask(invNo, ordNo, shortageRows, pickingRows) {
       const task = {
@@ -382,6 +410,12 @@
         drawerNo: '',
         memo2Map: new Map(),
         clear: false,
+        releaseHold: false,
+        skip: false,
+        nextShip: false,
+        writeMemo1: false,
+        writeHold: false,
+        reason: '',
         hold: false,
         hasDbData: (shortageRows.length + pickingRows.length) > 0
       };
@@ -389,25 +423,71 @@
         if (row.hold) task.hold = true;
         if (!task.drawerNo && normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY') task.drawerNo = normal(row.drawer_no);
       }
+      const activeRows = [];
+      const pickedRows = [];
+      const nextShipRows = [];
+      const clearRows = [];
       for (const row of shortageRows) {
         const status = normal(row.status);
-        if (isDoneStatus(status)) task.clear = true;
         const drawer = normal(row.drawer_no);
         if (!task.drawerNo && drawer && drawer !== 'EMPTY') task.drawerNo = drawer;
-        const pCode = normal(row.p_code);
-        const qty = Number(row.short_qty || 0);
-        const memo2Val = normal(row.memo2_val);
-        if (!pCode || task.clear) continue;
-        if (qty > 0) task.memo2Map.set(pCode, String(qty));
-        else if (isWaitingStatus(status) && memo2Val) task.memo2Map.set(pCode, memo2Val);
+        if (isDoneStatus(status)) clearRows.push(row);
+        else if (isNextShipStatus(status)) nextShipRows.push(row);
+        else if (Number(row.short_qty || 0) > 0) activeRows.push(row);
+        else if (isPickedStatus(status)) pickedRows.push(row);
       }
-      if (task.clear) {
+      if (clearRows.length) {
+        task.clear = true;
         task.drawerNo = '';
         task.memo2Map.clear();
         task.hold = false;
-      } else if (task.memo2Map.size || task.drawerNo) {
-        task.hold = true;
+        task.writeMemo1 = true;
+        task.writeHold = true;
+        task.reason = '검품완료: 메모 삭제 + 배송보류 해제';
+        return task;
       }
+      if (nextShipRows.length && !activeRows.length) {
+        task.nextShip = true;
+        task.releaseHold = true;
+        task.hold = false;
+        task.writeMemo1 = true;
+        task.writeHold = true;
+        task.reason = '발송대기: 내일출고 메모 + 메모2 ㅁ + 배송보류 해제';
+        for (const row of nextShipRows) {
+          const pCode = normal(row.p_code);
+          if (!pCode) continue;
+          task.memo2Map.set(pCode, normal(row.memo2_val) || 'ㅁ');
+        }
+        return task;
+      }
+      if (activeRows.length && !pickedRows.length) {
+        task.writeMemo1 = !!task.drawerNo;
+        task.writeHold = true;
+        task.hold = true;
+        task.reason = '미송 발생: 서랍번호 + 부족수량 + 배송보류';
+        for (const row of activeRows) {
+          const pCode = normal(row.p_code);
+          if (pCode) task.memo2Map.set(pCode, String(Number(row.short_qty || 0)));
+        }
+        return task;
+      }
+      if (activeRows.length && pickedRows.length) {
+        task.writeMemo1 = false;
+        task.writeHold = false;
+        task.reason = '부분 미송피킹: 피킹된 상품만 관리메모2 ㅁ';
+        for (const row of pickedRows) {
+          const pCode = normal(row.p_code);
+          if (pCode) task.memo2Map.set(pCode, normal(row.memo2_val) || 'ㅁ');
+        }
+        return task;
+      }
+      if (pickedRows.length && !activeRows.length) {
+        task.skip = true;
+        task.reason = '미송 전량 피킹완료: 검품 전이므로 셀피아 무반영';
+        return task;
+      }
+      task.skip = true;
+      task.reason = '반영할 상태 없음';
       return task;
     }
     function matchMemo2Rows(rows, memo2Map) {
@@ -491,11 +571,13 @@
       }
       const rows = detail.rows.length ? detail.rows : detailRows().filter(row => normal(row.ord_no) === detail.ordNo);
       if (!rows.length) throw new Error('상세 상품 행이 없습니다.');
+      if (task.skip) return task.reason || '스킵';
       const firstRow = rows[0];
       const actions = [];
-      if (options.doMemo1) {
-        await updateMemo('o_shop_memo', firstRow, task.clear ? '' : task.drawerNo, true);
-        actions.push(task.clear ? '관리메모 삭제' : `관리메모=${task.drawerNo || '-'}`);
+      if (options.doMemo1 && task.writeMemo1) {
+        const memo1Value = task.clear ? '' : task.nextShip ? options.nextShipMemo : task.drawerNo;
+        await updateMemo('o_shop_memo', firstRow, memo1Value, true);
+        actions.push(task.clear ? '관리메모 삭제' : task.nextShip ? `관리메모=${memo1Value}` : `관리메모=${task.drawerNo || '-'}`);
       }
       if (options.doMemo2) {
         if (task.clear) {
@@ -510,7 +592,7 @@
           if (unmatchedCodes.length) addLog(`  상품코드 미매칭: ${unmatchedCodes.join(', ')}`);
         }
       }
-      if (options.doHold) {
+      if (options.doHold && task.writeHold) {
         await setDeliveryHold(rows, !!task.hold);
         actions.push(task.hold ? '배송보류 설정' : '배송보류 해제');
       }
@@ -534,6 +616,8 @@
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo2" type="checkbox" checked> 관리메모2</label>
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-hold" type="checkbox" checked> 배송보류</label>
             </div>
+            <label style="display:block;margin:0 0 6px;color:#cbd5e1;font-size:12px;">발송대기 관리메모1 문구</label>
+            <input id="smu0608-nextship-memo" value="!!" placeholder="예: !! / ?? / 내일출고" style="width:100%;box-sizing:border-box;height:38px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;margin-bottom:14px;">
             <button id="smu0608-start" style="width:100%;height:42px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:900;cursor:pointer;">시작</button>
           </div>
           <div id="smu0608-work" style="display:none;">
@@ -573,7 +657,8 @@
       const options = {
         doMemo1: $id('smu0608-memo1').checked,
         doMemo2: $id('smu0608-memo2').checked,
-        doHold: $id('smu0608-hold').checked
+        doHold: $id('smu0608-hold').checked,
+        nextShipMemo: normal($id('smu0608-nextship-memo').value) || '!!'
       };
       if (!invNo && !date) {
         alert('운송장번호 또는 날짜를 입력해주세요.');
@@ -584,6 +669,10 @@
       $id('smu0608-work').style.display = 'block';
       stopped = false;
       try {
+        if (date) {
+          setStatus(`${date} 주문조회 검색조건 적용 중`);
+          await applyOrderSearchDate(date, true);
+        }
         if (invNo) {
           setStatus(`1건 처리 준비\n${invNo}`);
           const built = await buildTaskFromInvoice(invNo);
