@@ -144,6 +144,18 @@
     }[ch]));
     const normal = value => String(value ?? '').trim();
     const uniq = list => [...new Set(list.filter(Boolean).map(v => String(v)))];
+    function isGoldCode(value) {
+      const code = normal(value).toUpperCase();
+      return code.startsWith('GPA') || code.startsWith('GPB') || code.includes('14K');
+    }
+    function isGoldRow(row) {
+      const flag = normal(row && (row.is_gold ?? row.is14k)).toUpperCase();
+      if (['Y', 'YES', 'TRUE', '1'].includes(flag)) return true;
+      return isGoldCode(row && (row.p_code || row.prod_code || row.product_code || row.c_p_code));
+    }
+    function postgrestIn(values) {
+      return uniq(values).map(v => encodeURIComponent(v)).join(',');
+    }
     const waitFor = async (predicate, timeout, interval = 120) => {
       const started = Date.now();
       let lastError = null;
@@ -592,27 +604,51 @@
       );
       return { detail, task: buildTask(invNo, detail.ordNo, shortageRows || [], pickingRows || []) };
     }
-    async function collectDateTasks(date) {
+    async function collectDateTasks(date, filters = {}) {
       const d0 = date.replace(/-/g, '');
       const d1Obj = new Date(date + 'T00:00:00');
       d1Obj.setDate(d1Obj.getDate() + 1);
       const d1 = d1Obj.toISOString().slice(0, 10).replace(/-/g, '');
       let shortageRows;
       try {
-        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val`);
+        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold`);
       } catch (err) {
         addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
         shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=ord_no,short_qty,drawer_no,status,p_code,memo2_val`);
       }
       if (!shortageRows.length) return [];
       const ordNos = uniq(shortageRows.map(row => row.ord_no));
-      let pickingRows = [];
+      const orderMeta = new Map();
       if (ordNos.length) {
         try {
-          pickingRows = await dbRequest(`picking?ord_no=in.(${ordNos.map(encodeURIComponent).join(',')})&select=inv_no,ord_no,hold,drawer_no`);
+          const orderRows = await dbRequest(`orders?ord_no=in.(${postgrestIn(ordNos)})&select=ord_no,am_pm`);
+          (orderRows || []).forEach(row => orderMeta.set(normal(row.ord_no), { amPm: normal(row.am_pm).toUpperCase() }));
+        } catch (err) {
+          addLog(`  DB fallback(orders filter): ${err.message.slice(0, 80)}`);
+        }
+      }
+      const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
+      if (sessionFilter !== 'ALL' && orderMeta.size) {
+        shortageRows = shortageRows.filter(row => (orderMeta.get(normal(row.ord_no))?.amPm || '') === sessionFilter);
+      } else if (sessionFilter !== 'ALL') {
+        addLog('  AM/PM 필터를 적용할 orders.am_pm 정보를 찾지 못해 세션 필터를 건너뜁니다.');
+      }
+      const typeFilter = normal(filters.itemType || 'ALL').toUpperCase();
+      if (typeFilter !== 'ALL') {
+        shortageRows = shortageRows.filter(row => {
+          const gold = isGoldRow(row);
+          return typeFilter === 'GOLD' ? gold : !gold;
+        });
+      }
+      if (!shortageRows.length) return [];
+      const filteredOrdNos = uniq(shortageRows.map(row => row.ord_no));
+      let pickingRows = [];
+      if (filteredOrdNos.length) {
+        try {
+          pickingRows = await dbRequest(`picking?ord_no=in.(${postgrestIn(filteredOrdNos)})&select=inv_no,ord_no,hold,drawer_no`);
         } catch (err) {
           addLog(`  DB fallback(picking date): ${err.message.slice(0, 80)}`);
-          pickingRows = await dbRequest(`picking?ord_no=in.(${ordNos.map(encodeURIComponent).join(',')})&select=ord_no,hold,drawer_no`);
+          pickingRows = await dbRequest(`picking?ord_no=in.(${postgrestIn(filteredOrdNos)})&select=ord_no,hold,drawer_no`);
         }
       }
       const byOrd = new Map();
@@ -687,6 +723,22 @@
             <input id="smu0608-inv" placeholder="1건만 처리할 때 입력" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
             <label style="display:block;margin:14px 0 6px;color:#cbd5e1;font-size:12px;">날짜</label>
             <input id="smu0608-date" type="date" value="${today()}" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;">
+              <label style="display:block;color:#cbd5e1;font-size:12px;">AM/PM
+                <select id="smu0608-session" style="margin-top:6px;width:100%;box-sizing:border-box;height:38px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 10px;font-size:13px;">
+                  <option value="ALL">전체</option>
+                  <option value="AM">오전</option>
+                  <option value="PM">오후</option>
+                </select>
+              </label>
+              <label style="display:block;color:#cbd5e1;font-size:12px;">상품구분
+                <select id="smu0608-item-type" style="margin-top:6px;width:100%;box-sizing:border-box;height:38px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 10px;font-size:13px;">
+                  <option value="ALL">전체</option>
+                  <option value="NORMAL">일반만</option>
+                  <option value="GOLD">14K만</option>
+                </select>
+              </label>
+            </div>
             <div style="display:flex;gap:12px;margin:14px 0 18px;flex-wrap:wrap;">
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo1" type="checkbox" checked> 관리메모</label>
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo2" type="checkbox" checked> 관리메모2</label>
@@ -730,6 +782,10 @@
     $id('smu0608-start').onclick = async () => {
       const invNo = normal($id('smu0608-inv').value);
       const date = normal($id('smu0608-date').value);
+      const session = normal($id('smu0608-session').value || 'ALL');
+      const itemType = normal($id('smu0608-item-type').value || 'ALL');
+      const sessionLabel = session === 'AM' ? '오전' : session === 'PM' ? '오후' : '전체';
+      const itemTypeLabel = itemType === 'GOLD' ? '14K만' : itemType === 'NORMAL' ? '일반만' : '전체';
       const options = {
         doMemo1: $id('smu0608-memo1').checked,
         doMemo2: $id('smu0608-memo2').checked,
@@ -740,7 +796,7 @@
         alert('운송장번호 또는 날짜를 입력해주세요.');
         return;
       }
-      if (!invNo && !confirm(`${date} 날짜의 미송 데이터를 주문조회에서 순차 반영합니다. 계속할까요?`)) return;
+      if (!invNo && !confirm(`${date} / ${sessionLabel} / ${itemTypeLabel} 미송 데이터를 주문조회에서 순차 반영합니다. 계속할까요?`)) return;
       $id('smu0608-form').style.display = 'none';
       $id('smu0608-work').style.display = 'block';
       stopped = false;
@@ -759,12 +815,13 @@
           addLog(`완료: ${invNo} / ${result}`);
           return;
         }
-        setStatus(`${date} 데이터 조회 중`);
-        const tasks = await collectDateTasks(date);
+        setStatus(`${date} ${sessionLabel} ${itemTypeLabel} 데이터 조회 중`);
+        const tasks = await collectDateTasks(date, { session, itemType });
         if (!tasks.length) {
           setStatus('처리할 데이터가 없습니다.');
           return;
         }
+        addLog(`필터: ${date} / ${sessionLabel} / ${itemTypeLabel}`);
         addLog(`처리 대상 ${tasks.length}건`);
         let ok = 0;
         let fail = 0;
