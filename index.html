@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0619-drawer-product-ui-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0619-workflow-state-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1432,6 +1432,7 @@ try{
 let jos=[], josInfo=[];
 let checked={},shortage={},drawer={},holded={},memoData={};
 let shortageDate={}; // no-code -> first/known shortage date
+let shortageStatus={}, shortageMemo2={}; // no-code -> shortage.status / memo2_val
 let seqToReal={}; // print_seq_no/work_seq_no → 실제 우체국 송장번호
 let realToSeq={}; // 실제 우체국 송장번호 → print_seq_no/work_seq_no
 var insp_itemMemos = {}; // 검품메모 (피킹메모와 연동)
@@ -2060,7 +2061,7 @@ async function loadData(silent=false,preserveView=false){
     });
 
     // 4.5 셀피아 관리메모 → drawer/shortage 초기 시딩 (picking 테이블이 덮어씌움)
-    shortage={}; shortageDate={}; drawer={};
+    shortage={}; shortageDate={}; shortageStatus={}; shortageMemo2={}; drawer={};
     (itemsData||[]).forEach(it=>{
       const no=ordToNo[it.ord_no]; if(!no) return;
       const memo1=cleanSellpiaManageMemo(it.o_shop_memo);
@@ -2090,6 +2091,8 @@ async function loadData(silent=false,preserveView=false){
       const q=shortageRowQty(row);
       if(q>0&&!shortage[k]) shortage[k]=q;
       if(q>0) shortageDate[k]=getShortageBaseDate(row,no)||shortageDate[k]||selectedDate;
+      shortageStatus[k]=normalizeShortageStatus(row.status);
+      shortageMemo2[k]=String(row.memo2_val??'').trim();
     });
     ORDERS_ALL.forEach(o=>{
       // 표시용 최신 상태 보정. 정렬 자체는 번호 안정성을 위해 로딩 초기에 계산한 planned_print_seq_no를 사용합니다.
@@ -2331,7 +2334,7 @@ function renderAll(skipLeft){
   const jo=jos[curJo];
   const reg=jo; // TODO(gold-picking-state): split normal/gold picking state into separate columns or pick_type later.
   const tot=reg.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)).length,0);
-  const don=reg.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&checked[o.no+'-'+it.code]).length,0);
+  const don=reg.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(o.no,it.code))).length,0);
   const pct=tot?Math.round(don/tot*100):0;
   document.getElementById('prog-fill').style.width=pct+'%';
   const mNum=getManualJoNum(curJo);
@@ -2339,11 +2342,12 @@ function renderAll(skipLeft){
   document.getElementById('prog-pct').textContent=pct+'%';
   
   const pickableOrders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)));
-  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>checked[o.no+'-'+it.code])).length;  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0).length,0);
-  const holdCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&holded[o.no+'-'+it.code]).length,0);
+  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(o.no,it.code)))).length;
+  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT).length,0);
+  const holdCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.HOLD).length,0);
   const memoWaitInvNos=new Set();
   ORDERS_ALL.forEach(o=>{
-    if(o.items.some(it=>!isGold(it)&&((shortage[o.no+'-'+it.code]||0)>0||holded[o.no+'-'+it.code]||String(drawer[o.no]||'').trim()))){
+    if(o.items.some(it=>!isGold(it)&&([WF_STATUS.SHORT,WF_STATUS.REPICKED_READY,WF_STATUS.HOLD].includes(getItemWorkflowState(o.no,it.code))||String(drawer[o.no]||'').trim()))){
       const inv=seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||String(o.no);
       if(inv) memoWaitInvNos.add(String(inv));
     }
@@ -2363,12 +2367,12 @@ function renderAll(skipLeft){
 
 function updateHeaderSummaryCounts(){
   const pickableOrders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)));
-  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>checked[o.no+'-'+it.code])).length;
-  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0).length,0);
-  const holdCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&holded[o.no+'-'+it.code]).length,0);
+  const dAll=pickableOrders.filter(o=>o.items.filter(it=>!isGold(it)).every(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(o.no,it.code)))).length;
+  const shortageCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT).length,0);
+  const holdCnt=ORDERS_ALL.reduce((sum,o)=>sum+o.items.filter(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.HOLD).length,0);
   const memoWaitInvNos=new Set();
   ORDERS_ALL.forEach(o=>{
-    if(o.items.some(it=>!isGold(it)&&((shortage[o.no+'-'+it.code]||0)>0||holded[o.no+'-'+it.code]||String(drawer[o.no]||'').trim()))){
+    if(o.items.some(it=>!isGold(it)&&([WF_STATUS.SHORT,WF_STATUS.REPICKED_READY,WF_STATUS.HOLD].includes(getItemWorkflowState(o.no,it.code))||String(drawer[o.no]||'').trim()))){
       const inv=seqToReal[o.no]||o.invNo||noMap[o.no]?.inv_no||String(o.no);
       if(inv) memoWaitInvNos.add(String(inv));
     }
@@ -2387,9 +2391,9 @@ function renderSidebar(){
   wrap.innerHTML=jos.map((jo,i)=>{
     const gNos=new Set(GOLD_ORDERS.map(o=>o.no));
     const reg=jo;
-    const don=reg.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&checked[o.no+'-'+it.code]).length,0);
+    const don=reg.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(o.no,it.code))).length,0);
     const tot=reg.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)).length,0);
-    const sh=reg.some(o=>o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0));
+    const sh=reg.some(o=>o.items.some(it=>getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT));
     const hasGold=jo.some(o=>gNos.has(o.no));
     const done=tot>0&&don===tot;
     const cls='jo-side-btn'+(i===curJo?' active':'')+(done?' done':sh?' has-short':hasGold?' has-gold':'');
@@ -2404,8 +2408,8 @@ function renderSidebar(){
       invNums=mNum?jo.map(o=>'출'+o.no).join(' '):('출'+jo[0].no+'~출'+jo[jo.length-1].no);
     }
     // 대상 항목 중 미체크 수 (골드/부족/보류 제외)
-    const qualifying=jo.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&!(shortage[o.no+'-'+it.code]>0)&&!holded[o.no+'-'+it.code]).length,0);
-    const unchecked=jo.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&!(shortage[o.no+'-'+it.code]>0)&&!holded[o.no+'-'+it.code]&&!checked[o.no+'-'+it.code]).length,0);
+    const qualifying=jo.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&![WF_STATUS.SHORT,WF_STATUS.HOLD,WF_STATUS.REPICKED_READY].includes(getItemWorkflowState(o.no,it.code))).length,0);
+    const unchecked=jo.reduce((s,o)=>s+o.items.filter(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.NORMAL).length,0);
     const allBulkDone=qualifying>0&&unchecked===0;
     return `<div class="jo-side-row"><button class="${cls}" style="flex:1;min-width:0;" onclick="switchJo(${i})"><span class="jo-side-no">${joLabel}</span><span style="font-size:9px;opacity:0.55;line-height:1.3;flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${invNums}</span><span class="jo-side-stat">${don}/${tot}</span>${sh&&!done?'<span style="font-size:10px;">⚠</span>':''}${hasGold&&!done?'<span style="font-size:10px;">🥇</span>':''}${done?'<span style="font-size:10px;">✓</span>':''}</button><button class="jo-bulk-btn${allBulkDone?' done-state':''}" onclick="bulkCheckJo(${i},event)" title="${allBulkDone?joLabel+' 일괄 체크 취소':joLabel+' 일괄 체크 (부족수량 제외)'}">${allBulkDone?'↩':'☑'}</button></div>`;
   }).join('');
@@ -2422,10 +2426,10 @@ function renderRightDetail(no){
   const gInv=GOLD_ORDERS.some(o=>o.no===no);
   const multi=buildMultiMap(jos[curJo]);
   const regItems=order.items.filter(it=>!isGold(it));
-  const doneCnt=regItems.filter(it=>checked[no+'-'+it.code]).length;
+  const doneCnt=regItems.filter(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(no,it.code))).length;
   const allDone=regItems.length>0&&doneCnt===regItems.length;
-  const hasShort=order.items.some(it=>(shortage[no+'-'+it.code]||0)>0);
-  const hasHold=order.items.some(it=>holded[no+'-'+it.code]);
+  const hasShort=order.items.some(it=>getItemWorkflowState(no,it.code)===WF_STATUS.SHORT);
+  const hasHold=order.items.some(it=>getItemWorkflowState(no,it.code)===WF_STATUS.HOLD);
   const drVal=drawer[no]||'';
 
   const statColor=allDone?'#7DFFB8':hasShort?'#FF9090':hasHold?'#FFB74D':'rgba(255,255,255,0.5)';
@@ -2443,7 +2447,8 @@ function renderRightDetail(no){
   document.getElementById('rp-scroll').innerHTML=detailItems.map((it,idx)=>{
     const c=multi[it.prodCode||it.code]||{b:'#B0BEC5'};
     const gItem=isGold(it);
-    const done2=checked[no+'-'+it.code], isHold=!!holded[no+'-'+it.code], shVal=shortage[no+'-'+it.code]||0;
+    const itemState=getItemWorkflowState(no,it.code);
+    const done2=[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), isHold=itemState===WF_STATUS.HOLD, shVal=shortage[no+'-'+it.code]||0;
     const seq=it.seqLabel||idx+1;
     const itemTitle=it.displayName||itemNameWithOption(it);
     const canCheck=!gItem&&!isHold;
@@ -2524,10 +2529,10 @@ function renderCSSidebar(){
     return true;
   });
   const stCounts = {
-    '': typeFiltered.filter(r=>{const s=String(r.status||'').trim(); return s!=='발송완료'&&s!=='부분발송'&&s!=='발송대기';}).length,
-    '부분발송': typeFiltered.filter(r=>String(r.status||'').trim()==='부분발송').length,
-    '발송대기': typeFiltered.filter(r=>String(r.status||'').trim()==='발송대기').length,
-    '발송완료': typeFiltered.filter(r=>String(r.status||'').trim()==='발송완료').length,
+    '': typeFiltered.filter(r=>normalizeCSStatus(r.status)==='').length,
+    '부분발송': typeFiltered.filter(r=>normalizeCSStatus(r.status)==='부분발송').length,
+    '발송대기': typeFiltered.filter(r=>normalizeCSStatus(r.status)==='발송대기').length,
+    '발송완료': typeFiltered.filter(r=>normalizeCSStatus(r.status)==='발송완료').length,
     '전체': typeFiltered.length,
   };
   [{key:'전체',label:'전체'},{key:'',label:'처리X'},{key:'부분발송',label:'📦 부분발송'},{key:'발송대기',label:'⏳ 발송대기'},{key:'발송완료',label:'✅ 발송완료'}].forEach(s=>{
@@ -2691,11 +2696,11 @@ function renderLeft(){
   });
 
   if(viewMode==='gold') flat=flat.filter(f=>f.goldItem);
-  else if(viewMode==='short') flat=flat.filter(f=>(shortage[f.no+'-'+f.code]||0)>0);
-  else if(viewMode==='hold') flat=flat.filter(f=>holded[f.no+'-'+f.code]);
+  else if(viewMode==='short') flat=flat.filter(f=>getItemWorkflowState(f.no,f.code)===WF_STATUS.SHORT);
+  else if(viewMode==='hold') flat=flat.filter(f=>getItemWorkflowState(f.no,f.code)===WF_STATUS.HOLD);
   else if(viewMode==='nodrawer'){
     const src=viewGlobal?ORDERS_ALL:jo;
-    const noDrawerNos=new Set(src.filter(o=>o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0)&&!String(drawer[o.no]||'').trim()).map(o=>o.no));
+    const noDrawerNos=new Set(src.filter(o=>o.items.some(it=>getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT)&&!String(drawer[o.no]||'').trim()).map(o=>o.no));
     flat=flat.filter(f=>noDrawerNos.has(f.no));
   }
   flat=annotateSameProductRows(flat);
@@ -2725,7 +2730,8 @@ function renderLeft(){
     const _pcode=f.prodCode||f.code;
     const isM=!!multi[_pcode], c=multi[_pcode]||{b:'#B0BEC5',t:'var(--text)',bg:'#fff'};
     const goldDimmed=f.goldItem&&viewMode!=='gold';
-    const done=!goldDimmed&&!!checked[f.no+'-'+f.code], shVal=shortage[f.no+'-'+f.code]||0, sh=shVal>0, isHold=!!holded[f.no+'-'+f.code];
+    const itemState=getItemWorkflowState(f.no,f.code);
+    const done=!goldDimmed&&[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), shVal=shortage[f.no+'-'+f.code]||0, sh=itemState===WF_STATUS.SHORT, isHold=itemState===WF_STATUS.HOLD;
 
     if(_pcode!==prevCode) prevCode=_pcode;
     // 위치 표기: 자신 위치 + 쌍 파트너 위치
@@ -2883,8 +2889,8 @@ function openZoneSortPopup(){
   const cells=src.map(o=>{
     const st=TS[getKey(o)];
     const regItems=o.items.filter(it=>!isGold(it));
-    const done=regItems.length>0&&regItems.every(it=>checked[o.no+'-'+it.code]);
-    const hasShort=o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0);
+    const done=regItems.length>0&&regItems.every(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(o.no,it.code)));
+    const hasShort=o.items.some(it=>getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT);
     return `<div onclick="jumpToRight(${o.no});closeZoneSortPopup();" style="padding:5px 2px;border-radius:5px;border:1.5px solid ${done?'#267A48':st.bd};background:${done?'#0A2A16':st.bg};color:${done?'#5DFFAA':st.tx};font-size:12px;font-weight:900;text-align:center;cursor:pointer;position:relative;" title="${buyerLabel(o.buyer,o.recv||'')}">${workNoText(o.no)}${hasShort?'<span style="position:absolute;top:0;right:1px;font-size:7px;color:#FF8080;">⚠</span>':''}</div>`;
   }).join('');
   const legend=Object.values(TS).map(st=>`<span style="display:flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:${st.tx};"><span style="width:8px;height:8px;border-radius:2px;background:${st.bg};border:1.5px solid ${st.bd};display:inline-block;"></span>${st.lbl}</span>`).join('');
@@ -2907,15 +2913,15 @@ function closeZoneSortPopup(){ document.getElementById('zone-sort-popup')?.remov
 function getBottomTrayContext(){
   const currentJo=jos[curJo]||[];
   if(viewGlobal&&viewMode==='short'){
-    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0));
+    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT));
     return {orders,label:'📦 미송 주문서',empty:'미송 주문서가 없습니다'};
   }
   if(viewGlobal&&viewMode==='hold'){
-    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&holded[o.no+'-'+it.code]));
+    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.HOLD));
     return {orders,label:'📦 보류 주문서',empty:'보류 주문서가 없습니다'};
   }
   if(viewGlobal&&viewMode==='nodrawer'){
-    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&(shortage[o.no+'-'+it.code]||0)>0)&&!String(drawer[o.no]||'').trim());
+    const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT)&&!String(drawer[o.no]||'').trim());
     return {orders,label:'📦 서랍없는 주문서',empty:'서랍번호 미입력 주문서가 없습니다'};
   }
   return {orders:currentJo,label:zoneSortMode?'📦 종별 주문서':'📦 조별 주문서',empty:'주문서가 없습니다'};
@@ -2934,10 +2940,10 @@ function renderRight(){
     if(!order) continue;
     const gInv=goldNos.has(order.no);
     const regItems=order.items.filter(it=>!isGold(it));
-    const doneCnt=regItems.filter(it=>checked[order.no+'-'+it.code]).length;
+    const doneCnt=regItems.filter(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(order.no,it.code))).length;
     const allDone=regItems.length>0&&doneCnt===regItems.length;
-    const hasShort=order.items.some(it=>(shortage[order.no+'-'+it.code]||0)>0);
-    const hasHold=order.items.some(it=>holded[order.no+'-'+it.code]);
+    const hasShort=order.items.some(it=>getItemWorkflowState(order.no,it.code)===WF_STATUS.SHORT);
+    const hasHold=order.items.some(it=>getItemWorkflowState(order.no,it.code)===WF_STATUS.HOLD);
     const drVal=drawer[order.no]||'';
     
     const hcls=gInv?'gold':allDone?'done':hasShort?'short':hasHold?'hold':'def';
@@ -2947,7 +2953,8 @@ function renderRight(){
 
     const items=order.items.map(it=>{
       const c=multi[it.code]||{b:'#B0BEC5'};
-      const done=checked[order.no+'-'+it.code], sh=(shortage[order.no+'-'+it.code]||0)>0, isHold=!!holded[order.no+'-'+it.code], gItem=isGold(it), inGInv=gInv&&!gItem;
+      const itemState=getItemWorkflowState(order.no,it.code);
+      const done=[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), sh=itemState===WF_STATUS.SHORT, isHold=itemState===WF_STATUS.HOLD, gItem=isGold(it), inGInv=gInv&&!gItem;
       const dotColor=gItem?'#D4A800':inGInv?'rgba(200,168,75,0.5)':done?'#0E7A4A':isHold?'#FFB74D':sh?'#E57373':c.b;
       const itemTitle=itemNameWithOption(it);
       return `<div class="ic-item"><div class="ic-dot" style="background:${dotColor}"></div><div class="ic-item-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':'var(--text)'}"><div>${it.prodCode||it.code}${inGInv?'<span style="font-size:8px;color:rgba(200,168,75,0.8);margin-left:2px;">골드</span>':''}</div><div style="font-size:9px;font-weight:600;color:var(--muted);line-height:1.25;margin-top:1px;">${esc(itemTitle)}</div></div><span class="ic-item-qty">${it.qty}개</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">부족 ${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;
@@ -2982,9 +2989,9 @@ function openPopup(no){
   const gInv=GOLD_ORDERS.some(o=>o.no===no);
   const multi=buildMultiMap(jos[curJo]);
   const regItems=order.items.filter(it=>!isGold(it));
-  const doneCnt=regItems.filter(it=>checked[no+'-'+it.code]).length;
+  const doneCnt=regItems.filter(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(no,it.code))).length;
   const allDone=regItems.length>0&&doneCnt===regItems.length;
-  const hasShort=order.items.some(it=>(shortage[no+'-'+it.code]||0)>0), hasHold=order.items.some(it=>holded[no+'-'+it.code]);
+  const hasShort=order.items.some(it=>getItemWorkflowState(no,it.code)===WF_STATUS.SHORT), hasHold=order.items.some(it=>getItemWorkflowState(no,it.code)===WF_STATUS.HOLD);
   
   const statColor=allDone?'var(--green)':hasShort?'var(--red)':hasHold?'#E65100':'#8AACCC';
   const statTxt=allDone?'✅ 완료':hasShort?'⚠ 미송있음':hasHold?'⏸ 보류 포함':doneCnt+'/'+regItems.length;
@@ -2998,7 +3005,8 @@ function openPopup(no){
 
   document.getElementById('popup-items').innerHTML=order.items.map((it,i)=>{
     const c=multi[it.code]||{b:'#B0BEC5',t:'var(--text)',bg:'#fff'};
-    const gItem=isGold(it), done=checked[no+'-'+it.code], isHold=!!holded[no+'-'+it.code], shVal=shortage[no+'-'+it.code]||0, hasV=shVal>0, inGInv=gInv&&!gItem;
+    const itemState=getItemWorkflowState(no,it.code);
+    const gItem=isGold(it), done=[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), isHold=itemState===WF_STATUS.HOLD, shVal=shortage[no+'-'+it.code]||0, hasV=itemState===WF_STATUS.SHORT, inGInv=gInv&&!gItem;
 
     let ordBg='#B0BEC5',ordTxt=String(i+1);
     if(done){ordBg='#0E7A4A';ordTxt='✓';} else if(gItem){ordBg='#C49A00';ordTxt='🥇';} else if(isHold){ordBg='#FFB74D';ordTxt='⏸';} else if(multi[it.code]) ordBg=c.b;
@@ -3122,8 +3130,8 @@ async function bulkCheckJo(joIdx, e){
     o.items.forEach(it=>{
       const k=o.no+'-'+it.code;
       if(isGold(it)) return;
-      if((shortage[k]||0)>0) return;
-      if(holded[k]) return;
+      const state=getItemWorkflowState(o.no,it.code);
+      if([WF_STATUS.SHORT,WF_STATUS.REPICKED_READY,WF_STATUS.HOLD].includes(state)) return;
       qualifying.push({no:o.no,code:it.code,k});
     });
   });
@@ -3153,14 +3161,14 @@ function syncMisongItem(no, code){
   if(sh>0&&!shortageDate[k]) shortageDate[k]=new Date().toISOString();
   const idx=misongPickingData.findIndex(r=>r.seq===no&&r.code===code);
   if(sh>0){
-    if(idx>=0){ misongPickingData[idx].shortage=sh; misongPickingData[idx].drawer=dr; misongPickingData[idx].shortageDate=shortageDate[k]||misongPickingData[idx].shortageDate||''; }
+    if(idx>=0){ misongPickingData[idx].shortage=sh; misongPickingData[idx].status='배송대기'; misongPickingData[idx].drawer=dr; misongPickingData[idx].shortageDate=shortageDate[k]||misongPickingData[idx].shortageDate||''; }
     else{
       const order=ORDERS_ALL.find(o=>o.no===no);
       const item=order?.items.find(it=>it.code===code);
-      if(order&&item) misongPickingData.push({seq:no,code,name:item.name||'',buyer:order.buyer||'',shortage:sh,drawer:dr,shortageDate:shortageDate[k]||selectedDate});
+      if(order&&item) misongPickingData.push({seq:no,code,name:item.name||'',buyer:order.buyer||'',shortage:sh,drawer:dr,shortageDate:shortageDate[k]||selectedDate,status:'배송대기'});
     }
   } else {
-    if(idx>=0) misongPickingData[idx].shortage=0;
+    if(idx>=0){ misongPickingData[idx].shortage=0; misongPickingData[idx].status='피킹완료'; }
   }
   const _mp=document.getElementById('misong-panel');
   if(_mp&&_mp.style.display!=='none'){ renderMisongList(); renderMisongSidebar(); }
@@ -3171,6 +3179,8 @@ function adjSh(no,code,d){
   if(holded[k]) return;
   const prev=shortage[k]||0;
   shortage[k]=Math.max(0,prev+d);
+  if(shortage[k]>0){ shortageStatus[k]='배송대기'; shortageMemo2[k]=String(shortage[k]); }
+  else { delete shortageStatus[k]; delete shortageMemo2[k]; }
   syncMisongItem(no, code);
   if(shortage[k]>0){
     jos[curJo].forEach(o=>{
@@ -3178,6 +3188,8 @@ function adjSh(no,code,d){
         const ok2=o.no+'-'+code;
         if(!(shortage[ok2]>0)){
           shortage[ok2]=o.items.find(it=>it.code===code).qty;
+          shortageStatus[ok2]='배송대기';
+          shortageMemo2[ok2]=String(shortage[ok2]);
           const oPrev=shortage[ok2];
           clearTimeout(_adjShTimer[ok2]);
           _adjShTimer[ok2]=setTimeout(()=>saveToSheet(o.no,code,!!checked[ok2],shortage[ok2],drawer[o.no]||'',!!holded[ok2]).catch(()=>{shortage[ok2]=oPrev;scheduleRender();}),400);
@@ -3207,6 +3219,8 @@ function bulkShortageAfter(invNo, code){
     const k=o.no+'-'+code;
     const qty=o.items.find(it=>it.code===code)?.qty||1;
     shortage[k]=qty;
+    shortageStatus[k]='배송대기';
+    shortageMemo2[k]=String(qty);
     syncMisongItem(o.no, code);
     saveToSheet(o.no,code,false,qty,drawer[o.no]||'',!!holded[k]).catch(()=>{});
   });
@@ -3245,10 +3259,14 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
         status:    '배송대기',
         updated_at: new Date().toISOString(),
       },{onConflict:'inv_no,p_code'});
+      shortageStatus[k]='배송대기';
+      shortageMemo2[k]=String(shortageVal);
     } else {
       // 부족수량 0 → 피킹탭에서 미송 취소 = shortage 레코드 삭제 (발주 재포함)
       // TODO(soft-delete): 실제 DELETE입니다. NAS 이전 시 deleted_at/status 기반 soft delete로 전환 후보입니다.
       await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',code);
+      delete shortageStatus[k];
+      delete shortageMemo2[k];
     }
   }finally{_saveQueue.delete(k);}
 }
@@ -3785,6 +3803,60 @@ function shortageRowQty(row){
   const m=memo.match(/^\d+$/);
   return m?Number(memo):0;
 }
+const WF_STATUS={
+  NORMAL:'normal',
+  PICKED:'picked',
+  SHORT:'short',
+  HOLD:'hold',
+  REPICKED_READY:'repicked_ready',
+  INSPECTED:'inspected',
+  CS_WAIT:'cs_wait',
+  CS_PARTIAL:'cs_partial',
+  CS_DONE:'cs_done'
+};
+const SHORTAGE_TERMINAL_STATUSES=new Set(['검품완료','메모정리완료','발송완료']);
+function normalizeShortageStatus(status){
+  return String(status||'').trim();
+}
+function workflowStateFromShortageStatus(status, qty=0){
+  const st=normalizeShortageStatus(status);
+  if(st==='발송완료') return WF_STATUS.CS_DONE;
+  if(st==='부분발송') return WF_STATUS.CS_PARTIAL;
+  if(st==='발송대기') return WF_STATUS.CS_WAIT;
+  if(st==='검품완료'||st==='메모정리완료') return WF_STATUS.INSPECTED;
+  if(st==='피킹완료') return WF_STATUS.REPICKED_READY;
+  if(Number(qty)>0) return WF_STATUS.SHORT;
+  return WF_STATUS.NORMAL;
+}
+function getItemWorkflowState(no, code, opts={}){
+  const k=String(no)+'-'+code;
+  const qty=Number(opts.shortage ?? shortage[k] ?? 0) || 0;
+  const status=opts.status ?? shortageStatus[k] ?? '';
+  const state=workflowStateFromShortageStatus(status,qty);
+  if(state!==WF_STATUS.NORMAL) return state;
+  if(holded[k]) return WF_STATUS.HOLD;
+  if(checked[k]) return WF_STATUS.PICKED;
+  return WF_STATUS.NORMAL;
+}
+function getOrderWorkflowState(order){
+  if(!order||!order.items) return WF_STATUS.NORMAL;
+  if(inspDone[order.no]) return WF_STATUS.INSPECTED;
+  const states=order.items.filter(it=>!isGold(it)).map(it=>getItemWorkflowState(order.no,it.code));
+  if(states.some(s=>s===WF_STATUS.SHORT)) return WF_STATUS.SHORT;
+  if(states.some(s=>s===WF_STATUS.REPICKED_READY)) return WF_STATUS.REPICKED_READY;
+  if(states.some(s=>s===WF_STATUS.HOLD)) return WF_STATUS.HOLD;
+  if(states.length&&states.every(s=>s===WF_STATUS.PICKED||s===WF_STATUS.INSPECTED)) return WF_STATUS.PICKED;
+  return WF_STATUS.NORMAL;
+}
+function isMisongPickingTargetStatus(status, qty){
+  const st=normalizeShortageStatus(status);
+  if(SHORTAGE_TERMINAL_STATUSES.has(st)) return false;
+  return Number(qty)>0 || st==='피킹완료';
+}
+function normalizeCSStatus(status){
+  const st=normalizeShortageStatus(status);
+  return (st==='부분발송'||st==='발송대기'||st==='발송완료') ? st : '';
+}
 function csRowShortageQty(row){
   const seqNo=realToSeq[row.inv]||row.inv;
   const local=shortage[seqNo+'-'+row.code];
@@ -3806,15 +3878,20 @@ async function loadMisongData(showToast=false){
   const el = document.getElementById('cs-status');
   try{
     if(showToast) toast('⏳ 미송현황 불러오는 중...',4000);
-    // '검품완료'는 메모 업데이터 처리 대상이지 CS 발송 대상이 아니므로 제외
-    const {data:shRows,error}=await db.from('shortage').select('*').neq('status','검품완료');
+    // 검품/메모 정리 완료는 CS 발송 대상이 아니므로 클라이언트에서 표준 상태로 제외합니다.
+    const {data:shRows,error}=await db.from('shortage').select('*');
     if(error) throw error;
     misongData = (shRows||[]).map(r=>{
       const seqNo = realToSeq[r.inv_no]||'';
       const order = seqNo ? ORDERS_ALL.find(o=>String(o.no)===String(seqNo)) : null;
       const k = seqNo+'-'+r.p_code;
       const rowShortage=shortageRowQty(r);
+      if(workflowStateFromShortageStatus(r.status,rowShortage)===WF_STATUS.INSPECTED) return null;
       if(rowShortage>0) shortage[(seqNo||r.inv_no)+'-'+r.p_code]=rowShortage;
+      if(seqNo&&r.p_code){
+        shortageStatus[k]=normalizeShortageStatus(r.status);
+        shortageMemo2[k]=String(r.memo2_val??'').trim();
+      }
       const dateVal = getShortageBaseDate(r,seqNo);
       const item = order?.items.find(it=>it.code===r.p_code);
       const buyerName = order?.buyer || r.orderer || '';
@@ -3830,7 +3907,7 @@ async function loadMisongData(showToast=false){
         product: productPart,                   // 상품명
         option:  optionPart,                    // 옵션명
         arrival: r.arrival_date||'',
-        status: r.status||'',
+        status: normalizeCSStatus(r.status),
         method: r.method||r.delay_method||r.cs_method||'',
         cs_memo: r.cs_memo||'',
         is14k: r.is_gold?'Y':'',
@@ -3841,10 +3918,10 @@ async function loadMisongData(showToast=false){
         name: buyerName,
         phone: order?.phone||'',
         elapsed: 0,
-        done: (r.status==='발송완료')?'✓':'',
+        done: (normalizeCSStatus(r.status)==='발송완료')?'✓':'',
         regDate: dateVal,
       };
-    });
+    }).filter(Boolean);
     computeElapsed(misongData);
     updateAllCSCounts();
     renderCSList();
@@ -3869,9 +3946,9 @@ function csFilterRows(){
     // currentCSType==='all' → 통과
 
     // 2단계: 상태 필터
-    const st = String(row.status||'').trim();
+    const st = normalizeCSStatus(row.status);
     if(currentCSStatus==='전체'){/* 통과 */}
-    else if(currentCSStatus==='') { if(st==='발송완료'||st==='부분발송'||st==='발송대기') return false; }
+    else if(currentCSStatus==='') { if(st) return false; }
     else if(currentCSStatus!==st) return false;
 
     return true;
@@ -3926,10 +4003,10 @@ function updateAllCSCounts(){
     if(currentCSType==='gold' && !is14k) return false;
     return true;
   });
-  const stNone = typeFiltered.filter(r=>{const s=String(r.status||'').trim(); return s!=='발송완료'&&s!=='부분발송'&&s!=='발송대기';}).length;
-  const stPart = typeFiltered.filter(r=>String(r.status||'').trim()==='부분발송').length;
-  const stWait = typeFiltered.filter(r=>String(r.status||'').trim()==='발송대기').length;
-  const stDone = typeFiltered.filter(r=>String(r.status||'').trim()==='발송완료').length;
+  const stNone = typeFiltered.filter(r=>normalizeCSStatus(r.status)==='').length;
+  const stPart = typeFiltered.filter(r=>normalizeCSStatus(r.status)==='부분발송').length;
+  const stWait = typeFiltered.filter(r=>normalizeCSStatus(r.status)==='발송대기').length;
+  const stDone = typeFiltered.filter(r=>normalizeCSStatus(r.status)==='발송완료').length;
   if(el('cs-st-cnt-none')) el('cs-st-cnt-none').textContent = stNone;
   if(el('cs-st-cnt-partial')) el('cs-st-cnt-partial').textContent = stPart;
   if(el('cs-st-cnt-wait')) el('cs-st-cnt-wait').textContent = stWait;
@@ -4017,7 +4094,7 @@ function renderCSList(){
     else if(method.includes('대기')) methodBadge='<span class="cs-method m-wait">대기</span>';
 
     // 송장 전체 상태 (가장 나쁜 상태 기준)
-    const statuses = invRows.map(r=>String(r.status||'').trim());
+    const statuses = invRows.map(r=>normalizeCSStatus(r.status));
     const allDone  = statuses.every(s=>s==='발송완료');
     const anyPart  = statuses.some(s=>s==='부분발송');
     const anyWait  = statuses.some(s=>s==='발송대기');
@@ -4137,6 +4214,8 @@ async function setMisongStatus(inv, code, status){
     )) return;
   }
   misongData.forEach(r=>{ if(r.inv===inv && r.code===code){ r.status=status; r.done=(status==='발송완료')?'✓':''; } });
+  const seqNo=realToSeq[inv]||inv;
+  shortageStatus[seqNo+'-'+code]=normalizeShortageStatus(status||'배송대기');
   updateAllCSCounts();
   if(status==='발송완료'){ switchCSStatus('발송완료'); } else { renderCSList(); }
   renderCSSidebar();
@@ -4900,7 +4979,12 @@ async function insp_loadMisongOrders(){
     const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
     const invMap={};
-    (shRows||[]).forEach(r=>{ if(!invMap[r.inv_no]) invMap[r.inv_no]=[]; invMap[r.inv_no].push(r); });
+    (shRows||[]).forEach(r=>{
+      const sq=shortageRowQty(r);
+      if(!isMisongPickingTargetStatus(r.status,sq)) return;
+      if(!invMap[r.inv_no]) invMap[r.inv_no]=[];
+      invMap[r.inv_no].push(r);
+    });
     _misongOrdersCache = Object.entries(invMap).map(([inv_no,rows])=>{
       const seqNo=realToSeq[inv_no]||'';
       const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
@@ -4908,6 +4992,8 @@ async function insp_loadMisongOrders(){
         const sq=shortageRowQty(r);
         const key=(seqNo||inv_no)+'-'+r.p_code;
         if(sq>0) shortage[key]=sq;
+        shortageStatus[key]=normalizeShortageStatus(r.status);
+        shortageMemo2[key]=String(r.memo2_val??'').trim();
         return {
           code:r.p_code,
           prodCode:r.p_code,
@@ -5010,7 +5096,7 @@ function insp_renderList(){
   }
   wrap.innerHTML=insp_filteredList.map((o,i)=>{
     const done=!!inspDone[o.no], isGoldInv=insp_GOLD_NOS.has(o.no), focused=i===insp_focusIdx;
-    const hasMisong=o._isMisong?true:o.items.some(it=>(shortage[o.no+'-'+it.code]||0)>0);
+    const hasMisong=o._isMisong?true:o.items.some(it=>[WF_STATUS.SHORT,WF_STATUS.REPICKED_READY].includes(getItemWorkflowState(o.no,it.code)));
     let label;
     if(insp_tabMode==='golditem'){
       const gItems=o.items.filter(it=>isGold(it)&&isLabelTarget({privateCode:it.prodCode||''}));
@@ -5132,12 +5218,13 @@ function insp_renderDetail(){
     gItems.forEach(it=>{const inf=insp_goldLabelMap[order.no+'-'+it.code];if(inf&&Array.isArray(inf.labels)) allNums.push(...inf.labels);});
     label=allNums.length?allNums.join(', '):(insp_focusIdx+1)+'번';
   } else { label=workNoHtml(order.no,'sm'); }
-  const hasMisong=order.items.some(it=>(shortage[order.no+'-'+it.code]||0)>0);
+  const hasMisong=order.items.some(it=>[WF_STATUS.SHORT,WF_STATUS.REPICKED_READY].includes(getItemWorkflowState(order.no,it.code)));
   if(insp_itemFocusIdx>=items.length) insp_itemFocusIdx=0;
 
   const rows=items.map((it,i)=>{
     const goldItem=isGold(it), rowFocused=i===insp_itemFocusIdx;
-    const itemShort=(shortage[order.no+'-'+it.code]||0)>0;
+    const itemState=getItemWorkflowState(order.no,it.code);
+    const itemShort=itemState===WF_STATUS.SHORT;
     const memoId='insp-memo-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal=insp_itemMemos[insp_memoKey(order.no,it.code)]||'';
     const imgUrl=it.imageUrl||(photoMap&&photoMap[it.code])||'';
@@ -5222,6 +5309,8 @@ function insp_adjShort(invNo, code, delta){
   const newVal=Math.max(0,old+delta);
   if(newVal===old) return;
   shortage[k]=newVal;
+  if(newVal>0){ shortageStatus[k]='배송대기'; shortageMemo2[k]=String(newVal); }
+  else { delete shortageStatus[k]; delete shortageMemo2[k]; }
   // 행 내 수량 표시 인-플레이스 업데이트
   const sid='insp-sh-'+invNo+'-'+code.replace(/[^a-zA-Z0-9]/g,'_');
   const el=document.getElementById(sid);
@@ -5233,7 +5322,13 @@ function insp_adjShort(invNo, code, delta){
   }
   insp_refreshAfterShortageChange(invNo);
   saveToSheet(invNo,code,!!checked[k],newVal,drawer[invNo]||'',!!holded[k])
-    .catch(()=>{ shortage[k]=old; insp_refreshAfterShortageChange(invNo); toast('⚠ 저장 실패'); });
+    .catch(()=>{
+      shortage[k]=old;
+      if(old>0){ shortageStatus[k]='배송대기'; shortageMemo2[k]=String(old); }
+      else { delete shortageStatus[k]; delete shortageMemo2[k]; }
+      insp_refreshAfterShortageChange(invNo);
+      toast('⚠ 저장 실패');
+    });
 }
 
 function insp_refreshAfterShortageChange(invNo){
@@ -5285,6 +5380,12 @@ async function insp_toggleDone(invNo){
       // 검품완료: '피킹완료' 상태인 shortage → '검품완료' + memo2_val='' (메모 업데이터가 셀피아 메모 클리어)
       await db.from('shortage').update({status:'검품완료', memo2_val:'', updated_at:new Date().toISOString()})
         .eq('inv_no',inv_no).eq('status','피킹완료');
+      Object.keys(shortageStatus).forEach(k=>{
+        if(k.startsWith(String(invNo)+'-')&&shortageStatus[k]==='피킹완료'){
+          shortageStatus[k]='검품완료';
+          shortageMemo2[k]='';
+        }
+      });
       // picking: 해당 송장 전체 hold=false (배송보류 해제)
       const order=ORDERS_ALL.find(o=>String(o.no)===String(invNo))||insp_filteredList.find(o=>String(o.no)===String(invNo));
       if(order) await Promise.all(order.items.map(it=>{
@@ -5298,6 +5399,12 @@ async function insp_toggleDone(invNo){
       // 검품완료 취소: '검품완료/메모정리완료' → '피킹완료'로 되돌림
       await db.from('shortage').update({status:'피킹완료', memo2_val:'ㅁ', updated_at:new Date().toISOString()})
         .eq('inv_no',inv_no).in('status',['검품완료','메모정리완료']);
+      Object.keys(shortageStatus).forEach(k=>{
+        if(k.startsWith(String(invNo)+'-')&&(shortageStatus[k]==='검품완료'||shortageStatus[k]==='메모정리완료')){
+          shortageStatus[k]='피킹완료';
+          shortageMemo2[k]='ㅁ';
+        }
+      });
       toast('↩ 완료 취소');
     }
   }catch(e){
@@ -5637,7 +5744,8 @@ function setupRealtime(){
       const no=invToNo[r.inv_no]; if(!no) return;
       const k=no+'-'+r.p_code;
       if(r.is_checked) checked[k]=true; else delete checked[k];
-      if((r.shortage_qty||0)>0) shortage[k]=r.shortage_qty; else delete shortage[k];
+      if((r.shortage_qty||0)>0){ shortage[k]=r.shortage_qty; shortageStatus[k]='배송대기'; shortageMemo2[k]=String(r.shortage_qty); }
+      else { delete shortage[k]; delete shortageStatus[k]; delete shortageMemo2[k]; }
       if(r.drawer_no) drawer[no]=r.drawer_no; else delete drawer[no];
       if(r.hold) holded[k]=true; else delete holded[k];
       scheduleRender();
@@ -5686,18 +5794,18 @@ async function loadMisongPickingData(showToast=false){
   try{
     const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
-    const terminalStatuses = new Set(['검품완료','메모정리완료','발송완료']);
     (shRows||[]).forEach(r=>{
-      const status=String(r.status||'').trim();
-      if(terminalStatuses.has(status)) return;
+      const status=normalizeShortageStatus(r.status);
       const sh=shortageRowQty(r);
-      const shouldShow = sh>0 || status==='피킹완료';
+      const shouldShow = isMisongPickingTargetStatus(status,sh);
       if(!shouldShow || !r.p_code) return;
       const seqNo = realToSeq[r.inv_no]||String(r.inv_no||r.ord_no||'');
       const order = realToSeq[r.inv_no] ? ORDERS_ALL.find(o=>String(o.no)===String(realToSeq[r.inv_no])) : null;
       const item = order?.items.find(it=>it.code===r.p_code);
       const k = seqNo+'-'+r.p_code;
       if(sh>0) shortage[k]=sh;
+      shortageStatus[k]=status;
+      shortageMemo2[k]=String(r.memo2_val??'').trim();
       if(r.drawer_no&&!drawer[seqNo]) drawer[seqNo]=r.drawer_no;
       addMisongPickingRow({
         seq: seqNo,
@@ -5744,6 +5852,11 @@ function renderMisongDateBadge(row){
   const label=formatMiniDate(row?.shortageDate||row?.date||row?.created_at||row?.updated_at);
   return label?`<span class="misong-date-badge">미송 ${label}</span>`:'';
 }
+function getMisongRowWorkflowState(row){
+  if(!row) return WF_STATUS.NORMAL;
+  if(Number(row.shortage)===0) return WF_STATUS.REPICKED_READY;
+  return workflowStateFromShortageStatus(row.status,row.shortage);
+}
 function htmlEsc(s){
   return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
@@ -5764,7 +5877,7 @@ function getMisongMaps(){
   return {codeToProdCode,invItemSeqMap,itemNameMap};
 }
 function renderMisongItemRow(r,maps,extraClass=''){
-  const isDone=r.shortage===0;
+  const isDone=getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY;
   const prodCode = maps.codeToProdCode[r.code]||r.code;
   const imgUrl = photoMap[prodCode]||photoMap[r.code]||'';
   const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
@@ -5794,9 +5907,9 @@ function renderMisongList(){
   const progEl = document.getElementById('misong-prog-txt');
   if(!listEl) return;
 
-  const doneCnt = misongPickingData.filter(r=>r.shortage===0).length;
+  const doneCnt = misongPickingData.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY).length;
   const totalCnt = misongPickingData.length;
-  const noDrawerCnt = misongPickingData.filter(r=>r.shortage>0&&!String(drawer[r.seq]||r.drawer||'').trim()).length;
+  const noDrawerCnt = misongPickingData.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.SHORT&&!String(drawer[r.seq]||r.drawer||'').trim()).length;
   if(progEl) progEl.textContent = misongViewMode==='done'
     ? '완료 '+doneCnt+'건'
     : misongViewMode==='nodrawer'
@@ -5815,9 +5928,9 @@ function renderMisongList(){
 
   // 뷰 모드 필터
   const filtered = misongViewMode==='done'
-    ? searched.filter(r=>r.shortage===0)
+    ? searched.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY)
     : misongViewMode==='nodrawer'
-      ? searched.filter(r=>r.shortage>0&&!String(drawer[r.seq]||r.drawer||'').trim())
+      ? searched.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.SHORT&&!String(drawer[r.seq]||r.drawer||'').trim())
       : searched;
 
   if(!filtered.length){
@@ -5841,7 +5954,7 @@ function renderMisongList(){
     });
     listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(maps.codeToProdCode[a[0]]||a[0],maps.codeToProdCode[b[0]]||b[0])).map(([code,rows])=>{
       const totalSh = rows.reduce((s,r)=>s+r.shortage,0);
-      const allDoneC = totalSh===0;
+      const allDoneC = rows.every(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY);
       const prodCode = maps.codeToProdCode[code]||code;
       const itemsHtml = rows.map(r=>{
         const dr=String(drawer[r.seq]||r.drawer||'').trim();
@@ -5877,7 +5990,7 @@ function renderMisongList(){
     });
     listEl.innerHTML = [...invMap.entries()].map(([seq,rows])=>{
       const first=rows[0];
-      const allDone=rows.every(r=>r.shortage===0);
+      const allDone=rows.every(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY);
       const dr=String(drawer[seq]||first.drawer||'').trim();
       const realInv=seqToReal[seq]||first.invNo||'';
       const totalSh=rows.reduce((s,r)=>s+(r.shortage||0),0);
@@ -5902,10 +6015,10 @@ function renderMisongList(){
 }
 
 async function cleanMisongPickingDone(){
-  const doneCnt = misongPickingData.filter(r=>r.shortage===0).length;
+  const doneCnt = misongPickingData.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY).length;
   if(!doneCnt){ toast('완료된 항목이 없습니다'); return; }
   if(!confirm('완료 처리된 '+doneCnt+'건을 목록에서 제거하시겠습니까?')) return;
-  misongPickingData = misongPickingData.filter(r=>r.shortage!==0);
+  misongPickingData = misongPickingData.filter(r=>getMisongRowWorkflowState(r)!==WF_STATUS.REPICKED_READY);
   renderMisongList();
   renderMisongSidebar();
   toast('🗑 완료 '+doneCnt+'건 정리됨');
@@ -5917,6 +6030,7 @@ function adjMisongShortage(seq, code, delta){
   if(!row) return;
   const prev=row.shortage;
   row.shortage=Math.max(0,row.shortage+delta);
+  row.status=row.shortage===0?'피킹완료':'배송대기';
   renderMisongList();
   clearTimeout(_adjMisongTimer[seq+'-'+code]);
   _adjMisongTimer[seq+'-'+code]=setTimeout(()=>saveMisongShortage(seq,code,row.shortage,prev),400);
@@ -5927,6 +6041,7 @@ function completeMisong(seq, code){
   if(!row) return;
   const prev=row.shortage;
   row.shortage=0;
+  row.status='피킹완료';
   renderMisongList();
   saveMisongShortage(seq,code,0,prev);
   toast('✅ 처리완료');
@@ -5960,9 +6075,18 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     }
     const k=String(seq)+'-'+code;
     if(newShortage===0) delete shortage[k]; else shortage[k]=newShortage;
+    shortageStatus[k]=newShortage===0?'피킹완료':'배송대기';
+    shortageMemo2[k]=newShortage===0?'ㅁ':String(newShortage);
   }catch(e){
     const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
-    if(row&&prevShortage!==undefined){ row.shortage=prevShortage; renderMisongList(); }
+    if(row&&prevShortage!==undefined){
+      row.shortage=prevShortage;
+      row.status=prevShortage===0?'피킹완료':'배송대기';
+      const k=String(seq)+'-'+code;
+      if(prevShortage===0) delete shortage[k]; else shortage[k]=prevShortage;
+      shortageStatus[k]=row.status;
+      renderMisongList();
+    }
     toast('⚠ 저장 실패: '+e.message);
   }
 }
@@ -5971,8 +6095,8 @@ function renderMisongSidebar(){
   const wrap=document.getElementById('jo-side-list');
   if(!wrap) return;
   const total=misongPickingData.length;
-  const doneC=misongPickingData.filter(r=>r.shortage===0).length;
-  const noDrawerC=misongPickingData.filter(r=>r.shortage>0&&!String(drawer[r.seq]||r.drawer||'').trim()).length;
+  const doneC=misongPickingData.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY).length;
+  const noDrawerC=misongPickingData.filter(r=>getMisongRowWorkflowState(r)===WF_STATUS.SHORT&&!String(drawer[r.seq]||r.drawer||'').trim()).length;
   wrap.innerHTML=`
     <button class="jo-side-btn${misongViewMode==='inv'?' active':''}" style="border-left:3px solid var(--short);" onclick="setMisongView('inv')"><span class="jo-side-no" style="font-size:11px;">송장별</span><span class="jo-side-stat">${doneC}/${total}</span></button>
     <button class="jo-side-btn${misongViewMode==='code'?' active':''}" onclick="setMisongView('code')"><span class="jo-side-no" style="font-size:11px;">코드별</span></button>
