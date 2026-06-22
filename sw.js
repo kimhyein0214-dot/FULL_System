@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0619-workflow-state-v1';
+const CACHE_NAME = 'picking-system-0622-full-row-load-v1';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0619-workflow-state-v1',
+  './picking-system_0519.css?v=0622-full-row-load-v1',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];

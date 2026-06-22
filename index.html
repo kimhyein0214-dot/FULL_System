@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0619-workflow-state-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0622-full-row-load-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1294,6 +1294,17 @@ async function dbDelete(table,filter){
   return dbRequest(table,{method:'DELETE',query:filter,headers:{Prefer:'return=minimal'}});
 }
 async function dbRpc(fn,body={}){return dbRequest('rpc/'+fn,{method:'POST',body});}
+async function fetchAllRows(makeQuery,pageSize=1000){
+  const rows=[];
+  for(let from=0;;from+=pageSize){
+    const {data,error}=await makeQuery().range(from,from+pageSize-1);
+    if(error) throw new Error(error.message);
+    const chunk=data||[];
+    rows.push(...chunk);
+    if(chunk.length<pageSize) break;
+  }
+  return rows;
+}
 
 function chunkArray(arr,size=800){
   const chunks=[];
@@ -1981,15 +1992,15 @@ async function loadData(silent=false,preserveView=false){
   }
   try{
     // 1. orders 테이블 (ord_date 기준 필터)
-    let ordQ=db.from('orders').select('*').eq('ord_date',selectedDate);
-    if(selectedSession!=='ALL') ordQ=ordQ.eq('am_pm',selectedSession);
-    const {data:ordersData,error:oErr}=await ordQ.order('sort_order',{ascending:true,nullsFirst:false});
-    if(oErr) throw new Error(oErr.message);
+    const ordersData=await fetchAllRows(()=>{
+      let ordQ=db.from('orders').select('*').eq('ord_date',selectedDate);
+      if(selectedSession!=='ALL') ordQ=ordQ.eq('am_pm',selectedSession);
+      return ordQ.order('sort_order',{ascending:true,nullsFirst:false});
+    });
 
     // 2. order_items를 먼저 모아 작업순서 계산값(item_kind_count/total_item_qty/has_gold_item)을 만듭니다.
     // 실제 DB에는 저장하지 않고, 화면/CSV용 planned_print_seq_no만 로컬 계산합니다.
-    const {data:itemsData,error:iErr}=await db.from('order_items').select('*').eq('ord_date',selectedDate).order('sort_order',{ascending:true,nullsFirst:false});
-    if(iErr) throw new Error(iErr.message);
+    const itemsData=await fetchAllRows(()=>db.from('order_items').select('*').eq('ord_date',selectedDate).order('sort_order',{ascending:true,nullsFirst:false}));
     const itemsByOrd={};
     (itemsData||[]).forEach(it=>{
       if(!itemsByOrd[it.ord_no]) itemsByOrd[it.ord_no]=[];
@@ -2006,12 +2017,12 @@ async function loadData(silent=false,preserveView=false){
     // 송장 내부 상품순서는 셀피아/송장 원본 순서 그대로 보존한다.
     // 동선 정렬은 중앙 피킹 패널의 flat view에서만 적용한다.
     const todayOrdNos=(ordersData||[]).map(r=>String(r.ord_no).trim()).filter(Boolean);
-    const {data:pickData}=todayOrdNos.length
-      ? await db.from('picking').select('*').in('ord_no',todayOrdNos)
-      : {data:[]};
-    const {data:shortageRows}=todayOrdNos.length
-      ? await db.from('shortage').select('*').in('ord_no',todayOrdNos)
-      : {data:[]};
+    const pickData=todayOrdNos.length
+      ? await fetchAllRows(()=>db.from('picking').select('*').in('ord_no',todayOrdNos))
+      : [];
+    const shortageRows=todayOrdNos.length
+      ? await fetchAllRows(()=>db.from('shortage').select('*').in('ord_no',todayOrdNos))
+      : [];
     const outputOrders=buildOutputOrders(ordersData,itemsByOrd,pickData||[]);
 
     // 3. 작업번호 부여 + 브릿지맵
@@ -2115,9 +2126,9 @@ async function loadData(silent=false,preserveView=false){
     // 6. inspection 테이블 → inspDone(__done__) + insp_memo
     const todayInvNos=(ordersData||[]).map(r=>String(r.inv_no).trim()).filter(Boolean);
     inspDone={};
-    const {data:inspData}=todayInvNos.length
-      ? await db.from('inspection').select('inv_no,p_code,insp_memo,passed').in('inv_no',todayInvNos)
-      : {data:[]};
+    const inspData=todayInvNos.length
+      ? await fetchAllRows(()=>db.from('inspection').select('inv_no,p_code,insp_memo,passed').in('inv_no',todayInvNos))
+      : [];
     (inspData||[]).forEach(row=>{
       const no=invToNo[row.inv_no]; if(!no) return;
       if(row.p_code==='__done__'){ if(row.passed) inspDone[no]=true; return; }
