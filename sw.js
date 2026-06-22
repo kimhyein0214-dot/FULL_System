@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0622-sellpia-amount-v1';
+const CACHE_NAME = 'picking-system-0622-sellpia-amount-v2';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0622-sellpia-amount-v1',
+  './picking-system_0519.css?v=0622-sellpia-amount-v2',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];

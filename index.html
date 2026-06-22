@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0622-sellpia-amount-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0622-sellpia-amount-v2">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -5169,6 +5169,12 @@ function inspAmountCell(it){
     +htmlEsc(formatSellpiaAmount(it?.sellpiaItemSalesAmountRaw,it?.sellpiaItemSalesAmount))
   +'</td>';
 }
+function inspOrderTotalBadge(order){
+  if(!order) return '';
+  const label=formatSellpiaAmount(order.sellpiaOrderTotalAmountRaw,order.sellpiaOrderTotalAmount);
+  if(label==='—') return '';
+  return '<div class="insp-dh-total" style="font-size:12px;font-weight:900;color:#0F5132;background:#DFF6E8;border:1px solid #BFE9CE;border-radius:6px;padding:3px 8px;white-space:nowrap;">총금액 '+htmlEsc(label)+'</div>';
+}
 
 function insp_renderDetail(){
   const panel=document.getElementById('insp-detail-panel');
@@ -5217,6 +5223,7 @@ function insp_renderDetail(){
           +' <span style="font-size:10px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:1px 5px;">미송 '+shortCnt+'종</span>'
         +'</div>'
         +'<div class="insp-dh-stat">전체 '+order.items.length+'종</div>'
+        +inspOrderTotalBadge(order)
       +'</div>'
       +'<div class="insp-table-wrap">'
         +'<table class="insp-table" id="insp-main-table">'
@@ -5302,6 +5309,7 @@ function insp_renderDetail(){
       +'<div class="insp-dh-buyer">'+buyerLabel(order.buyer,order.recv||'')+(isGoldInv?' <span class="insp-gold-badge">🥇 골드</span>':'')+(hasMisong?' <span style="background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:800;">미송</span>':'')+'</div>'
       +(chBadge(order.no)||'')
       +'<div class="insp-dh-stat">'+items.length+'종</div>'
+      +inspOrderTotalBadge(order)
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
         +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
         +'<input id="insp-dr-'+order.no+'" type="text" value="'+(drawer[order.no]||'')+'" placeholder="서랍번호"'
