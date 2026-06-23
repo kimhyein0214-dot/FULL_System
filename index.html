@@ -5312,8 +5312,9 @@ function insp_renderDetail(){
         +'<div class="insp-dh-buyer">'+buyerLabel(order.buyer,order.recv||'')
           +' <span style="font-size:10px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:1px 5px;">미송 '+shortCnt+'종</span>'
         +'</div>'
-        +'<div class="insp-dh-stat">전체 '+order.items.length+'종</div>'
+        +(chBadge(order.no)||'')
         +inspOrderTotalBadge(order)
+        +'<div class="insp-dh-stat">전체 '+order.items.length+'종</div>'
       +'</div>'
       +'<div class="insp-table-wrap">'
         +'<table class="insp-table" id="insp-main-table">'
@@ -5400,8 +5401,8 @@ function insp_renderDetail(){
       +'<div class="insp-dh-no">'+label+'</div>'
       +'<div class="insp-dh-buyer">'+buyerLabel(order.buyer,order.recv||'')+(isGoldInv?' <span class="insp-gold-badge">🥇 골드</span>':'')+(hasMisong?' <span style="background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:800;">미송</span>':'')+'</div>'
       +(chBadge(order.no)||'')
-      +'<div class="insp-dh-stat">'+items.length+'종</div>'
       +inspOrderTotalBadge(order)
+      +'<div class="insp-dh-stat">'+items.length+'종</div>'
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
         +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
         +'<input id="insp-dr-'+order.no+'" type="text" value="'+(drawer[order.no]||'')+'" placeholder="서랍번호"'

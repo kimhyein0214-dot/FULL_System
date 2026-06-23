@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0623-insp-option-wide-v1';
+const CACHE_NAME = 'picking-system-0623-insp-total-next-channel-v1';
 const APP_ASSETS = [
   './',
   './index.html',
