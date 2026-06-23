@@ -254,7 +254,8 @@
     }
     function isOrderNoText(value) {
       const text = normal(value).toLowerCase();
-      return text.includes('주문') || text.includes('order') || text.includes('ord_no') || text.includes('ordno') || text.includes('ono');
+      if (text.includes('일자') || text.includes('date') || text.includes('기간')) return false;
+      return text.includes('주문no') || text.includes('주문번호') || text.includes('주문 no') || text.includes('order no') || text.includes('order_no') || text.includes('ord_no') || text.includes('ordno') || text === 'ono';
     }
     function isLikelyInvoiceNo(value) {
       const text = normal(value).replace(/[^\d]/g, '');
@@ -454,6 +455,14 @@
       }, CONFIG.searchTimeout);
       return hit;
     }
+    function findOrderHitInGrid(invNo, ordNo = '') {
+      const targets = [ordNo, isLikelyInvoiceNo(invNo) ? invNo : ''].map(normal).filter(Boolean);
+      if (!targets.length) return null;
+      return getGridRows('grid7').find(({ item }) => {
+        const blob = rowBlob(item);
+        return targets.some(target => blob.includes(target));
+      }) || null;
+    }
     async function openOrderDetail(orderHit) {
       const row = orderHit.item;
       const rowIndex = orderHit.index;
@@ -471,7 +480,9 @@
         const rows = detailRows();
         return rows.length && rows.some(item => normal(item.ord_no) === ordNo) ? rows : false;
       }, CONFIG.detailTimeout);
-      return { ordNo, sellerId, rows: detailRows().filter(item => normal(item.ord_no) === ordNo) };
+      const rows = detailRows().filter(item => normal(item.ord_no) === ordNo);
+      rows.forEach(row => { row.__smuSellerId = rowSellerId(row) || sellerId; });
+      return { ordNo, sellerId, rows };
     }
     function detailRows() {
       return getGridRows('grid8').map(({ item }) => item).filter(Boolean);
@@ -480,10 +491,10 @@
       return normal(row.item_no || row.o_item_no || row.ord_item_no);
     }
     function rowSellerId(row) {
-      return normal(row.p_provider_uid || row.provider_uid || row.seller_id);
+      return normal(row.__smuSellerId || row.p_provider_uid || row.provider_uid || row.seller_id);
     }
     function rowProductCode(row) {
-      return normal(row.p_code || row.product_code || row.c_p_code);
+      return normal(row.p_code || row.product_code || row.c_p_code || row.c_pcode || row.p_product_code || row.goods_code);
     }
     function rowOwnCode(row) {
       return normal(row.p_dpcode || row.p_dp_code || row.c_dp_code);
@@ -750,24 +761,24 @@
         for (const row of shortageRows) {
           const ord = normal(row.ord_no);
           if (!ord) continue;
-          if (!byOrd.has(ord)) byOrd.set(ord, { invNo: normal(row.inv_no) || orderMeta.get(ord)?.invNo || '', shortageRows: [], pickingRows: [] });
+          if (!byOrd.has(ord)) byOrd.set(ord, { invNo: isLikelyInvoiceNo(row.inv_no) ? normal(row.inv_no) : (isLikelyInvoiceNo(orderMeta.get(ord)?.invNo) ? orderMeta.get(ord).invNo : ''), shortageRows: [], pickingRows: [] });
           const bucket = byOrd.get(ord);
-          if (!bucket.invNo && (row.inv_no || orderMeta.get(ord)?.invNo)) bucket.invNo = normal(row.inv_no) || orderMeta.get(ord)?.invNo || '';
+          if (!bucket.invNo) bucket.invNo = isLikelyInvoiceNo(row.inv_no) ? normal(row.inv_no) : (isLikelyInvoiceNo(orderMeta.get(ord)?.invNo) ? orderMeta.get(ord).invNo : '');
           bucket.shortageRows.push(row);
         }
         for (const row of pickingRows) {
           const ord = normal(row.ord_no);
           if (!ord) continue;
-          if (!byOrd.has(ord)) byOrd.set(ord, { invNo: normal(row.inv_no) || orderMeta.get(ord)?.invNo || '', shortageRows: [], pickingRows: [] });
+          if (!byOrd.has(ord)) byOrd.set(ord, { invNo: isLikelyInvoiceNo(row.inv_no) ? normal(row.inv_no) : (isLikelyInvoiceNo(orderMeta.get(ord)?.invNo) ? orderMeta.get(ord).invNo : ''), shortageRows: [], pickingRows: [] });
           const bucket = byOrd.get(ord);
-          if (!bucket.invNo && (row.inv_no || orderMeta.get(ord)?.invNo)) bucket.invNo = normal(row.inv_no) || orderMeta.get(ord)?.invNo || '';
+          if (!bucket.invNo) bucket.invNo = isLikelyInvoiceNo(row.inv_no) ? normal(row.inv_no) : (isLikelyInvoiceNo(orderMeta.get(ord)?.invNo) ? orderMeta.get(ord).invNo : '');
           bucket.pickingRows.push(row);
         }
         return [...byOrd.entries()].map(([ordNo, bucket]) => ({
           invNo: bucket.invNo,
           ordNo,
           task: buildTask(bucket.invNo, ordNo, bucket.shortageRows, bucket.pickingRows)
-        })).filter(item => item.invNo);
+        })).filter(item => item.ordNo);
       }
       const d0 = date.replace(/-/g, '');
       const d1Obj = new Date(date + 'T00:00:00');
@@ -842,7 +853,7 @@
       const invNo = task.invNo;
       let detail = detailFromSingle;
       if (!detail) {
-        const hit = await searchInvoice(invNo, task.ordNo);
+        const hit = findOrderHitInGrid(invNo, task.ordNo) || await searchInvoice(invNo, task.ordNo);
         detail = await openOrderDetail(hit);
       }
       const rows = detail.rows.length ? detail.rows : detailRows().filter(row => normal(row.ord_no) === detail.ordNo);
