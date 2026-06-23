@@ -252,6 +252,14 @@
       const text = normal(value).toLowerCase();
       return text.includes('송장') || text.includes('delinum') || text.includes('invoice');
     }
+    function isOrderNoText(value) {
+      const text = normal(value).toLowerCase();
+      return text.includes('주문') || text.includes('order') || text.includes('ord_no') || text.includes('ordno') || text.includes('ono');
+    }
+    function isLikelyInvoiceNo(value) {
+      const text = normal(value).replace(/[^\d]/g, '');
+      return text.length >= 10;
+    }
     function isTextInput(el) {
       if (!el || String(el.tagName).toLowerCase() !== 'input') return false;
       const type = String(el.type || 'text').toLowerCase();
@@ -303,6 +311,44 @@
       }
       return pickedControl;
     }
+    function chooseOrderNoSearchMode() {
+      let pickedControl = null;
+      const candidates = [
+        '#search_ordno', '#search_ord_no', '#search_order_no', '#search_t_ordno_radio',
+        'input[type="radio"][value="ord_no"]', 'input[type="radio"][value="ordno"]',
+        'input[type="radio"][value="order_no"]', 'input[type="radio"][value="ono"]'
+      ];
+      for (const selector of candidates) {
+        const el = document.querySelector(selector);
+        if (el) {
+          el.checked = true;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          pickedControl = el;
+          break;
+        }
+      }
+      if (!pickedControl) {
+        const labels = [...document.querySelectorAll('label')];
+        const label = labels.find(el => isOrderNoText(el.textContent));
+        const target = label && (label.control || (label.getAttribute('for') ? document.getElementById(label.getAttribute('for')) : null));
+        if (target && String(target.type || '').toLowerCase() === 'radio') {
+          target.checked = true;
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          pickedControl = target;
+        }
+      }
+      const selects = [...document.querySelectorAll('select')].filter(isVisible);
+      for (const select of selects) {
+        const option = [...select.options].find(opt => isOrderNoText(opt.textContent) || isOrderNoText(opt.value));
+        if (!option) continue;
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        try { window.jQuery(select).val(option.value).trigger('change'); } catch (_) {}
+        pickedControl = select;
+        break;
+      }
+      return pickedControl;
+    }
     function findInvoiceInput(pickedControl) {
       const directSelectors = [
         '#search_t_delinum', 'input[name="search_t_delinum"]',
@@ -331,6 +377,22 @@
       const nearRadio = textInputAfter(checkedInvoiceRadio);
       if (nearRadio) return nearRadio;
       return null;
+    }
+    function findOrderNoInput(pickedControl) {
+      const directSelectors = [
+        '#search_ordno', 'input[name="search_ordno"]',
+        '#search_ord_no', 'input[name="search_ord_no"]',
+        '#search_order_no', 'input[name="search_order_no"]',
+        '#search_t_ordno', 'input[name="search_t_ordno"]',
+        'input[id*="ord" i][type="text"]', 'input[name*="ord" i][type="text"]',
+        'input[id*="order" i]', 'input[name*="order" i]',
+        'input[id*="ono" i]', 'input[name*="ono" i]'
+      ];
+      for (const selector of directSelectors) {
+        const el = document.querySelector(selector);
+        if (isTextInput(el) && isVisible(el)) return el;
+      }
+      return textInputAfter(pickedControl);
     }
     async function runOrderSearch() {
       if (typeof window.search_order === 'function') {
@@ -361,20 +423,24 @@
       await runOrderSearch();
       await sleep(900);
     }
-    async function searchInvoice(invNo) {
+    async function searchInvoice(invNo, ordNo = '') {
       if (!window.grid7 || !window.grid8 || typeof window.view_order_detail !== 'function') {
         throw new Error('주문조회 grid/view_order_detail 함수를 찾을 수 없습니다. 페이지 로딩 후 다시 실행해주세요.');
       }
-      const pickedControl = chooseInvoiceSearchMode();
-      const input = findInvoiceInput(pickedControl);
-      if (!input) throw new Error('송장번호 검색 입력칸을 찾을 수 없습니다.');
-      triggerValue(input, invNo);
+      const useInvoice = isLikelyInvoiceNo(invNo);
+      const target = useInvoice ? normal(invNo) : normal(ordNo);
+      if (!target) throw new Error('검색할 송장번호/주문번호가 없습니다.');
+      const pickedControl = useInvoice ? chooseInvoiceSearchMode() : chooseOrderNoSearchMode();
+      const input = useInvoice ? findInvoiceInput(pickedControl) : findOrderNoInput(pickedControl);
+      if (!input) throw new Error(useInvoice ? '송장번호 검색 입력칸을 찾을 수 없습니다.' : '주문번호 검색 입력칸을 찾을 수 없습니다.');
+      addLog(`  ${useInvoice ? '송장번호' : '주문번호'} 검색: ${target}`);
+      triggerValue(input, target);
       const before = rowBlob(getGridItem('grid7', 0));
       await runOrderSearch();
       const hit = await waitFor(() => {
         const rows = getGridRows('grid7');
         if (!rows.length) return false;
-        const hit = rows.find(({ item }) => rowBlob(item).includes(String(invNo)));
+        const hit = rows.find(({ item }) => rowBlob(item).includes(String(target)));
         if (hit) return hit;
         if (rows.length === 1) {
           addLog('  검색 결과 1건: grid 데이터에 송장번호가 없어도 해당 행으로 진행');
@@ -776,7 +842,7 @@
       const invNo = task.invNo;
       let detail = detailFromSingle;
       if (!detail) {
-        const hit = await searchInvoice(invNo);
+        const hit = await searchInvoice(invNo, task.ordNo);
         detail = await openOrderDetail(hit);
       }
       const rows = detail.rows.length ? detail.rows : detailRows().filter(row => normal(row.ord_no) === detail.ordNo);
