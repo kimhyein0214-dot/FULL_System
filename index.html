@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-amount-left-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-misong-owncode-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1397,6 +1397,45 @@ async function loadProductImagesForCodes(rawCodes){
   }
   try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
   return stats;
+}
+async function fetchOwnCodeMapForPcodes(rawCodes){
+  const codes=compactCodes(rawCodes);
+  const map={};
+  if(!codes.length) return map;
+  try{
+    for(const chunk of chunkArray(codes)){
+      const {data,error}=await db.from('products').select('p_code,own_code').in('p_code',chunk);
+      if(error) throw new Error(error.message);
+      (data||[]).forEach(row=>{
+        const p=String(row.p_code||'').trim();
+        const own=String(row.own_code||'').trim();
+        if(p&&own&&!map[p]) map[p]=own;
+      });
+    }
+  }catch(e){
+    console.warn('own_code map load warning: products',e);
+  }
+  try{
+    if(imageCatalogDb){
+      const view=IMAGE_CATALOG_CONFIG.view||'sellpia_product_images_public';
+      for(const chunk of chunkArray(codes)){
+        const {data,error}=await imageCatalogDb.from(view).select('p_code,own_code').in('p_code',chunk);
+        if(error) throw new Error(error.message);
+        (data||[]).forEach(row=>{
+          const p=String(row.p_code||'').trim();
+          const own=String(row.own_code||'').trim();
+          if(p&&own&&!map[p]) map[p]=own;
+        });
+      }
+    }
+  }catch(e){
+    console.warn('own_code map load warning: image catalog',e);
+  }
+  return map;
+}
+function ownCodeFromShortageRow(row,item,ownMap){
+  const p=String(row?.p_code||item?.code||'').trim();
+  return String(item?.prodCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'').trim();
 }
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
@@ -4993,6 +5032,7 @@ async function insp_loadMisongOrders(){
   try{
     const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
+    const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     const invMap={};
     (shRows||[]).forEach(r=>{
       const sq=shortageRowQty(r);
@@ -5011,7 +5051,7 @@ async function insp_loadMisongOrders(){
         shortageMemo2[key]=String(r.memo2_val??'').trim();
         return {
           code:r.p_code,
-          prodCode:r.p_code,
+          prodCode:ownCodeFromShortageRow(r,null,shortageOwnMap),
           name:r.p_name||r.p_code||'',
           qty:Math.max(1,sq||1),
           shortage:sq,
@@ -5028,7 +5068,7 @@ async function insp_loadMisongOrders(){
         items: orderItems.map(it=>{
           const sr=rows.find(r=>r.p_code===it.code);
           const sq=sr?shortageRowQty(sr):0;
-          return {...it, shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
+          return {...it, prodCode:it.prodCode||ownCodeFromShortageRow(sr,it,shortageOwnMap), shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
         }),
         shortItems: rows.map(r=>{
           const sq=shortage[(seqNo||inv_no)+'-'+r.p_code]||shortageRowQty(r);
@@ -5200,6 +5240,7 @@ function insp_renderDetail(){
       const is14k=isGold(it);
       const imgUrl=photoMap&&photoMap[it.code]?photoMap[it.code]:'';
       const {prodName,optName}=insp_itemDisplayParts(it);
+      const ownCodeHtml=it.prodCode?htmlEsc(it.prodCode):'<span style="color:#AAA;font-weight:700;">—</span>';
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
         +'<td style="text-align:center;width:132px;">'
@@ -5211,7 +5252,7 @@ function insp_renderDetail(){
         +'<td class="insp-td-qty">'+it.qty+'</td>'
         +inspProductCell(prodName)
         +inspAmountCell(it)
-        +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'">'+it.prodCode+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
+        +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
         +'<td style="font-size:11px;color:#888;">'+( it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
         +'<td style="padding:6px 8px;">'
           +(isShort
@@ -5273,6 +5314,7 @@ function insp_renderDetail(){
     const _isLabelTab=insp_tabMode==='golditem'||insp_tabMode==='gold';
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
     const optionText=optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>';
+    const ownCodeHtml=it.prodCode?htmlEsc(it.prodCode):'<span style="color:#AAA;font-weight:700;">—</span>';
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
@@ -5285,7 +5327,7 @@ function insp_renderDetail(){
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
       +inspAmountCell(it)
-      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'">'+it.prodCode+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
+      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
       +'<td style="min-width:80px;color:#888;font-size:11px;">'+(it.code||'<span style="color:#CCC;">—</span>')+'</td>'
       +(()=>{
           const shV=shortage[order.no+'-'+it.code]||0;
