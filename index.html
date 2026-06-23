@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-misong-owncode-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-code-fallback-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1436,6 +1436,9 @@ async function fetchOwnCodeMapForPcodes(rawCodes){
 function ownCodeFromShortageRow(row,item,ownMap){
   const p=String(row?.p_code||item?.code||'').trim();
   return String(item?.prodCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'').trim();
+}
+function inspOwnCodeText(it){
+  return String(it?.prodCode||it?.dispCode||it?.privateCode||it?.ownCode||it?.code||'').trim();
 }
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
@@ -5240,7 +5243,8 @@ function insp_renderDetail(){
       const is14k=isGold(it);
       const imgUrl=photoMap&&photoMap[it.code]?photoMap[it.code]:'';
       const {prodName,optName}=insp_itemDisplayParts(it);
-      const ownCodeHtml=it.prodCode?htmlEsc(it.prodCode):'<span style="color:#AAA;font-weight:700;">—</span>';
+      const ownCodeText=inspOwnCodeText(it);
+      const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#AAA;font-weight:700;">—</span>';
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
         +'<td style="text-align:center;width:132px;">'
@@ -5314,7 +5318,8 @@ function insp_renderDetail(){
     const _isLabelTab=insp_tabMode==='golditem'||insp_tabMode==='gold';
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
     const optionText=optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>';
-    const ownCodeHtml=it.prodCode?htmlEsc(it.prodCode):'<span style="color:#AAA;font-weight:700;">—</span>';
+    const ownCodeText=inspOwnCodeText(it);
+    const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#AAA;font-weight:700;">—</span>';
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
