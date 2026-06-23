@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-code-fallback-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-code-display-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1438,7 +1438,7 @@ function ownCodeFromShortageRow(row,item,ownMap){
   return String(item?.prodCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'').trim();
 }
 function inspOwnCodeText(it){
-  return String(it?.prodCode||it?.dispCode||it?.privateCode||it?.ownCode||it?.code||'').trim();
+  return String(it?.prodCode||it?.code||'').trim();
 }
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
@@ -5256,7 +5256,7 @@ function insp_renderDetail(){
         +'<td class="insp-td-qty">'+it.qty+'</td>'
         +inspProductCell(prodName)
         +inspAmountCell(it)
-        +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
+        +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'" style="color:'+(is14k?'#B8860B':'#111827')+';font-weight:900;">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
         +'<td style="font-size:11px;color:#888;">'+( it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
         +'<td style="padding:6px 8px;">'
           +(isShort
@@ -5332,7 +5332,7 @@ function insp_renderDetail(){
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
       +inspAmountCell(it)
-      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
+      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'" style="color:'+(goldItem?'#B8860B':'#111827')+';font-weight:900;">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
       +'<td style="min-width:80px;color:#888;font-size:11px;">'+(it.code||'<span style="color:#CCC;">—</span>')+'</td>'
       +(()=>{
           const shV=shortage[order.no+'-'+it.code]||0;
