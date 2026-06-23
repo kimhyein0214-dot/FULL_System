@@ -3959,7 +3959,7 @@ body{
 .insp-table.has-label-col td:nth-child(7){
   width:82px !important;
   min-width:82px !important;
-  text-align:right !important;
+  text-align:left !important;
   font-size:13px !important;
   font-weight:900 !important;
   white-space:nowrap !important;

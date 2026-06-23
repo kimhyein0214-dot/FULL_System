@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-density-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-amount-left-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -5165,7 +5165,7 @@ function formatSellpiaAmount(raw,amount){
   return Number.isFinite(n) ? n.toLocaleString('ko-KR')+'원' : '—';
 }
 function inspAmountCell(it){
-  return '<td class="insp-td-amount" style="text-align:right;width:82px;font-size:13px;font-weight:900;color:#0F5132;white-space:nowrap;">'
+  return '<td class="insp-td-amount" style="text-align:left;width:82px;font-size:13px;font-weight:900;color:#0F5132;white-space:nowrap;">'
     +htmlEsc(formatSellpiaAmount(it?.sellpiaItemSalesAmountRaw,it?.sellpiaItemSalesAmount))
   +'</td>';
 }
@@ -5239,7 +5239,7 @@ function insp_renderDetail(){
             +'<th style="width:230px;">옵션명</th>'
             +'<th style="text-align:center;width:50px;">수량</th>'
             +'<th style="width:145px;">상품명</th>'
-            +'<th style="width:82px;text-align:right;color:#0F5132;">금액</th>'
+            +'<th style="width:82px;text-align:left;color:#0F5132;">금액</th>'
             +'<th style="width:130px;">자사코드</th>'
             +'<th style="min-width:80px;color:#888;">셀피아코드</th>'
             +'<th style="min-width:100px;">미송정보</th>'
@@ -5335,7 +5335,7 @@ function insp_renderDetail(){
           +'<th style="width:230px;">옵션명</th>'
           +'<th style="text-align:center;width:50px;">수량</th>'
           +'<th style="width:145px;">상품명</th>'
-          +'<th style="width:82px;text-align:right;color:#0F5132;font-size:10px;">금액</th>'
+          +'<th style="width:82px;text-align:left;color:#0F5132;font-size:10px;">금액</th>'
           +'<th style="width:130px;">자사코드</th>'
           +'<th style="min-width:80px;color:#888;">셀피아코드</th>'
           +'<th style="width:90px;text-align:center;color:#C0392B;font-size:10px;">부족수량</th>'
