@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-option-wide-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0623-sellpia-order-memo-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -4782,7 +4782,7 @@ let insp_searchQuery = '';   // 검품 검색어 (송장번호/주문자)
 let insp_memoSaveTimer = {};
 let insp_parsedRows = [];
 let insp_parsedChannels = {};
-let inspMemoColW = parseInt(localStorage.getItem('inspMemoColW')||'140');
+let inspMemoColW = parseInt(localStorage.getItem('inspMemoColW')||'170');
 let insp_misongCacheReady = false;
 const insp_savingDone = new Set();
 
@@ -4793,7 +4793,7 @@ function insp_startColResize(e){
   const startX=e.clientX, startW=inspMemoColW;
   function onMove(ev){
     const delta=ev.clientX-startX;
-    inspMemoColW=Math.max(80,Math.min(400,startW+delta));
+    inspMemoColW=Math.max(120,Math.min(480,startW+delta));
     document.querySelectorAll('#insp-main-table .insp-memo-th').forEach(th=>{
       th.style.width=inspMemoColW+'px'; th.style.minWidth=inspMemoColW+'px';
     });
@@ -5263,6 +5263,27 @@ function inspOrderTotalBadge(order){
   if(label==='—') return '';
   return '<div class="insp-dh-total" style="font-size:12px;font-weight:900;color:#0F5132;background:#DFF6E8;border:1px solid #BFE9CE;border-radius:6px;padding:3px 8px;white-space:nowrap;">총금액 '+htmlEsc(label)+'</div>';
 }
+function inspSellpiaOrderMemoText(order){
+  return String(order?.orderMemo||'').trim();
+}
+function inspMemoCell(order,it,memoId,memoVal){
+  const codeEsc=String(it?.code||'').replace(/'/g,"\\'");
+  const sellpiaMemo=inspSellpiaOrderMemoText(order);
+  return '<td class="insp-memo-cell" style="vertical-align:top;padding:5px 6px;width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;max-width:'+inspMemoColW+'px;">'
+    +'<div style="display:flex;flex-direction:column;gap:4px;height:100%;">'
+      +'<textarea id="'+memoId+'" class="insp-item-memo'+(memoVal?' insp-item-memo-filled':'')+'" placeholder="로컬 검품 메모..." rows="2"'
+        +' style="width:100%;box-sizing:border-box;min-height:36px;max-height:58px;resize:vertical;"'
+        +' oninput="insp_saveMemo('+order.no+',\''+codeEsc+'\',(this.value))"'
+        +' onkeydown="insp_handleMemoKey(event)"'
+      +'>'+memoVal+'</textarea>'
+      +'<div class="insp-sellpia-order-memo'+(sellpiaMemo?' has-val':'')+'" title="'+htmlEsc(sellpiaMemo)+'"'
+        +' style="box-sizing:border-box;min-height:34px;max-height:58px;overflow:auto;border:1px solid #C9D6E2;border-radius:6px;background:'+(sellpiaMemo?'#F3F8FF':'#F7F8FA')+';padding:3px 6px;">'
+        +'<div style="font-size:9px;line-height:1.1;font-weight:900;color:#4E6C8A;margin-bottom:1px;">셀피아 주문메모</div>'
+        +'<div style="font-size:11px;line-height:1.25;font-weight:700;color:'+(sellpiaMemo?'#1A2840':'#A0AEC0')+';white-space:pre-wrap;word-break:break-word;">'+(sellpiaMemo?htmlEsc(sellpiaMemo):'—')+'</div>'
+      +'</div>'
+    +'</div>'
+  +'</td>';
+}
 
 function insp_renderDetail(){
   const panel=document.getElementById('insp-detail-panel');
@@ -5386,13 +5407,7 @@ function insp_renderDetail(){
             +'</div>'
           +'</td>';
         })()
-      +'<td class="insp-memo-cell" style="vertical-align:top;padding-top:6px;width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;max-width:'+inspMemoColW+'px;">'
-        +'<textarea id="'+memoId+'" class="insp-item-memo'+(memoVal?' insp-item-memo-filled':'')+'" placeholder="검품 메모..." rows="3"'
-          +' style="width:100%;box-sizing:border-box;"'
-          +' oninput="insp_saveMemo('+order.no+',\''+it.code.replace(/'/g,"\\'")+'\',(this.value))"'
-          +' onkeydown="insp_handleMemoKey(event)"'
-        +'>'+memoVal+'</textarea>'
-      +'</td>'
+      +inspMemoCell(order,it,memoId,memoVal)
     +'</tr>';
   }).join('');
 
