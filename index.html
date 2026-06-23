@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-code-display-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-owncode-only-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1435,10 +1435,45 @@ async function fetchOwnCodeMapForPcodes(rawCodes){
 }
 function ownCodeFromShortageRow(row,item,ownMap){
   const p=String(row?.p_code||item?.code||'').trim();
-  return String(item?.prodCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'').trim();
+  return resolveOwnCodeText({
+    code:p,
+    prodCode:item?.prodCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'',
+    option:item?.option||row?.p_option||'',
+    name:item?.name||row?.p_name||''
+  });
+}
+function looksLikeSellpiaCode(value){
+  return /^[0-9]{3,}(?:-\d+)?$/i.test(String(value||'').trim());
+}
+function extractOwnCodeFromText(){
+  const blob=[...arguments].map(v=>String(v||'')).join(' ');
+  const direct=blob.match(/\[[A-Z]{1,4}-\d{1,2}-\d{1,2}(?:_\d+)?\]/i);
+  if(direct) return direct[0].toUpperCase();
+  const pStyle=blob.match(/\[P\]\s*([A-Z])[-\s]*(\d{1,2})[-\s]*(\d{1,2})\s*\]?/i);
+  if(pStyle) return '[P] '+pStyle[1].toUpperCase()+'-'+pStyle[2].padStart(2,'0')+'-'+pStyle[3].padStart(2,'0')+' ]';
+  const compact=blob.match(/\b([A-Z]{2,4})[-\s]*(\d{1,2})[-\s]*(\d{1,2})(?:_(\d+))?\b/i);
+  if(compact){
+    return '['+compact[1].toUpperCase()+'-'+compact[2].padStart(2,'0')+'-'+compact[3].padStart(2,'0')+(compact[4]?'_'+compact[4]:'')+']';
+  }
+  return '';
+}
+function resolveOwnCodeText(it,ownMap){
+  const raw=String(it?.prodCode||it?.dispCode||it?.privateCode||it?.ownCode||'').trim();
+  if(raw&&!looksLikeSellpiaCode(raw)) return raw;
+  const mapped=String((ownMap&&ownMap[String(it?.code||'').trim()])||'').trim();
+  if(mapped&&!looksLikeSellpiaCode(mapped)) return mapped;
+  return extractOwnCodeFromText(it?.option,it?.p_option,it?.seller_option_name,it?.name,it?.p_name);
+}
+async function enrichOrderOwnCodes(orders){
+  const allItems=(orders||[]).flatMap(o=>o.items||[]);
+  const ownMap=await fetchOwnCodeMapForPcodes(allItems.map(it=>it.code));
+  allItems.forEach(it=>{
+    const resolved=resolveOwnCodeText(it,ownMap);
+    it.resolvedOwnCode=resolved;
+  });
 }
 function inspOwnCodeText(it){
-  return String(it?.prodCode||it?.code||'').trim();
+  return String(it?.resolvedOwnCode||resolveOwnCodeText(it)||'').trim();
 }
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
@@ -2106,6 +2141,7 @@ async function loadData(silent=false,preserveView=false){
         sellpiaOrderTotalAmount:row.sellpia_order_total_amount,
         sellpiaOrderTotalAmountRaw:row.sellpia_order_total_amount_raw||''});
     });
+    await enrichOrderOwnCodes(ORDERS_ALL);
     ORDERS=ORDERS_ALL.filter(o=>!o.items.some(it=>isGold(it)));
     GOLD_ORDERS=ORDERS_ALL.filter(o=>o.items.some(it=>isGold(it)));
 
@@ -5052,9 +5088,11 @@ async function insp_loadMisongOrders(){
         if(sq>0) shortage[key]=sq;
         shortageStatus[key]=normalizeShortageStatus(r.status);
         shortageMemo2[key]=String(r.memo2_val??'').trim();
+        const ownCode=ownCodeFromShortageRow(r,null,shortageOwnMap);
         return {
           code:r.p_code,
-          prodCode:ownCodeFromShortageRow(r,null,shortageOwnMap),
+          prodCode:ownCode,
+          resolvedOwnCode:ownCode,
           name:r.p_name||r.p_code||'',
           qty:Math.max(1,sq||1),
           shortage:sq,
@@ -5071,7 +5109,8 @@ async function insp_loadMisongOrders(){
         items: orderItems.map(it=>{
           const sr=rows.find(r=>r.p_code===it.code);
           const sq=sr?shortageRowQty(sr):0;
-          return {...it, prodCode:it.prodCode||ownCodeFromShortageRow(sr,it,shortageOwnMap), shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
+          const ownCode=it.resolvedOwnCode||ownCodeFromShortageRow(sr,it,shortageOwnMap);
+          return {...it, prodCode:it.prodCode||ownCode, resolvedOwnCode:ownCode, shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
         }),
         shortItems: rows.map(r=>{
           const sq=shortage[(seqNo||inv_no)+'-'+r.p_code]||shortageRowQty(r);
@@ -5244,7 +5283,7 @@ function insp_renderDetail(){
       const imgUrl=photoMap&&photoMap[it.code]?photoMap[it.code]:'';
       const {prodName,optName}=insp_itemDisplayParts(it);
       const ownCodeText=inspOwnCodeText(it);
-      const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#AAA;font-weight:700;">—</span>';
+      const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
         +'<td style="text-align:center;width:132px;">'
@@ -5319,7 +5358,7 @@ function insp_renderDetail(){
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
     const optionText=optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>';
     const ownCodeText=inspOwnCodeText(it);
-    const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#AAA;font-weight:700;">—</span>';
+    const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
