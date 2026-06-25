@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-image-db-gift-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-storage-code-name-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1320,13 +1320,28 @@ function imageUrlFromRow(row){
   if(!row) return '';
   return row.storage_public_url||row.image_url||row.source_image_url||'';
 }
-function systemStoragePublicUrlForCode(code){
+function systemStoragePublicUrlsForCode(code){
   const key=String(code||'').trim();
-  if(!key||!imageCatalogDb) return '';
+  if(!key||!imageCatalogDb) return [];
   const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
-  const path='sellpia/'+photoSafeName(key)+'.jpg';
-  const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
-  return data&&data.publicUrl?data.publicUrl:'';
+  const safe=photoSafeName(key);
+  const paths=[
+    safe+'.jpg',
+    safe+'.jpeg',
+    safe+'.png',
+    safe+'.webp',
+    'sellpia/'+safe+'.jpg',
+    'sellpia/'+safe+'.jpeg',
+    'sellpia/'+safe+'.png',
+    'sellpia/'+safe+'.webp'
+  ];
+  return compactCodes(paths.map(path=>{
+    const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
+    return data&&data.publicUrl?data.publicUrl:'';
+  }));
+}
+function systemStoragePublicUrlForCode(code){
+  return systemStoragePublicUrlsForCode(code)[0]||'';
 }
 function applyImageRows(rows,{preferExisting=false}={}){
   let applied=0;
@@ -2223,16 +2238,30 @@ function photoAliasesFromAttr(value){
     return compactCodes(String(value).split(/[,\s]+/));
   }
 }
+function photoUrlListAttr(values){
+  return htmlEsc(JSON.stringify(compactCodes(values)));
+}
+function photoUrlsFromAttr(value){
+  if(!value) return [];
+  try{
+    const parsed=JSON.parse(value);
+    return Array.isArray(parsed)?compactCodes(parsed):[];
+  }catch(e){
+    return compactCodes(String(value).split(/\s+/));
+  }
+}
 function renderPhotoBox(code,imgUrl,kind='pick',uploadCode=code,aliasCodes=[]){
   const cls=kind==='insp'?'insp-photo-cell':'pr-photo';
   const dataCode=htmlEsc(code);
   const primaryUploadCode=String(uploadCode||code||'').trim();
   const dataUploadCode=htmlEsc(primaryUploadCode);
-  const dataAliases=photoAliasAttr([code,primaryUploadCode,...(aliasCodes||[])]);
+  const aliasList=compactCodes([code,primaryUploadCode,...(aliasCodes||[])]);
+  const dataAliases=photoAliasAttr(aliasList);
   const url=String(imgUrl||'').trim();
   if(url){
-    return `<div class="${cls} has-img photo-drop-target" data-code="${dataUploadCode}" data-aliases="${dataAliases}" data-url="${htmlEsc(url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code,this.dataset.aliases)">`
-      +`<img src="${htmlEsc(url)}" alt="${dataCode}" loading="lazy" onerror="photoImageError(this,this.closest('.photo-drop-target')?.dataset.code||'',this.closest('.photo-drop-target')?.dataset.aliases||'')">`
+    const urlList=compactCodes([url,...aliasList.flatMap(systemStoragePublicUrlsForCode)]);
+    return `<div class="${cls} has-img photo-drop-target" data-code="${dataUploadCode}" data-aliases="${dataAliases}" data-urls="${photoUrlListAttr(urlList)}" data-url-index="0" data-url="${htmlEsc(urlList[0]||url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code,this.dataset.aliases)">`
+      +`<img src="${htmlEsc(urlList[0]||url)}" alt="${dataCode}" loading="lazy" onerror="photoImageError(this,this.closest('.photo-drop-target')?.dataset.code||'',this.closest('.photo-drop-target')?.dataset.aliases||'')">`
     +`</div>`;
   }
   return `<div class="${cls} photo-drop-target photo-empty" data-code="${dataUploadCode}" data-aliases="${dataAliases}" title="클릭: 카메라/파일 선택 · 드롭: 사진 저장 (${dataUploadCode})" onclick="event.stopPropagation();openPhotoCapture(this.dataset.code,this.dataset.aliases)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code,this.dataset.aliases)">`
@@ -2241,6 +2270,16 @@ function renderPhotoBox(code,imgUrl,kind='pick',uploadCode=code,aliasCodes=[]){
 }
 function photoImageError(img,code,aliases=''){
   const box=img.closest('.pr-photo,.insp-photo-cell');
+  const wrap=img.closest('.photo-drop-target');
+  const urls=photoUrlsFromAttr(wrap?.dataset.urls);
+  const idx=Number(wrap?.dataset.urlIndex||0);
+  if(wrap&&idx+1<urls.length){
+    const next=urls[idx+1];
+    wrap.dataset.urlIndex=String(idx+1);
+    wrap.dataset.url=next;
+    img.src=next;
+    return;
+  }
   compactCodes([code,...photoAliasesFromAttr(aliases)]).forEach(key=>{ delete photoMap[key]; });
   try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
   if(box) box.outerHTML=renderPhotoBox(code,'',box.classList.contains('insp-photo-cell')?'insp':'pick',code,photoAliasesFromAttr(box.dataset.aliases));
@@ -2311,7 +2350,7 @@ function blobToDataUrl(blob){
 async function uploadProductPhotoToStorage(code,blob){
   if(!imageCatalogDb) throw new Error('이미지 DB 연결 없음');
   const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
-  const path='sellpia/'+photoSafeName(code)+'.jpg';
+  const path=photoSafeName(code)+'.jpg';
   const {error}=await imageCatalogDb.storage.from(bucket).upload(path,blob,{contentType:'image/jpeg',upsert:true,cacheControl:'3600'});
   if(error) throw new Error(error.message||'Storage 업로드 실패');
   const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
@@ -2327,7 +2366,7 @@ async function upsertProductPhotoMetadata(code,aliasKeys,storageInfo,blob){
     p_code:key,
     own_code:ownCode||null,
     bucket:storageInfo.bucket||IMAGE_CATALOG_CONFIG.bucket||'product-images',
-    storage_path:storageInfo.path||('sellpia/'+photoSafeName(key)+'.jpg'),
+    storage_path:storageInfo.path||(photoSafeName(key)+'.jpg'),
     storage_public_url:storageInfo.publicUrl||'',
     source_image_url:storageInfo.publicUrl||'',
     upload_status:'uploaded',

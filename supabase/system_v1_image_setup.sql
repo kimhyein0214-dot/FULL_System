@@ -83,7 +83,6 @@ for select
 to anon, authenticated
 using (
   bucket_id = 'product-images'
-  and name like 'sellpia/%'
 );
 
 drop policy if exists "product images sellpia public insert" on storage.objects;
@@ -93,7 +92,6 @@ for insert
 to anon, authenticated
 with check (
   bucket_id = 'product-images'
-  and name like 'sellpia/%'
 );
 
 drop policy if exists "product images sellpia public update" on storage.objects;
@@ -103,9 +101,7 @@ for update
 to anon, authenticated
 using (
   bucket_id = 'product-images'
-  and name like 'sellpia/%'
 )
 with check (
   bucket_id = 'product-images'
-  and name like 'sellpia/%'
 );
