@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-storage-image-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-storage-upload-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1243,6 +1243,7 @@ const APP_CONFIG={
     table:'sellpia_product_images',
     view:'product_images_resolved',
     bucket:'product-images',
+    uploadFunction:'upload-product-image',
     preferStorage:true
   },
   apiBaseUrl:'',
@@ -2400,36 +2401,30 @@ function blobToDataUrl(blob){
     fr.readAsDataURL(blob);
   });
 }
-async function uploadProductPhotoToStorage(code,blob){
-  if(!imageCatalogDb) throw new Error('이미지 DB 연결 없음');
-  const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
-  const path='sellpia/'+photoSafeName(code)+'.jpg';
-  const {error}=await imageCatalogDb.storage.from(bucket).upload(path,blob,{contentType:'image/jpeg',upsert:true,cacheControl:'3600'});
-  if(error) throw new Error(error.message||'Storage 업로드 실패');
-  const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
-  return {publicUrl:data&&data.publicUrl?data.publicUrl:'',bucket,path};
-}
-async function upsertProductPhotoMetadata(code,aliasKeys,storageInfo,blob){
-  if(!imageCatalogDb) throw new Error('이미지 DB 연결 없음');
+async function uploadProductPhotoToStorage(code,blob,aliasKeys=[]){
+  if(!IMAGE_CATALOG_CONFIG.supabaseUrl) throw new Error('이미지 DB 연결 없음');
   const key=String(code||'').trim();
   if(!key) throw new Error('셀피아코드 없음');
-  const table=IMAGE_CATALOG_CONFIG.table||'sellpia_product_images';
   const ownCode=(aliasKeys||[]).find(v=>isValidOwnCode(v))||'';
-  const row={
-    p_code:key,
-    own_code:ownCode||null,
-    storage_bucket:storageInfo.bucket||IMAGE_CATALOG_CONFIG.bucket||'product-images',
-    storage_path:storageInfo.path||('sellpia/'+photoSafeName(key)+'.jpg'),
-    storage_public_url:storageInfo.publicUrl||'',
-    source_image_url:storageInfo.publicUrl||'',
-    upload_status:'uploaded',
-    content_type:'image/jpeg',
-    byte_size:blob?.size||null,
-    updated_at:new Date().toISOString()
+  const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
+  const path='sellpia/'+photoSafeName(key)+'.jpg';
+  const fn=IMAGE_CATALOG_CONFIG.uploadFunction||'upload-product-image';
+  const form=new FormData();
+  form.append('p_code',key);
+  form.append('own_code',ownCode);
+  form.append('file',blob,photoSafeName(key)+'.jpg');
+  const res=await fetch(IMAGE_CATALOG_CONFIG.supabaseUrl.replace(/\/+$/,'')+'/functions/v1/'+fn,{
+    method:'POST',
+    body:form
+  });
+  const body=await res.json().catch(()=>({}));
+  if(!res.ok||!body.ok) throw new Error(body.message||body.error||'Storage 업로드 실패');
+  return {
+    publicUrl:body.storage_public_url||'',
+    bucket:body.storage_bucket||bucket,
+    path:body.storage_path||path,
+    metaSaved:true
   };
-  const {error}=await imageCatalogDb.from(table).upsert(row,{onConflict:'p_code'});
-  if(error) throw new Error(error.message||'이미지 메타 DB 저장 실패');
-  return row;
 }
 async function handlePhotoFiles(code,files,aliases=''){
   const file=files&&files[0];
@@ -2442,17 +2437,10 @@ async function handlePhotoFiles(code,files,aliases=''){
     let url='', savedOnServer=false, metaSaved=false, serverError='', metaError='';
     const aliasKeys=compactCodes([key,...photoAliasesFromAttr(aliases)]);
     try{
-      const storageInfo=await uploadProductPhotoToStorage(key,blob);
+      const storageInfo=await uploadProductPhotoToStorage(key,blob,aliasKeys);
       url=storageInfo.publicUrl;
       savedOnServer=!!url;
-      if(savedOnServer){
-        try{
-          await upsertProductPhotoMetadata(key,aliasKeys,storageInfo,blob);
-          metaSaved=true;
-        }catch(e){
-          metaError=e.message||String(e);
-        }
-      }
+      metaSaved=!!storageInfo.metaSaved;
     }catch(e){
       serverError=e.message||String(e);
       url=await blobToDataUrl(blob);
