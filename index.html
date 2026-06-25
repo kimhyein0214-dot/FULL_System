@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-photo-wrap-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-misong-flow-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1442,6 +1442,24 @@ function ownCodeFromShortageRow(row,item,ownMap){
     name:item?.name||row?.p_name||''
   });
 }
+function findItemByShortageRow(order,row,ownMap){
+  if(!order||!Array.isArray(order.items)||!row) return null;
+  const raw=String(row.p_code||row.code||'').trim();
+  const own=ownCodeFromShortageRow(row,null,ownMap);
+  const rowName=String(row.p_name||row.name||'').trim();
+  return order.items.find(it=>{
+    const itemOwn=String(it.prodCode||it.resolvedOwnCode||'').trim();
+    const itemName=String(it.name||'').trim();
+    const itemFull=itemNameWithOption(it);
+    return String(it.code||'').trim()===raw ||
+      itemOwn===raw ||
+      (own && itemOwn===own) ||
+      (rowName && ((itemName&&rowName.includes(itemName)) || (itemFull&&itemFull.includes(rowName))));
+  }) || null;
+}
+function shortageDisplayCode(row,item,ownMap){
+  return ownCodeFromShortageRow(row,item,ownMap) || String(item?.prodCode||item?.resolvedOwnCode||row?.p_code||row?.code||'').trim();
+}
 function looksLikeSellpiaCode(value){
   return /^[0-9]{3,}(?:-\d+)?$/i.test(String(value||'').trim());
 }
@@ -2303,7 +2321,10 @@ async function loadData(silent=false,preserveView=false){
     (pickData||[]).forEach(row=>{
       const no=invToNo[row.inv_no]||ordToNo[row.ord_no]; if(!no) return;
       _pickedOrdNos.add(String(noMap[no]?.ord_no||''));
-      const k=no+'-'+row.p_code;
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
+      const item=findItemByShortageRow(order,row);
+      const codeKey=item?.code||row.p_code;
+      const k=no+'-'+codeKey;
       if(row.is_checked) checked[k]=true;
       if((row.shortage_qty||0)>0){ shortage[k]=row.shortage_qty; if(row.shortage_date||row.created_at||row.created||row.updated_at) shortageDate[k]=row.shortage_date||row.created_at||row.created||row.updated_at; }
       if(row.drawer_no) drawer[no]=row.drawer_no;
@@ -2312,7 +2333,10 @@ async function loadData(silent=false,preserveView=false){
     });
     (shortageRows||[]).forEach(row=>{
       const no=invToNo[row.inv_no]||ordToNo[row.ord_no]; if(!no||!row.p_code) return;
-      const k=no+'-'+row.p_code;
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
+      const item=findItemByShortageRow(order,row);
+      const codeKey=item?.code||row.p_code;
+      const k=no+'-'+codeKey;
       const q=shortageRowQty(row);
       if(q>0&&!shortage[k]) shortage[k]=q;
       if(q>0) shortageDate[k]=getShortageBaseDate(row,no)||shortageDate[k]||selectedDate;
@@ -3462,22 +3486,24 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
   _saveQueue.add(k);
   try{
     const inv_no=seqToReal[invNo]||String(invNo);
-    const ord_no=noMap[invNo]?.ord_no||inv_no;
+    const order=(ORDERS_ALL||[]).find(o=>String(o.no)===String(invNo)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no))
+      || (_misongOrdersCache||[]).find(o=>String(o.no)===String(invNo)||String(o.invNo||'')===String(inv_no));
+    const item=order?.items?.find(it=>it.code===code||it.prodCode===code);
+    const storageCode=item?.code||code;
+    const ord_no=noMap[invNo]?.ord_no||order?.ordNo||order?.ord_no||inv_no;
     // 1. picking 저장
     const {error}=await db.from('picking').upsert(
-      {inv_no,ord_no,p_code:code,is_checked:!!isChecked,shortage_qty:shortageVal||0,drawer_no:drawerVal||'',hold:!!holdVal},
+      {inv_no,ord_no,p_code:storageCode,is_checked:!!isChecked,shortage_qty:shortageVal||0,drawer_no:drawerVal||'',hold:!!holdVal},
       {onConflict:'inv_no,p_code'}
     );
     if(error) throw error;
     // 2. shortage 테이블 동기화
     if((shortageVal||0)>0){
-      const order=ORDERS_ALL.find(o=>o.no===invNo);
-      const item=order?.items.find(it=>it.code===code);
       await db.from('shortage').upsert({
         inv_no, ord_no,
         orderer: order?.buyer||'',
-        p_code:  code,
-        p_name:  item?.name||'',
+        p_code:  storageCode,
+        p_name:  item ? itemNameWithOption(item) : '',
         short_qty: shortageVal,
         memo2_val: String(shortageVal),
         drawer_no: drawerVal||'',
@@ -3490,7 +3516,7 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
     } else {
       // 부족수량 0 → 피킹탭에서 미송 취소 = shortage 레코드 삭제 (발주 재포함)
       // TODO(soft-delete): 실제 DELETE입니다. NAS 이전 시 deleted_at/status 기반 soft delete로 전환 후보입니다.
-      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',code);
+      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',storageCode);
       delete shortageStatus[k];
       delete shortageMemo2[k];
     }
@@ -4079,6 +4105,9 @@ function isMisongPickingTargetStatus(status, qty){
   if(SHORTAGE_TERMINAL_STATUSES.has(st)) return false;
   return Number(qty)>0 || st==='피킹완료';
 }
+function isInspectionMisongReadyStatus(status, qty){
+  return workflowStateFromShortageStatus(status,qty)===WF_STATUS.REPICKED_READY;
+}
 function normalizeCSStatus(status){
   const st=normalizeShortageStatus(status);
   return (st==='부분발송'||st==='발송대기'||st==='발송완료') ? st : '';
@@ -4107,19 +4136,21 @@ async function loadMisongData(showToast=false){
     // 검품/메모 정리 완료는 CS 발송 대상이 아니므로 클라이언트에서 표준 상태로 제외합니다.
     const {data:shRows,error}=await db.from('shortage').select('*');
     if(error) throw error;
+    const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     misongData = (shRows||[]).map(r=>{
       const seqNo = realToSeq[r.inv_no]||'';
       const order = seqNo ? ORDERS_ALL.find(o=>String(o.no)===String(seqNo)) : null;
-      const k = seqNo+'-'+r.p_code;
       const rowShortage=shortageRowQty(r);
       if(workflowStateFromShortageStatus(r.status,rowShortage)===WF_STATUS.INSPECTED) return null;
-      if(rowShortage>0) shortage[(seqNo||r.inv_no)+'-'+r.p_code]=rowShortage;
-      if(seqNo&&r.p_code){
+      const item = findItemByShortageRow(order,r,shortageOwnMap);
+      const codeKey = item?.code || r.p_code;
+      const k = seqNo+'-'+codeKey;
+      if(rowShortage>0) shortage[(seqNo||r.inv_no)+'-'+codeKey]=rowShortage;
+      if(seqNo&&codeKey){
         shortageStatus[k]=normalizeShortageStatus(r.status);
         shortageMemo2[k]=String(r.memo2_val??'').trim();
       }
       const dateVal = getShortageBaseDate(r,seqNo);
-      const item = order?.items.find(it=>it.code===r.p_code);
       const buyerName = order?.buyer || r.orderer || '';
       const fullName  = item?.name || r.p_name || '';
       // p_name 형식: "상품명 / 옵션명[코드]" → product/option 분리
@@ -4128,8 +4159,9 @@ async function loadMisongData(showToast=false){
       const optionPart  = slashIdx>=0 ? fullName.slice(slashIdx+3).trim() : '';
       return {
         inv: r.inv_no,
-        code: r.p_code,                         // DB 키 (셀피아 상품코드)
-        dispCode: item?.prodCode || r.p_code,   // 화면 표시용 (자사코드)
+        code: codeKey,                          // DB 키 (셀피아 상품코드 우선)
+        sellpiaCode: item?.code || r.p_code,
+        dispCode: shortageDisplayCode(r,item,shortageOwnMap), // 화면 표시용 (자사코드)
         product: productPart,                   // 상품명
         option:  optionPart,                    // 옵션명
         arrival: r.arrival_date||'',
@@ -5208,7 +5240,7 @@ async function insp_loadMisongOrders(){
     const invMap={};
     (shRows||[]).forEach(r=>{
       const sq=shortageRowQty(r);
-      if(!isMisongPickingTargetStatus(r.status,sq)) return;
+      if(!isInspectionMisongReadyStatus(r.status,sq)) return;
       if(!invMap[r.inv_no]) invMap[r.inv_no]=[];
       invMap[r.inv_no].push(r);
     });
@@ -5217,16 +5249,21 @@ async function insp_loadMisongOrders(){
       const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
       const fallbackItems=rows.map(r=>{
         const sq=shortageRowQty(r);
-        const key=(seqNo||inv_no)+'-'+r.p_code;
+        const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
+        const item=findItemByShortageRow(order,r,shortageOwnMap);
+        const codeKey=item?.code||r.p_code;
+        const key=(seqNo||inv_no)+'-'+codeKey;
         if(sq>0) shortage[key]=sq;
         shortageStatus[key]=normalizeShortageStatus(r.status);
         shortageMemo2[key]=String(r.memo2_val??'').trim();
-        const ownCode=ownCodeFromShortageRow(r,null,shortageOwnMap);
+        const ownCode=shortageDisplayCode(r,item,shortageOwnMap);
         return {
-          code:r.p_code,
+          code:codeKey,
+          sellpiaCode:item?.code||r.p_code,
           prodCode:ownCode,
           resolvedOwnCode:ownCode,
-          name:r.p_name||r.p_code||'',
+          name:item ? item.name : (r.p_name||r.p_code||''),
+          option:item?.option||'',
           qty:Math.max(1,sq||1),
           shortage:sq,
           arrival:r.arrival_date||'',
@@ -5240,14 +5277,16 @@ async function insp_loadMisongOrders(){
         recv: order?.recv||rows[0]?.orderer||'',
         invNo: inv_no,
         items: orderItems.map(it=>{
-          const sr=rows.find(r=>r.p_code===it.code);
+          const sr=rows.find(r=>(findItemByShortageRow({items:[it]},r,shortageOwnMap)?.code||r.p_code)===it.code);
           const sq=sr?shortageRowQty(sr):0;
-          const ownCode=it.resolvedOwnCode||ownCodeFromShortageRow(sr,it,shortageOwnMap);
+          const ownCode=it.resolvedOwnCode||shortageDisplayCode(sr,it,shortageOwnMap);
           return {...it, prodCode:it.prodCode||ownCode, resolvedOwnCode:ownCode, shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
         }),
         shortItems: rows.map(r=>{
-          const sq=shortage[(seqNo||inv_no)+'-'+r.p_code]||shortageRowQty(r);
-          return {code:r.p_code,shortage:sq,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
+          const item=findItemByShortageRow(order,r,shortageOwnMap);
+          const codeKey=item?.code||r.p_code;
+          const sq=shortage[(seqNo||inv_no)+'-'+codeKey]||shortageRowQty(r);
+          return {code:codeKey,prodCode:shortageDisplayCode(r,item,shortageOwnMap),sellpiaCode:item?.code||r.p_code,shortage:sq,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
         }).filter(it=>it.code),
         _isMisong: true
       };
@@ -5434,10 +5473,14 @@ function insp_renderDetail(){
       const isShort = shortSet.has(it.code);
       const shortInfo = (order.shortItems||[]).find(s=>s.code===it.code);
       const is14k=isGold(it);
-      const imgUrl=photoMap&&photoMap[it.code]?photoMap[it.code]:'';
+      const imgUrl=(photoMap&&photoMap[it.prodCode])||((photoMap&&photoMap[it.code])||'');
       const {prodName,optName}=insp_itemDisplayParts(it);
       const ownCodeText=inspOwnCodeText(it);
       const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
+      const shV=shortage[order.no+'-'+it.code]||shortInfo?.shortage||0;
+      const sid='insp-sh-'+String(order.no).replace(/[^a-zA-Z0-9]/g,'_')+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
+      const eNo=String(order.no).replace(/'/g,"\\'");
+      const ec=it.code.replace(/'/g,"\\'");
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
         +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp')+'</td>'
@@ -5447,6 +5490,13 @@ function insp_renderDetail(){
         +inspAmountCell(it)
         +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(is14k?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
         +'<td style="width:92px;min-width:92px;max-width:92px;font-size:11px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+( it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
+        +'<td style="text-align:center;width:64px;min-width:64px;max-width:64px;padding:4px 1px;">'
+          +'<div class="pi-short'+(shV>0?' has-val':'')+'" style="display:flex;align-items:center;justify-content:center;gap:2px;">'
+            +'<button class="sq-btn" style="width:22px;height:22px;font-size:14px;" onclick="insp_adjShort(\''+eNo+'\',\''+ec+'\',-1)">−</button>'
+            +'<span class="sq-val" id="'+sid+'" style="min-width:18px;font-size:13px;">'+shV+'</span>'
+            +'<button class="sq-btn" style="width:22px;height:22px;font-size:14px;" onclick="insp_adjShort(\''+eNo+'\',\''+ec+'\',1)">+</button>'
+          +'</div>'
+        +'</td>'
         +'<td style="padding:6px 8px;">'
           +(isShort
             ?'<span style="display:inline-block;font-size:10px;font-weight:800;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:1px 5px;">미송 '+( shortInfo?shortInfo.shortage:'' )+'개</span>'
@@ -5465,6 +5515,14 @@ function insp_renderDetail(){
         +(chBadge(order.no)||'')
         +inspOrderTotalBadge(order)
         +'<div class="insp-dh-stat">전체 '+order.items.length+'종</div>'
+        +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
+          +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
+          +'<input id="insp-dr-'+order.no+'" type="text" value="'+(drawer[order.no]||'')+'" placeholder="서랍번호"'
+            +' style="width:60px;padding:3px 6px;border:1.5px solid #E8A0A0;border-radius:6px;font-size:12px;font-weight:700;color:#C0392B;background:#FDECEA;text-align:center;outline:none;"'
+            +' onkeydown="if(event.key===\'Enter\')this.blur();"'
+            +' onblur="insp_saveDrawer(\''+String(order.no).replace(/'/g,"\\'")+'\',this.value)"'
+          +'>'
+        +'</div>'
       +'</div>'
       +'<div class="insp-table-wrap">'
         +'<table class="insp-table" id="insp-main-table">'
@@ -5477,6 +5535,7 @@ function insp_renderDetail(){
             +'<th style="width:64px;text-align:left;color:#0F5132;">금액</th>'
             +'<th style="width:148px;">자사코드</th>'
             +'<th style="width:92px;color:#666;">셀피아코드</th>'
+            +'<th style="width:64px;text-align:center;color:#C0392B;font-size:10px;">부족수량</th>'
             +'<th style="width:64px;">미송정보</th>'
           +'</tr></thead>'
           +'<tbody>'+rows+'</tbody>'
@@ -5583,7 +5642,7 @@ function insp_adjShort(invNo, code, delta){
   if(newVal>0){ shortageStatus[k]='배송대기'; shortageMemo2[k]=String(newVal); }
   else { delete shortageStatus[k]; delete shortageMemo2[k]; }
   // 행 내 수량 표시 인-플레이스 업데이트
-  const sid='insp-sh-'+invNo+'-'+code.replace(/[^a-zA-Z0-9]/g,'_');
+  const sid='insp-sh-'+String(invNo).replace(/[^a-zA-Z0-9]/g,'_')+'-'+code.replace(/[^a-zA-Z0-9]/g,'_');
   const el=document.getElementById(sid);
   if(el){
     el.textContent=newVal;
@@ -5620,7 +5679,8 @@ function insp_refreshAfterShortageChange(invNo){
 function insp_saveDrawer(invNo, val){
   val=String(val||'').trim();
   drawer[invNo]=val;
-  const order=ORDERS_ALL.find(o=>String(o.no)===String(invNo));
+  const order=(ORDERS_ALL||[]).find(o=>String(o.no)===String(invNo))
+    || (_misongOrdersCache||[]).find(o=>String(o.no)===String(invNo)||String(o.invNo||'')===String(invNo));
   if(!order) return;
   order.items.forEach(it=>{
     const k=invNo+'-'+it.code;
@@ -6058,13 +6118,14 @@ async function loadMisongPickingData(showToast=false){
       o.items.forEach(it=>{
         const k=o.no+'-'+it.code;
         const sh=shortage[k]||0;
-        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:it.code,name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
+        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:it.code,sellpiaCode:it.code,prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
       });
     });
   }
   try{
     const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
+    const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     (shRows||[]).forEach(r=>{
       const status=normalizeShortageStatus(r.status);
       const sh=shortageRowQty(r);
@@ -6072,8 +6133,10 @@ async function loadMisongPickingData(showToast=false){
       if(!shouldShow || !r.p_code) return;
       const seqNo = realToSeq[r.inv_no]||String(r.inv_no||r.ord_no||'');
       const order = realToSeq[r.inv_no] ? ORDERS_ALL.find(o=>String(o.no)===String(realToSeq[r.inv_no])) : null;
-      const item = order?.items.find(it=>it.code===r.p_code);
-      const k = seqNo+'-'+r.p_code;
+      const item = findItemByShortageRow(order,r,shortageOwnMap);
+      const codeKey = item?.code || r.p_code;
+      const ownCode = shortageDisplayCode(r,item,shortageOwnMap);
+      const k = seqNo+'-'+codeKey;
       if(sh>0) shortage[k]=sh;
       shortageStatus[k]=status;
       shortageMemo2[k]=String(r.memo2_val??'').trim();
@@ -6082,7 +6145,9 @@ async function loadMisongPickingData(showToast=false){
         seq: seqNo,
         invNo: r.inv_no||'',
         ordNo: r.ord_no||'',
-        code: r.p_code,
+        code: codeKey,
+        sellpiaCode: item?.code||r.p_code,
+        prodCode: ownCode,
         name: item ? itemNameWithOption(item) : (r.p_name||''),
         buyer: order?.buyer||r.orderer||'',
         shortage: sh,
@@ -6149,8 +6214,8 @@ function getMisongMaps(){
 }
 function renderMisongItemRow(r,maps,extraClass=''){
   const isDone=getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY;
-  const prodCode = maps.codeToProdCode[r.code]||r.code;
-  const imgUrl = photoMap[prodCode]||photoMap[r.code]||'';
+  const prodCode = r.prodCode||r.dispCode||maps.codeToProdCode[r.code]||r.code;
+  const imgUrl = photoMap[prodCode]||photoMap[r.sellpiaCode]||photoMap[r.code]||'';
   const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
   const itemName = maps.itemNameMap[String(r.seq)+'-'+r.code]||r.name||'';
   const imgHtml = imgUrl
@@ -6194,6 +6259,7 @@ function renderMisongList(){
     return String(r.seq).includes(q)
       || realInv.includes(q)
       || String(r.code||'').toLowerCase().includes(q)
+      || String(r.prodCode||r.dispCode||'').toLowerCase().includes(q)
       || String(r.buyer||'').toLowerCase().includes(q);
   }) : misongPickingData;
 
@@ -6223,10 +6289,10 @@ function renderMisongList(){
       if(!codeMap.has(r.code)) codeMap.set(r.code,[]);
       codeMap.get(r.code).push(r);
     });
-    listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(maps.codeToProdCode[a[0]]||a[0],maps.codeToProdCode[b[0]]||b[0])).map(([code,rows])=>{
+    listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(a[1][0]?.prodCode||maps.codeToProdCode[a[0]]||a[0],b[1][0]?.prodCode||maps.codeToProdCode[b[0]]||b[0])).map(([code,rows])=>{
       const totalSh = rows.reduce((s,r)=>s+r.shortage,0);
       const allDoneC = rows.every(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY);
-      const prodCode = maps.codeToProdCode[code]||code;
+      const prodCode = rows[0]?.prodCode||rows[0]?.dispCode||maps.codeToProdCode[code]||code;
       const itemsHtml = rows.map(r=>{
         const dr=String(drawer[r.seq]||r.drawer||'').trim();
         const realInv=seqToReal[r.seq]||r.invNo||'';
@@ -6323,26 +6389,31 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
     const inv_no=row?.invNo||seqToReal[seq]||String(seq);
     const _ord2=row?.ordNo||noMap[seq]?.ord_no||inv_no;
-    const {error}=await db.from('picking').upsert({inv_no,ord_no:_ord2,p_code:code,shortage_qty:newShortage},{onConflict:'inv_no,p_code'});
+    const order=ORDERS_ALL.find(o=>String(o.no)===String(seq)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no));
+    const item=order?.items.find(it=>it.code===code||it.prodCode===code);
+    const storageCode=item?.code||row?.sellpiaCode||code;
+    const {error}=await db.from('picking').upsert({inv_no,ord_no:_ord2,p_code:storageCode,shortage_qty:newShortage},{onConflict:'inv_no,p_code'});
     if(error) throw error;
     // shortage 테이블 동기화
     if(newShortage>0){
-      const order=ORDERS_ALL.find(o=>String(o.no)===String(seq)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no));
-      const item=order?.items.find(it=>it.code===code);
       await db.from('shortage').upsert({
         inv_no, ord_no:_ord2,
         orderer: order?.buyer||row?.buyer||'',
-        p_code: code, p_name: item ? itemNameWithOption(item) : (row?.name||''),
+        p_code: storageCode, p_name: item ? itemNameWithOption(item) : (row?.name||''),
         short_qty: newShortage, memo2_val: String(newShortage), is_gold: isGold(item||code),
         status: '배송대기', updated_at: new Date().toISOString(),
       },{onConflict:'inv_no,p_code'});
     } else {
       // 미송피킹 완료: 삭제 대신 '피킹완료' 상태로 변경 → 메모 업데이터가 셀피아에 'ㅁ' 씀
       await db.from('shortage').upsert({
-        inv_no, ord_no:_ord2, p_code:code,
+        inv_no, ord_no:_ord2, p_code:storageCode,
         short_qty: 0, memo2_val: 'ㅁ', status: '피킹완료',
         updated_at: new Date().toISOString(),
       },{onConflict:'inv_no,p_code'});
+    }
+    if(storageCode!==code){
+      await db.from('picking').delete().eq('inv_no',inv_no).eq('p_code',code);
+      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',code);
     }
     const k=String(seq)+'-'+code;
     if(newShortage===0) delete shortage[k]; else shortage[k]=newShortage;
