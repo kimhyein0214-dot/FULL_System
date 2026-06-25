@@ -488,8 +488,48 @@
     function detailRows() {
       return getGridRows('grid8').map(({ item }) => item).filter(Boolean);
     }
+    function itemNoAliases(itemNo, ordNo) {
+      const raw = normal(itemNo);
+      const orderNo = normal(ordNo);
+      const aliases = new Set();
+      const add = value => {
+        const v = normal(value);
+        if (v) aliases.add(v);
+      };
+      add(raw);
+      if (!raw) return aliases;
+
+      const bracket = raw.match(/(?:^|_)(\d+_\d{14,}-\d+_\[(\d+)\]|\d{14,}-\d+_\[(\d+)\])$/);
+      if (bracket) {
+        add(bracket[1]);
+        add(bracket[2] || bracket[3]);
+      }
+      const plainMatch = raw.match(/\[(\d+)\]$/);
+      if (plainMatch) add(plainMatch[1]);
+
+      const numeric = raw.match(/^\d+$/);
+      if (numeric && orderNo) {
+        add(`${orderNo}_[${raw}]`);
+        add(`1_${orderNo}_[${raw}]`);
+      }
+      if (orderNo && raw.includes(orderNo + '_[') && !raw.startsWith('1_')) {
+        add(`1_${raw}`);
+      }
+      if (orderNo && raw.startsWith('1_' + orderNo)) {
+        add(raw.slice(2));
+      }
+      return aliases;
+    }
     function rowItemNo(row) {
-      return normal(row.item_no || row.o_item_no || row.ord_item_no);
+      return normal(
+        row.item_no ||
+        row.o_item_no ||
+        row.ord_item_no ||
+        row.order_item_no ||
+        row.c_item_no ||
+        row.product_change_item_no ||
+        row.switch_item_no
+      );
     }
     function rowSellerId(row) {
       return normal(row.__smuSellerId || row.p_provider_uid || row.provider_uid || row.seller_id);
@@ -557,8 +597,19 @@
     }
     async function setDeliveryHold(rows, hold) {
       const ordNo = normal(rows[0] && rows[0].ord_no);
+      const isDelayed = row => {
+        const blob = [
+          row.d_status,
+          row.o_status,
+          row.d_status_text,
+          row.delivery_delay,
+          row.deli_delay,
+          row.bflag_status_h
+        ].map(value => normal(value)).join(' ');
+        return row.d_status === true || ['1', 'Y', 'TRUE'].includes(normal(row.d_status).toUpperCase()) || blob.includes('배송보류');
+      };
       const targets = rows.filter(row => {
-        const delayed = row.d_status === true || normal(row.o_status).includes('배송보류');
+        const delayed = isDelayed(row);
         return hold ? !delayed : delayed;
       });
       if (!ordNo || !targets.length) {
@@ -640,8 +691,9 @@
         task.reason = '발송대기: 내일출고 메모 + 메모2 ㅁ + 배송보류 해제';
         for (const row of nextShipRows) {
           const itemNo = normal(row.item_no);
-          if (!itemNo) continue;
-          task.memo2Map.set(itemNo, normal(row.memo2_val) || 'ㅁ');
+          for (const alias of itemNoAliases(itemNo, ordNo)) {
+            task.memo2Map.set(alias, normal(row.memo2_val) || 'ㅁ');
+          }
         }
         return task;
       }
@@ -652,7 +704,9 @@
         task.reason = '미송 발생: 서랍번호 + 부족수량 + 배송보류';
         for (const row of activeRows) {
           const itemNo = normal(row.item_no);
-          if (itemNo) task.memo2Map.set(itemNo, String(Number(row.short_qty || 0)));
+          for (const alias of itemNoAliases(itemNo, ordNo)) {
+            task.memo2Map.set(alias, String(Number(row.short_qty || 0)));
+          }
         }
         return task;
       }
@@ -662,7 +716,9 @@
         task.reason = '부분 미송피킹: 피킹된 상품만 관리메모2 ㅁ';
         for (const row of pickedRows) {
           const itemNo = normal(row.item_no);
-          if (itemNo) task.memo2Map.set(itemNo, normal(row.memo2_val) || 'ㅁ');
+          for (const alias of itemNoAliases(itemNo, ordNo)) {
+            task.memo2Map.set(alias, normal(row.memo2_val) || 'ㅁ');
+          }
         }
         return task;
       }
@@ -679,7 +735,13 @@
       const result = [];
       for (const row of rows) {
         const itemNo = rowItemNo(row);
-        if (memo2Map.has(itemNo)) result.push({ row, memo: memo2Map.get(itemNo), code: itemNo });
+        const aliases = [...itemNoAliases(itemNo, row.ord_no)];
+        for (const alias of aliases) {
+          if (memo2Map.has(alias)) {
+            result.push({ row, memo: memo2Map.get(alias), code: alias, aliases });
+            break;
+          }
+        }
       }
       return result;
     }
@@ -885,7 +947,8 @@
           const matched = matchMemo2Rows(rows, task.memo2Map);
           for (const item of matched) await updateMemo('o_shop_memo2', item.row, item.memo, false);
           actions.push(`관리메모2 ${matched.length}건`);
-          const unmatchedCodes = [...task.memo2Map.keys()].filter(code => !matched.some(item => item.code === code));
+          const matchedCodes = new Set(matched.flatMap(item => item.aliases || [item.code]));
+          const unmatchedCodes = [...task.memo2Map.keys()].filter(code => !matchedCodes.has(code));
           if (unmatchedCodes.length) addLog(`  상품순서번호 미매칭: ${unmatchedCodes.join(', ')}`);
         }
       }
