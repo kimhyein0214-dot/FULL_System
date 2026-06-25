@@ -595,39 +595,59 @@
       }
       await sleep(CONFIG.ajaxDelay);
     }
-    async function setDeliveryHold(rows, hold) {
-      const ordNo = normal(rows[0] && rows[0].ord_no);
-      const isDelayed = row => {
-        const blob = [
-          row.d_status,
-          row.o_status,
-          row.d_status_text,
-          row.delivery_delay,
-          row.deli_delay,
-          row.bflag_status_h
-        ].map(value => normal(value)).join(' ');
-        return row.d_status === true || ['1', 'Y', 'TRUE'].includes(normal(row.d_status).toUpperCase()) || blob.includes('배송보류');
-      };
-      const targets = rows.filter(row => {
-        const delayed = isDelayed(row);
-        return hold ? !delayed : delayed;
+    function detailRowIndices(ordNo) {
+      return getGridRows('grid8')
+        .filter(({ item }) => normal(item && item.ord_no) === normal(ordNo))
+        .map(({ idx }) => idx);
+    }
+    async function clickDeliveryHoldPrompt(hold) {
+      await waitFor(() => {
+        const buttons = [...document.querySelectorAll('button,input[type="button"],input[type="submit"],a')]
+          .filter(el => el.offsetParent !== null)
+          .map(el => ({
+            el,
+            text: normal(el.textContent || el.value || '')
+          }))
+          .filter(item => item.text);
+        const target = buttons.find(item => {
+          if (hold) return item.text === '배송보류' || (item.text.includes('배송보류') && !item.text.includes('해제'));
+          return item.text.includes('배송보류') && item.text.includes('해제');
+        });
+        return target ? target.el : false;
+      }, 2000).then(button => {
+        button.click();
       });
-      if (!ordNo || !targets.length) {
-        addLog(`  배송보류 ${hold ? '설정' : '해제'} 대상 없음`);
+      await sleep(CONFIG.ajaxDelay);
+    }
+    async function setDeliveryHoldByGridSelection(rows, hold) {
+      const ordNo = normal(rows[0] && rows[0].ord_no);
+      const indices = detailRowIndices(ordNo);
+      if (!ordNo || !indices.length || !window.grid8) {
+        addLog(`  배송보류 ${hold ? '설정' : '해제'} 상세행 없음`);
         return;
       }
-      const items = targets.map(row => rowSellerId(row) + '_' + rowItemNo(row)).filter(item => !item.startsWith('_') && !item.endsWith('_'));
-      if (!items.length) throw new Error('배송보류 처리 item 목록을 만들지 못했습니다.');
-      await postSellpia({
-        mode: 'setorderdelidelay',
-        ono: ordNo,
-        items,
-        set_type: hold ? 'Y' : 'N'
-      });
-      targets.forEach(row => updateGridRow(row, {
+      try {
+        window.grid8.setActiveCell(indices[0], 0);
+        window.grid8.setSelectedRows(indices);
+        if (typeof window.grid8.focus === 'function') window.grid8.focus();
+      } catch (err) {
+        throw new Error(`배송보류 전체선택 실패: ${err.message}`);
+      }
+      await sleep(120);
+      if (typeof window.orderedit_deli_delay === 'function') {
+        window.orderedit_deli_delay();
+      } else {
+        const button = document.getElementById('deli_delay_b') || [...document.querySelectorAll('button,input[type="button"],a')]
+          .find(el => el.offsetParent !== null && normal(el.textContent || el.value || '').includes('배송보류'));
+        if (!button) throw new Error('배송보류 버튼을 찾지 못했습니다.');
+        button.click();
+      }
+      await clickDeliveryHoldPrompt(hold);
+      rows.forEach(row => updateGridRow(row, {
         d_status: !!hold,
         o_status: hold ? '배송보류' : normal(row.o_status).replace('배송보류', '').trim()
       }));
+      addLog(`  상세 ${indices.length}행 전체선택 → 배송보류 ${hold ? '설정' : '해제'}`);
       await sleep(CONFIG.ajaxDelay);
     }
     function isDoneStatus(status) {
@@ -953,7 +973,7 @@
         }
       }
       if (options.doHold && task.writeHold) {
-        await setDeliveryHold(rows, !!task.hold);
+        await setDeliveryHoldByGridSelection(rows, !!task.hold);
         actions.push(task.hold ? '배송보류 설정' : '배송보류 해제');
       }
       return actions.join(' / ') || '변경 없음';
