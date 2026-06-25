@@ -600,6 +600,21 @@
         .filter(({ item }) => normal(item && item.ord_no) === normal(ordNo))
         .map(({ index }) => index);
     }
+    function detailGridElement() {
+      try {
+        if (window.grid8 && typeof window.grid8.getContainerNode === 'function') {
+          const node = window.grid8.getContainerNode();
+          if (node) return node;
+        }
+      } catch (_) {}
+      return document.getElementById('myGrid8') ||
+        document.getElementById('grid8') ||
+        document.querySelector('.grid8') ||
+        [...document.querySelectorAll('.slickgrid-container,.slick-pane,.slick-viewport')]
+          .find(el => el.querySelector('.slick-row,.slick-cell')) ||
+        document.querySelector('.slick-cell')?.closest('.slickgrid-container,.slick-pane,.slick-viewport') ||
+        null;
+    }
     function isVisibleElement(el) {
       if (!el) return false;
       const style = window.getComputedStyle(el);
@@ -609,6 +624,80 @@
     }
     function elementLabel(el) {
       return normal(el?.textContent || el?.value || el?.getAttribute?.('value') || el?.getAttribute?.('title') || '');
+    }
+    function findVisibleControl(predicate, root = document) {
+      return [...root.querySelectorAll('button,input[type="button"],input[type="submit"],a,[role="button"],.jqibuttons *')]
+        .filter(isVisibleElement)
+        .find(el => predicate(elementLabel(el), el));
+    }
+    function dispatchMouseClick(target) {
+      if (!target) return;
+      ['mousedown', 'mouseup', 'click'].forEach(type => {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      });
+    }
+    function dispatchCtrlA(target) {
+      const eventInit = {
+        key: 'a',
+        code: 'KeyA',
+        keyCode: 65,
+        which: 65,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      };
+      ['keydown', 'keyup'].forEach(type => {
+        target?.dispatchEvent?.(new KeyboardEvent(type, eventInit));
+      });
+    }
+    async function selectInvoiceDetailRowsLikeManual(indices) {
+      const firstIndex = indices[0];
+      const grid = window.grid8;
+      const gridEl = detailGridElement();
+      try {
+        if (typeof grid.scrollRowIntoView === 'function') grid.scrollRowIntoView(firstIndex);
+        grid.setActiveCell(firstIndex, 0);
+        if (typeof grid.focus === 'function') grid.focus();
+      } catch (err) {
+        throw new Error(`배송보류 상세 셀 포커스 실패: ${err.message}`);
+      }
+      await sleep(80);
+
+      const firstRow = gridEl?.querySelector(`.slick-row[row="${firstIndex}"],.slick-row[data-row="${firstIndex}"]`);
+      const clickTarget = firstRow?.querySelector('.slick-cell') ||
+        gridEl?.querySelector('.slick-cell.active') ||
+        gridEl?.querySelector('.slick-cell') ||
+        gridEl ||
+        document.body;
+      clickTarget.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+      dispatchMouseClick(clickTarget);
+      await sleep(80);
+
+      const keyTargets = [
+        document.activeElement,
+        clickTarget,
+        gridEl,
+        gridEl?.querySelector('.slick-viewport'),
+        gridEl?.querySelector('.grid-canvas'),
+        document
+      ].filter(Boolean);
+      keyTargets.forEach(target => dispatchCtrlA(target));
+      try {
+        if (window.jQuery && gridEl) {
+          window.jQuery(gridEl).trigger(window.jQuery.Event('keydown', { keyCode: 65, which: 65, ctrlKey: true }));
+          window.jQuery(gridEl).trigger(window.jQuery.Event('keyup', { keyCode: 65, which: 65, ctrlKey: true }));
+        }
+      } catch (_) {}
+      await sleep(120);
+
+      try {
+        const selected = typeof grid.getSelectedRows === 'function' ? grid.getSelectedRows().map(Number) : [];
+        const hasAllInvoiceRows = indices.every(index => selected.includes(index));
+        if (!hasAllInvoiceRows) grid.setSelectedRows(indices);
+      } catch (err) {
+        throw new Error(`배송보류 송장 전체선택 실패: ${err.message}`);
+      }
+      await sleep(120);
     }
     function deliveryPromptRoot() {
       return [...document.querySelectorAll('.jqibox,.jqi,.jqistate,.ui-dialog,[id^="jqi"]')]
@@ -650,36 +739,22 @@
         addLog(`  배송보류 ${hold ? '설정' : '해제'} 송장 상세 없음`);
         return;
       }
-      const originalGetSelectedRows = typeof window.grid8.getSelectedRows === 'function'
-        ? window.grid8.getSelectedRows.bind(window.grid8)
-        : null;
-      try {
-        window.grid8.setActiveCell(indices[0], 0);
-        window.grid8.setSelectedRows(indices);
-        if (typeof window.grid8.focus === 'function') window.grid8.focus();
-        window.grid8.getSelectedRows = () => indices.slice();
-      } catch (err) {
-        throw new Error(`배송보류 송장 전체선택 실패: ${err.message}`);
-      }
-      await sleep(120);
-      try {
-        if (typeof window.orderedit_deli_delay === 'function') {
-          window.orderedit_deli_delay();
-        } else {
-          const button = document.getElementById('deli_delay_b') || [...document.querySelectorAll('button,input[type="button"],a')]
-            .find(el => isVisibleElement(el) && elementLabel(el).includes('배송보류'));
-          if (!button) throw new Error('배송보류 버튼을 찾지 못했습니다.');
-          button.click();
-        }
-      } finally {
-        if (originalGetSelectedRows) window.grid8.getSelectedRows = originalGetSelectedRows;
+      await selectInvoiceDetailRowsLikeManual(indices);
+      const button = document.getElementById('deli_delay_b') ||
+        findVisibleControl(text => text.includes('배송보류') && (text.includes('해제') || text.includes('(해제)')));
+      if (button) {
+        button.click();
+      } else if (typeof window.orderedit_deli_delay === 'function') {
+        window.orderedit_deli_delay();
+      } else {
+        throw new Error('배송보류(해제) 버튼/orderedit_deli_delay 함수를 찾지 못했습니다.');
       }
       await clickDeliveryHoldPrompt(hold);
       rows.forEach(row => updateGridRow(row, {
         d_status: !!hold,
         o_status: hold ? '배송보류' : normal(row.o_status).replace('배송보류', '').trim()
       }));
-      addLog(`  송장 상세 ${indices.length}행 전체선택 → 배송보류 ${hold ? '설정' : '해제'}`);
+      addLog(`  송장 상세 셀 클릭 + Ctrl+A(${indices.length}행) → 배송보류 ${hold ? '설정' : '해제'}`);
       await sleep(CONFIG.ajaxDelay);
     }
     function isDoneStatus(status) {
