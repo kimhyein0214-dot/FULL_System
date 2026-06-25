@@ -651,9 +651,14 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .insp-memo-th{overflow:visible !important;}
 
 /* 사진 셀 */
-.insp-photo-cell{width:124px;height:85px;border-radius:6px;border:1.5px dashed #D9CBBA;background:#FFF8F0;display:flex;align-items:center;justify-content:center;font-size:22px;color:#D9CBBA;cursor:zoom-in;overflow:hidden;}
+.insp-photo-cell{width:124px;height:85px;border-radius:6px;border:1.5px dashed #D9CBBA;background:#FFF8F0;display:flex;align-items:center;justify-content:center;font-size:22px;color:#D9CBBA;cursor:pointer;overflow:hidden;position:relative;}
 .insp-photo-cell img{width:100%;height:100%;object-fit:contain;border-radius:4px;background:#F8FAFC;}
 .insp-photo-cell.has-img{border-style:solid;border-color:#D9CBBA;}
+.photo-drop-target.dragging{border-color:#2563EB !important;background:#DBEAFE !important;box-shadow:inset 0 0 0 2px rgba(37,99,235,0.24) !important;}
+.photo-empty{flex-direction:column;gap:2px;color:#7C8DA5 !important;border-style:dashed !important;background:#F8FAFC !important;}
+.photo-empty-ico{font-size:22px;line-height:1;}
+.photo-empty-txt{font-size:10px;font-weight:900;line-height:1;color:#64748B;}
+.option-alert{color:#E02424 !important;font-weight:1000 !important;}
 
 /* 검색 */
 .insp-search-input{width:90px;padding:4px 8px;border:1.5px solid rgba(255,255,255,0.2);border-radius:7px;font-size:12px;font-weight:700;outline:none;font-family:inherit;color:#fff;background:rgba(255,255,255,0.12);text-align:center;}
@@ -3883,8 +3888,8 @@ body{
 }
 .insp-table{
   table-layout:fixed !important;
-  width:max-content !important;
-  min-width:1320px !important;
+  width:100% !important;
+  min-width:1540px !important;
   border-collapse:separate !important;
   border-spacing:0 !important;
 }
@@ -3921,27 +3926,33 @@ body{
 .insp-table:not(.has-label-col) td:nth-child(3),
 .insp-table.has-label-col th:nth-child(4),
 .insp-table.has-label-col td:nth-child(4){
-  width:650px !important;
-  min-width:650px !important;
-  max-width:650px !important;
+  width:420px !important;
+  min-width:420px !important;
+  max-width:420px !important;
   font-size:15px !important;
   font-weight:900 !important;
-  white-space:nowrap !important;
-  overflow:hidden !important;
-  text-overflow:ellipsis !important;
+  white-space:normal !important;
+  word-break:keep-all !important;
+  overflow-wrap:anywhere !important;
+  line-height:1.25 !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
 }
 .insp-table:not(.has-label-col) th:nth-child(5),
 .insp-table:not(.has-label-col) td:nth-child(5),
 .insp-table.has-label-col th:nth-child(6),
 .insp-table.has-label-col td:nth-child(6){
-  width:82px !important;
-  min-width:82px !important;
-  max-width:82px !important;
+  width:340px !important;
+  min-width:340px !important;
+  max-width:340px !important;
   font-size:13px !important;
-  font-weight:700 !important;
-  white-space:nowrap !important;
-  overflow:hidden !important;
-  text-overflow:ellipsis !important;
+  font-weight:800 !important;
+  white-space:normal !important;
+  word-break:keep-all !important;
+  overflow-wrap:anywhere !important;
+  line-height:1.25 !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
 }
 .insp-table:not(.has-label-col) th:nth-child(4),
 .insp-table:not(.has-label-col) td:nth-child(4),
@@ -3958,9 +3969,9 @@ body{
 .insp-table:not(.has-label-col) td:nth-child(6),
 .insp-table.has-label-col th:nth-child(7),
 .insp-table.has-label-col td:nth-child(7){
-  width:46px !important;
-  min-width:46px !important;
-  max-width:46px !important;
+  width:64px !important;
+  min-width:64px !important;
+  max-width:64px !important;
   text-align:left !important;
   font-size:13px !important;
   font-weight:900 !important;
@@ -3972,16 +3983,16 @@ body{
 .insp-table:not(.has-label-col) td:nth-child(7),
 .insp-table.has-label-col th:nth-child(8),
 .insp-table.has-label-col td:nth-child(8){
-  width:86px !important;
-  min-width:86px !important;
-  max-width:86px !important;
+  width:148px !important;
+  min-width:148px !important;
+  max-width:148px !important;
   padding-left:3px !important;
   padding-right:3px !important;
 }
 .insp-table .insp-td-code{
-  white-space:nowrap !important;
+  white-space:normal !important;
   word-break:keep-all !important;
-  overflow-wrap:normal !important;
+  overflow-wrap:anywhere !important;
   line-height:1.2 !important;
 }
 .insp-table .insp-td-code .insp-gold-badge,
@@ -3992,9 +4003,9 @@ body{
 .insp-table:not(.has-label-col) td:nth-child(8),
 .insp-table.has-label-col th:nth-child(9),
 .insp-table.has-label-col td:nth-child(9){
-  width:46px !important;
-  min-width:46px !important;
-  max-width:46px !important;
+  width:92px !important;
+  min-width:92px !important;
+  max-width:92px !important;
   white-space:nowrap !important;
   padding-left:3px !important;
   padding-right:3px !important;
@@ -4003,9 +4014,9 @@ body{
 .insp-table:not(.has-label-col) td:nth-child(9),
 .insp-table.has-label-col th:nth-child(10),
 .insp-table.has-label-col td:nth-child(10){
-  width:52px !important;
-  min-width:52px !important;
-  max-width:52px !important;
+  width:64px !important;
+  min-width:64px !important;
+  max-width:64px !important;
   text-align:center !important;
   white-space:nowrap !important;
   padding-left:2px !important;

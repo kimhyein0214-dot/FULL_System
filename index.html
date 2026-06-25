@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0623-insp-wide-option-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-photo-wrap-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -2061,6 +2061,138 @@ function zoomPhoto(url){
   document.body.appendChild(ov);
 }
 
+function optionHtml(text){
+  return htmlEsc(text).replace(/바변경/g,'<strong class="option-alert">바변경</strong>');
+}
+function photoSafeName(code){
+  return String(code||'photo').trim().replace(/[\\/:*?"<>|#%&{}$!`'@+=\s]+/g,'_')||'photo';
+}
+function renderPhotoBox(code,imgUrl,kind='pick'){
+  const cls=kind==='insp'?'insp-photo-cell':'pr-photo';
+  const dataCode=htmlEsc(code);
+  const url=String(imgUrl||'').trim();
+  if(url){
+    return `<div class="${cls} has-img photo-drop-target" data-code="${dataCode}" data-url="${htmlEsc(url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
+      +`<img src="${htmlEsc(url)}" alt="${dataCode}" loading="lazy" onerror="photoImageError(this,this.closest('.photo-drop-target')?.dataset.code||'')">`
+    +`</div>`;
+  }
+  return `<div class="${cls} photo-drop-target photo-empty" data-code="${dataCode}" title="클릭: 카메라/파일 선택 · 드롭: 사진 저장 (${dataCode})" onclick="event.stopPropagation();openPhotoCapture(this.dataset.code)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
+    +`<span class="photo-empty-ico">📷</span><span class="photo-empty-txt">사진</span>`
+  +`</div>`;
+}
+function photoImageError(img,code){
+  const box=img.closest('.pr-photo,.insp-photo-cell');
+  if(box) box.outerHTML=renderPhotoBox(code,'',box.classList.contains('insp-photo-cell')?'insp':'pick');
+}
+function openPhotoCapture(code){
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='image/*';
+  input.capture='environment';
+  input.onchange=()=>handlePhotoFiles(code,input.files);
+  input.click();
+}
+function photoDragOver(e){
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.add('dragging');
+}
+function photoDragLeave(e){
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('dragging');
+}
+function photoDrop(e,code){
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('dragging');
+  handlePhotoFiles(code,e.dataTransfer&&e.dataTransfer.files);
+}
+function readFileAsDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onload=()=>resolve(fr.result);
+    fr.onerror=()=>reject(fr.error||new Error('파일 읽기 실패'));
+    fr.readAsDataURL(file);
+  });
+}
+function loadImageFromDataUrl(dataUrl){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=()=>reject(new Error('이미지 로드 실패'));
+    img.src=dataUrl;
+  });
+}
+async function imageFileToJpegBlob(file,maxSide=1200,quality=0.86){
+  if(!file||!String(file.type||'').startsWith('image/')) throw new Error('이미지 파일만 저장할 수 있어요');
+  const dataUrl=await readFileAsDataUrl(file);
+  const img=await loadImageFromDataUrl(dataUrl);
+  const scale=Math.min(1,maxSide/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height));
+  const w=Math.max(1,Math.round((img.naturalWidth||img.width)*scale));
+  const h=Math.max(1,Math.round((img.naturalHeight||img.height)*scale));
+  const canvas=document.createElement('canvas');
+  canvas.width=w; canvas.height=h;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#fff';
+  ctx.fillRect(0,0,w,h);
+  ctx.drawImage(img,0,0,w,h);
+  return await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('이미지 변환 실패')),'image/jpeg',quality));
+}
+function blobToDataUrl(blob){
+  return new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onload=()=>resolve(fr.result);
+    fr.onerror=()=>reject(fr.error||new Error('이미지 저장 실패'));
+    fr.readAsDataURL(blob);
+  });
+}
+async function uploadProductPhotoToStorage(code,blob){
+  if(!imageCatalogDb) throw new Error('이미지 DB 연결 없음');
+  const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
+  const path='sellpia/'+photoSafeName(code)+'.jpg';
+  const {error}=await imageCatalogDb.storage.from(bucket).upload(path,blob,{contentType:'image/jpeg',upsert:true,cacheControl:'3600'});
+  if(error) throw new Error(error.message||'Storage 업로드 실패');
+  const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
+  return data&&data.publicUrl?data.publicUrl:'';
+}
+async function handlePhotoFiles(code,files){
+  const file=files&&files[0];
+  const key=String(code||'').trim();
+  if(!key){toast('⚠ 셀피아코드 없음');return;}
+  if(!file) return;
+  toast('⏳ '+key+' 사진 저장 중...',3000);
+  try{
+    const blob=await imageFileToJpegBlob(file);
+    let url='', savedOnServer=false, serverError='';
+    try{
+      url=await uploadProductPhotoToStorage(key,blob);
+      savedOnServer=!!url;
+    }catch(e){
+      serverError=e.message||String(e);
+      url=await blobToDataUrl(blob);
+    }
+    photoMap[key]=url;
+    try{
+      localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));
+      const local=JSON.parse(localStorage.getItem('pickingLocalPhotoUploads')||'{}');
+      local[key]={url,updatedAt:new Date().toISOString(),serverSaved:savedOnServer,fileName:photoSafeName(key)+'.jpg'};
+      localStorage.setItem('pickingLocalPhotoUploads',JSON.stringify(local));
+    }catch(e){
+      console.warn('photo cache warning',e);
+    }
+    renderLeft();
+    if(document.getElementById('sys-insp')?.classList.contains('active')){
+      insp_renderList();
+      insp_renderDetail();
+    }
+    toast(savedOnServer?'✅ '+key+'.jpg 서버 저장 완료':'✅ '+key+'.jpg 로컬 저장 완료 (서버 권한 필요)',savedOnServer?2500:4500);
+    if(serverError) console.warn('Storage upload skipped:',serverError);
+  }catch(e){
+    toast('❌ 사진 저장 실패: '+e.message,4000);
+  }
+}
+
 async function loadData(silent=false,preserveView=false){
   const sw=document.getElementById('stack-wrap');
   if(!silent){
@@ -2845,14 +2977,15 @@ function renderLeft(){
         :`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`;
 
     const drVal=drawer[f.no]||'';
+    const _photoUrl=photoMap[f.code]||photoMap[_pcode]||'';
     listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
-        <div class="pr-photo-wrap"><div class="pr-photo">${photoMap[f.code]?`<img src="${photoMap[f.code]}" alt="${f.code}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML='🖼'">`:'🖼'}</div></div>
+        <div class="pr-photo-wrap">${renderPhotoBox(f.code,_photoUrl,'pick')}</div>
       </div>
       <div class="deck-content">
         <div class="deck-card-head">
-          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${optionText?`<span class="deck-card-option">${esc(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
+          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${optionText?`<span class="deck-card-option">${optionHtml(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
           <div class="deck-card-name">${esc(itemNameOnly(f))}</div>
           <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
         </div>
@@ -5247,13 +5380,13 @@ function formatSellpiaAmount(raw,amount){
   return Number.isFinite(n) ? n.toLocaleString('ko-KR')+'원' : '—';
 }
 function inspAmountCell(it){
-  return '<td class="insp-td-amount" style="text-align:left;width:46px;min-width:46px;max-width:46px;font-size:13px;font-weight:900;color:#0F5132;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+  return '<td class="insp-td-amount" style="text-align:left;width:64px;min-width:64px;max-width:64px;font-size:13px;font-weight:900;color:#0F5132;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
     +htmlEsc(formatSellpiaAmount(it?.sellpiaItemSalesAmountRaw,it?.sellpiaItemSalesAmount))
   +'</td>';
 }
 function inspProductCell(prodName){
   const text=String(prodName||'').trim();
-  return '<td class="insp-product-cell" title="'+htmlEsc(text)+'" style="width:82px;min-width:82px;max-width:82px;color:#666;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+  return '<td class="insp-product-cell" title="'+htmlEsc(text)+'" style="width:340px;min-width:340px;max-width:340px;color:#4B5563;font-size:13px;font-weight:800;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'
     +(text?htmlEsc(text):'<span style="color:#CCC;">—</span>')
   +'</td>';
 }
@@ -5307,17 +5440,13 @@ function insp_renderDetail(){
       const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
-        +'<td style="text-align:center;width:132px;">'
-          +'<div class="insp-photo-cell'+(imgUrl?' has-img':'')+'">'
-            +(imgUrl?'<img src="'+imgUrl+'" onerror="this.parentElement.innerHTML=\'🖼\';this.parentElement.classList.remove(\'has-img\')">'  :'🖼')
-          +'</div>'
-        +'</td>'
-        +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:650px;min-width:650px;max-width:650px;font-size:15px;font-weight:900;color:#1A2840;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+( optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>' )+'</td>'
+        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp')+'</td>'
+        +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;font-size:15px;font-weight:900;color:#1A2840;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+( optName?optionHtml(optName):'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>' )+'</td>'
         +'<td class="insp-td-qty">'+it.qty+'</td>'
         +inspProductCell(prodName)
         +inspAmountCell(it)
-        +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'" style="width:86px;min-width:86px;max-width:86px;color:'+(is14k?'#B8860B':'#111827')+';font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
-        +'<td style="width:46px;min-width:46px;max-width:46px;font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+( it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
+        +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(is14k?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
+        +'<td style="width:92px;min-width:92px;max-width:92px;font-size:11px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+( it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
         +'<td style="padding:6px 8px;">'
           +(isShort
             ?'<span style="display:inline-block;font-size:10px;font-weight:800;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:1px 5px;">미송 '+( shortInfo?shortInfo.shortage:'' )+'개</span>'
@@ -5342,13 +5471,13 @@ function insp_renderDetail(){
           +'<thead><tr>'
             +'<th style="width:52px;text-align:center;font-size:10px;">상품순서번호</th>'
             +'<th style="width:132px;text-align:center;">사진</th>'
-            +'<th style="width:650px;">옵션명</th>'
+            +'<th style="width:420px;">옵션명</th>'
             +'<th style="text-align:center;width:50px;">수량</th>'
-            +'<th style="width:110px;">상품명</th>'
-            +'<th style="width:46px;text-align:left;color:#0F5132;">금액</th>'
-            +'<th style="width:86px;">자사코드</th>'
-            +'<th style="width:46px;color:#888;">셀피아코드</th>'
-            +'<th style="width:52px;">미송정보</th>'
+            +'<th style="width:340px;">상품명</th>'
+            +'<th style="width:64px;text-align:left;color:#0F5132;">금액</th>'
+            +'<th style="width:148px;">자사코드</th>'
+            +'<th style="width:92px;color:#666;">셀피아코드</th>'
+            +'<th style="width:64px;">미송정보</th>'
           +'</tr></thead>'
           +'<tbody>'+rows+'</tbody>'
         +'</table>'
@@ -5384,22 +5513,18 @@ function insp_renderDetail(){
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
-      +'<td style="text-align:center;width:132px;">'
-        +'<div class="insp-photo-cell'+(imgUrl?' has-img':'')+'" onclick="insp_openZoomIdx('+i+')" title="0키: 확대">'
-          +(imgUrl?'<img src="'+imgUrl+'" onerror="this.parentElement.innerHTML=\'🖼\';this.parentElement.classList.remove(\'has-img\')">':'🖼')
-        +'</div>'
-      +'</td>'
-      +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:650px;min-width:650px;max-width:650px;color:#1A2840;font-size:15px;font-weight:900;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+optionText+'</td>'
+      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp')+'</td>'
+      +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;color:#1A2840;font-size:15px;font-weight:900;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+(optName?optionHtml(optName):optionText)+'</td>'
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
       +inspAmountCell(it)
-      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'" style="width:86px;min-width:86px;max-width:86px;color:'+(goldItem?'#B8860B':'#111827')+';font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
-      +'<td style="width:46px;min-width:46px;max-width:46px;color:#888;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(it.code||'<span style="color:#CCC;">—</span>')+'</td>'
+      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(goldItem?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
+      +'<td style="width:92px;min-width:92px;max-width:92px;color:#666;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(it.code||'<span style="color:#CCC;">—</span>')+'</td>'
       +(()=>{
           const shV=shortage[order.no+'-'+it.code]||0;
           const sid='insp-sh-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
           const ec=it.code.replace(/'/g,"\\'");
-          return '<td style="text-align:center;width:52px;min-width:52px;max-width:52px;padding:4px 1px;">'
+          return '<td style="text-align:center;width:64px;min-width:64px;max-width:64px;padding:4px 1px;">'
             +'<div class="pi-short'+(shV>0?' has-val':'')+'" style="display:flex;align-items:center;justify-content:center;gap:2px;">'
               +'<button class="sq-btn" style="width:22px;height:22px;font-size:14px;" onclick="insp_adjShort('+order.no+',\''+ec+'\',-1)">−</button>'
               +'<span class="sq-val" id="'+sid+'" style="min-width:18px;font-size:13px;">'+shV+'</span>'
@@ -5434,13 +5559,13 @@ function insp_renderDetail(){
           +'<th style="width:52px;text-align:center;font-size:10px;color:#7C7D81;">상품순서번호</th>'
           +((insp_tabMode==='golditem'||insp_tabMode==='gold')?'<th style="width:60px;text-align:center;font-size:10px;color:#B8860B;background:#FFFBF0;">라벨번호</th>':'')
           +'<th style="width:132px;text-align:center;">사진</th>'
-          +'<th style="width:650px;">옵션명</th>'
+          +'<th style="width:420px;">옵션명</th>'
           +'<th style="text-align:center;width:50px;">수량</th>'
-          +'<th style="width:110px;">상품명</th>'
-          +'<th style="width:46px;text-align:left;color:#0F5132;font-size:10px;">금액</th>'
-          +'<th style="width:86px;">자사코드</th>'
-          +'<th style="width:46px;color:#888;">셀피아코드</th>'
-          +'<th style="width:52px;text-align:center;color:#C0392B;font-size:10px;">부족수량</th>'
+          +'<th style="width:340px;">상품명</th>'
+          +'<th style="width:64px;text-align:left;color:#0F5132;font-size:10px;">금액</th>'
+          +'<th style="width:148px;">자사코드</th>'
+          +'<th style="width:92px;color:#666;">셀피아코드</th>'
+          +'<th style="width:64px;text-align:center;color:#C0392B;font-size:10px;">부족수량</th>'
           +'<th class="insp-memo-th" style="width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;position:relative;user-select:none;">메모<div class="insp-col-resize-handle" onmousedown="insp_startColResize(event)"></div></th>'
         +'</tr></thead>'
         +'<tbody>'+rows+'</tbody>'
