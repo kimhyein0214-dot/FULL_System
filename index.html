@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-storage-code-name-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-product-code-image-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1358,13 +1358,24 @@ function applyImageRows(rows,{preferExisting=false}={}){
   return applied;
 }
 async function fetchPrProductImages(codes){
-  const rows=[];
+  const byKey=new Map();
+  const addRows=(data)=>{
+    (data||[]).forEach(row=>{
+      const p=String(row.p_code||'').trim();
+      const own=String(row.own_code||'').trim();
+      const key=p||own;
+      if(key) byKey.set(key,row);
+    });
+  };
   for(const chunk of chunkArray(codes)){
-    const {data,error}=await db.from('products').select('p_code,own_code,image_url').in('p_code',chunk);
-    if(error) throw new Error(error.message);
-    rows.push(...(data||[]));
+    const {data:pRows,error:pError}=await db.from('products').select('p_code,own_code,image_url').in('p_code',chunk);
+    if(pError) throw new Error(pError.message);
+    addRows(pRows);
+    const {data:oRows,error:oError}=await db.from('products').select('p_code,own_code,image_url').in('own_code',chunk);
+    if(oError) throw new Error(oError.message);
+    addRows(oRows);
   }
-  return rows;
+  return [...byKey.values()];
 }
 async function fetchSystemImageCatalog(codes){
   if(!imageCatalogDb) return [];
@@ -1403,7 +1414,7 @@ async function loadProductImagesForCodes(rawCodes){
       ...prRows.flatMap(row=>[row.p_code,row.own_code])
     ]);
     const catalogRows=await fetchSystemImageCatalog(catalogCodes);
-    stats.catalogApplied=applyImageRows(catalogRows,{preferExisting:false});
+    stats.catalogApplied=applyImageRows(catalogRows,{preferExisting:true});
     const catalogByOwnCode=new Map();
     catalogRows.forEach(row=>{
       const url=imageUrlFromRow(row);
@@ -1413,6 +1424,7 @@ async function loadProductImagesForCodes(rawCodes){
       const url=catalogByOwnCode.get(String(row.own_code||'').trim());
       if(!url) return;
       compactCodes([row.p_code,row.own_code]).forEach(key=>{
+        if(photoMap[key]) return;
         photoMap[key]=url;
         stats.catalogApplied++;
       });
@@ -1430,7 +1442,13 @@ async function loadProductImagesForCodes(rawCodes){
       const url=systemStoragePublicUrlForCode(code);
       if(!url) return;
       photoMap[code]=url;
-      const linked=prRows.find(row=>String(row.p_code||'').trim()===String(code).trim());
+      const linked=prRows.find(row=>{
+        const p=String(row.p_code||'').trim();
+        const own=String(row.own_code||'').trim();
+        const c=String(code||'').trim();
+        return p===c||own===c;
+      });
+      if(linked?.p_code&&!photoMap[linked.p_code]) photoMap[linked.p_code]=url;
       if(linked?.own_code&&!photoMap[linked.own_code]) photoMap[linked.own_code]=url;
       stats.storageFallbackApplied++;
     });
