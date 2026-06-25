@@ -600,18 +600,42 @@
         .filter(({ item }) => normal(item && item.ord_no) === normal(ordNo))
         .map(({ idx }) => idx);
     }
+    function isVisibleElement(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+    function elementLabel(el) {
+      return normal(el?.textContent || el?.value || el?.getAttribute?.('value') || el?.getAttribute?.('title') || '');
+    }
+    function deliveryPromptRoot() {
+      return [...document.querySelectorAll('.jqibox,.jqi,.jqistate,.ui-dialog,[id^="jqi"]')]
+        .filter(isVisibleElement)
+        .filter(el => {
+          const text = normal(el.innerText || el.textContent || '');
+          return text.includes('배송보류') && text.includes('계속하시겠습니까');
+        })
+        .sort((a, b) => {
+          const az = parseInt(window.getComputedStyle(a).zIndex || '0', 10) || 0;
+          const bz = parseInt(window.getComputedStyle(b).zIndex || '0', 10) || 0;
+          return bz - az;
+        })[0] || document;
+    }
     async function clickDeliveryHoldPrompt(hold) {
       await waitFor(() => {
-        const buttons = [...document.querySelectorAll('button,input[type="button"],input[type="submit"],a')]
-          .filter(el => el.offsetParent !== null)
+        const root = deliveryPromptRoot();
+        const buttons = [...root.querySelectorAll('button,input[type="button"],input[type="submit"],a,[role="button"]')]
+          .filter(isVisibleElement)
           .map(el => ({
             el,
-            text: normal(el.textContent || el.value || '')
+            text: elementLabel(el)
           }))
           .filter(item => item.text);
         const target = buttons.find(item => {
-          if (hold) return item.text === '배송보류' || (item.text.includes('배송보류') && !item.text.includes('해제'));
-          return item.text.includes('배송보류') && item.text.includes('해제');
+          if (hold) return item.text === '배송보류';
+          return item.text === '배송보류 해제' || item.text === '배송보류해제';
         });
         return target ? target.el : false;
       }, 2000).then(button => {
@@ -626,21 +650,29 @@
         addLog(`  배송보류 ${hold ? '설정' : '해제'} 상세행 없음`);
         return;
       }
+      const originalGetSelectedRows = typeof window.grid8.getSelectedRows === 'function'
+        ? window.grid8.getSelectedRows.bind(window.grid8)
+        : null;
       try {
         window.grid8.setActiveCell(indices[0], 0);
         window.grid8.setSelectedRows(indices);
         if (typeof window.grid8.focus === 'function') window.grid8.focus();
+        window.grid8.getSelectedRows = () => indices.slice();
       } catch (err) {
         throw new Error(`배송보류 전체선택 실패: ${err.message}`);
       }
       await sleep(120);
-      if (typeof window.orderedit_deli_delay === 'function') {
-        window.orderedit_deli_delay();
-      } else {
-        const button = document.getElementById('deli_delay_b') || [...document.querySelectorAll('button,input[type="button"],a')]
-          .find(el => el.offsetParent !== null && normal(el.textContent || el.value || '').includes('배송보류'));
-        if (!button) throw new Error('배송보류 버튼을 찾지 못했습니다.');
-        button.click();
+      try {
+        if (typeof window.orderedit_deli_delay === 'function') {
+          window.orderedit_deli_delay();
+        } else {
+          const button = document.getElementById('deli_delay_b') || [...document.querySelectorAll('button,input[type="button"],a')]
+            .find(el => isVisibleElement(el) && elementLabel(el).includes('배송보류'));
+          if (!button) throw new Error('배송보류 버튼을 찾지 못했습니다.');
+          button.click();
+        }
+      } finally {
+        if (originalGetSelectedRows) window.grid8.getSelectedRows = originalGetSelectedRows;
       }
       await clickDeliveryHoldPrompt(hold);
       rows.forEach(row => updateGridRow(row, {
