@@ -595,10 +595,10 @@
       }
       await sleep(CONFIG.ajaxDelay);
     }
-    function detailRowIndices(ordNo) {
+    function invoiceDetailRowIndices(ordNo) {
       return getGridRows('grid8')
         .filter(({ item }) => normal(item && item.ord_no) === normal(ordNo))
-        .map(({ idx }) => idx);
+        .map(({ index }) => index);
     }
     function isVisibleElement(el) {
       if (!el) return false;
@@ -643,11 +643,11 @@
       });
       await sleep(CONFIG.ajaxDelay);
     }
-    async function setDeliveryHoldByGridSelection(rows, hold) {
+    async function setInvoiceDeliveryHold(rows, hold) {
       const ordNo = normal(rows[0] && rows[0].ord_no);
-      const indices = detailRowIndices(ordNo);
+      const indices = invoiceDetailRowIndices(ordNo);
       if (!ordNo || !indices.length || !window.grid8) {
-        addLog(`  배송보류 ${hold ? '설정' : '해제'} 상세행 없음`);
+        addLog(`  배송보류 ${hold ? '설정' : '해제'} 송장 상세 없음`);
         return;
       }
       const originalGetSelectedRows = typeof window.grid8.getSelectedRows === 'function'
@@ -659,7 +659,7 @@
         if (typeof window.grid8.focus === 'function') window.grid8.focus();
         window.grid8.getSelectedRows = () => indices.slice();
       } catch (err) {
-        throw new Error(`배송보류 전체선택 실패: ${err.message}`);
+        throw new Error(`배송보류 송장 전체선택 실패: ${err.message}`);
       }
       await sleep(120);
       try {
@@ -679,7 +679,7 @@
         d_status: !!hold,
         o_status: hold ? '배송보류' : normal(row.o_status).replace('배송보류', '').trim()
       }));
-      addLog(`  상세 ${indices.length}행 전체선택 → 배송보류 ${hold ? '설정' : '해제'}`);
+      addLog(`  송장 상세 ${indices.length}행 전체선택 → 배송보류 ${hold ? '설정' : '해제'}`);
       await sleep(CONFIG.ajaxDelay);
     }
     function isDoneStatus(status) {
@@ -1005,7 +1005,7 @@
         }
       }
       if (options.doHold && task.writeHold) {
-        await setDeliveryHoldByGridSelection(rows, !!task.hold);
+        await setInvoiceDeliveryHold(rows, !!task.hold);
         actions.push(task.hold ? '배송보류 설정' : '배송보류 해제');
       }
       return actions.join(' / ') || '변경 없음';
