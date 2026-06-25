@@ -600,20 +600,85 @@
         .filter(({ item }) => normal(item && item.ord_no) === normal(ordNo))
         .map(({ idx }) => idx);
     }
+    function isVisibleElement(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+    function elementLabel(el) {
+      return normal(el?.textContent || el?.value || el?.getAttribute?.('value') || el?.getAttribute?.('title') || '');
+    }
+    function findVisibleControl(predicate, root = document) {
+      return [...root.querySelectorAll('button,input[type="button"],input[type="submit"],a,[role="button"],.jqibuttons *')]
+        .filter(isVisibleElement)
+        .find(el => predicate(elementLabel(el), el));
+    }
+    async function selectDetailRowsLikeSellpia(indices) {
+      const firstIdx = indices[0];
+      const gridEl = document.getElementById('myGrid8') || document.querySelector('.grid8') || document.querySelector('.slickgrid-container');
+      try {
+        if (window.grid8) {
+          window.grid8.setActiveCell(firstIdx, 0);
+          window.grid8.setSelectedRows(indices);
+          if (typeof window.grid8.focus === 'function') window.grid8.focus();
+        }
+      } catch (err) {
+        throw new Error(`배송보류 상세행 선택 실패: ${err.message}`);
+      }
+      const activeCell = gridEl?.querySelector('.slick-cell.active') || gridEl?.querySelector('.slick-cell') || document.querySelector('.slick-cell.active') || document.querySelector('.slick-cell');
+      const clickTarget = activeCell || gridEl || document.body;
+      clickTarget.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+      ['mousedown', 'mouseup', 'click'].forEach(type => {
+        clickTarget.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      });
+      const selectAll = document.getElementById('select_all');
+      if (selectAll) {
+        if (selectAll.checked) {
+          selectAll.click();
+          await sleep(80);
+        }
+        selectAll.click();
+        await sleep(120);
+      }
+      const keyTarget = gridEl || document.activeElement || document.body;
+      keyTarget.focus?.();
+      const keyEvent = type => new KeyboardEvent(type, {
+        key: 'a',
+        code: 'KeyA',
+        keyCode: 65,
+        which: 65,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      });
+      keyTarget.dispatchEvent(keyEvent('keydown'));
+      keyTarget.dispatchEvent(keyEvent('keyup'));
+      document.dispatchEvent(keyEvent('keydown'));
+      document.dispatchEvent(keyEvent('keyup'));
+      if (window.grid8) window.grid8.setSelectedRows(indices);
+      await sleep(120);
+    }
+    function findDeliveryPromptRoot() {
+      const roots = [...document.querySelectorAll('.jqibox,.jqi,.jqistate,.ui-dialog,[id^="jqi"]')]
+        .filter(isVisibleElement)
+        .filter(el => normal(el.innerText || el.textContent || '').includes('배송보류'))
+        .sort((a, b) => {
+          const az = parseInt(window.getComputedStyle(a).zIndex || '0', 10) || 0;
+          const bz = parseInt(window.getComputedStyle(b).zIndex || '0', 10) || 0;
+          return bz - az;
+        });
+      return roots[0] || document;
+    }
     async function clickDeliveryHoldPrompt(hold) {
       await waitFor(() => {
-        const buttons = [...document.querySelectorAll('button,input[type="button"],input[type="submit"],a')]
-          .filter(el => el.offsetParent !== null)
-          .map(el => ({
-            el,
-            text: normal(el.textContent || el.value || '')
-          }))
-          .filter(item => item.text);
-        const target = buttons.find(item => {
-          if (hold) return item.text === '배송보류' || (item.text.includes('배송보류') && !item.text.includes('해제'));
-          return item.text.includes('배송보류') && item.text.includes('해제');
-        });
-        return target ? target.el : false;
+        const root = findDeliveryPromptRoot();
+        const target = findVisibleControl(text => {
+          if (hold) return text === '배송보류';
+          return text === '배송보류 해제' || text === '배송보류해제' || (text.includes('배송보류') && text.includes('해제'));
+        }, root);
+        return target || false;
       }, 2000).then(button => {
         button.click();
       });
@@ -626,22 +691,10 @@
         addLog(`  배송보류 ${hold ? '설정' : '해제'} 상세행 없음`);
         return;
       }
-      try {
-        window.grid8.setActiveCell(indices[0], 0);
-        window.grid8.setSelectedRows(indices);
-        if (typeof window.grid8.focus === 'function') window.grid8.focus();
-      } catch (err) {
-        throw new Error(`배송보류 전체선택 실패: ${err.message}`);
-      }
-      await sleep(120);
-      if (typeof window.orderedit_deli_delay === 'function') {
-        window.orderedit_deli_delay();
-      } else {
-        const button = document.getElementById('deli_delay_b') || [...document.querySelectorAll('button,input[type="button"],a')]
-          .find(el => el.offsetParent !== null && normal(el.textContent || el.value || '').includes('배송보류'));
-        if (!button) throw new Error('배송보류 버튼을 찾지 못했습니다.');
-        button.click();
-      }
+      await selectDetailRowsLikeSellpia(indices);
+      const button = document.getElementById('deli_delay_b') || findVisibleControl(text => text.includes('배송보류') && text.includes('해제'));
+      if (!button) throw new Error('배송보류 버튼을 찾지 못했습니다.');
+      button.click();
       await clickDeliveryHoldPrompt(hold);
       rows.forEach(row => updateGridRow(row, {
         d_status: !!hold,
