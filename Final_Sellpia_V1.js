@@ -1,6 +1,6 @@
 (async function FinalSellpiaV1(){
   const BASE_URL = 'https://kimhyein0214-dot.github.io/FULL_System/';
-  const VERSION = '0625-invoice-hold-ctrl-a-v1';
+  const VERSION = '0625-memo2-item-no-alias-v1';
   const isOrderSearch = /\/order_search\.html/i.test(location.pathname);
   const isSellpia = /(^|\.)sellpia\.com$/i.test(location.hostname) || /(^|\.)curiouswiz\.sellpia\.com$/i.test(location.hostname);
 

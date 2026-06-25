@@ -520,6 +520,30 @@
       }
       return aliases;
     }
+    function addItemNoAliases(map, itemNo, ordNo, memo) {
+      for (const alias of itemNoAliases(itemNo, ordNo)) {
+        map.set(alias, memo);
+      }
+    }
+    function rowMemo2Aliases(row, ordNo, rowIndex) {
+      const aliases = new Set(itemNoAliases(rowItemNo(row), ordNo));
+      const addAliases = value => {
+        for (const alias of itemNoAliases(value, ordNo)) aliases.add(alias);
+      };
+      [
+        row.item_sort_order,
+        row.sort_order,
+        row.itemSortOrder,
+        row.o_item_sort_order,
+        row.order_item_sort_order,
+        row.item_seq,
+        row.seq,
+        row.seq_no,
+        row.no
+      ].forEach(addAliases);
+      addAliases(String(rowIndex + 1));
+      return [...aliases];
+    }
     function rowItemNo(row) {
       return normal(
         row.item_no ||
@@ -818,9 +842,7 @@
         task.reason = '발송대기: 내일출고 메모 + 메모2 ㅁ + 배송보류 해제';
         for (const row of nextShipRows) {
           const itemNo = normal(row.item_no);
-          for (const alias of itemNoAliases(itemNo, ordNo)) {
-            task.memo2Map.set(alias, normal(row.memo2_val) || 'ㅁ');
-          }
+          addItemNoAliases(task.memo2Map, itemNo, ordNo, normal(row.memo2_val) || 'ㅁ');
         }
         return task;
       }
@@ -831,9 +853,7 @@
         task.reason = '미송 발생: 서랍번호 + 부족수량 + 배송보류';
         for (const row of activeRows) {
           const itemNo = normal(row.item_no);
-          for (const alias of itemNoAliases(itemNo, ordNo)) {
-            task.memo2Map.set(alias, String(Number(row.short_qty || 0)));
-          }
+          addItemNoAliases(task.memo2Map, itemNo, ordNo, String(Number(row.short_qty || 0)));
         }
         return task;
       }
@@ -843,9 +863,7 @@
         task.reason = '부분 미송피킹: 피킹된 상품만 관리메모2 ㅁ';
         for (const row of pickedRows) {
           const itemNo = normal(row.item_no);
-          for (const alias of itemNoAliases(itemNo, ordNo)) {
-            task.memo2Map.set(alias, normal(row.memo2_val) || 'ㅁ');
-          }
+          addItemNoAliases(task.memo2Map, itemNo, ordNo, normal(row.memo2_val) || 'ㅁ');
         }
         return task;
       }
@@ -860,9 +878,9 @@
     }
     function matchMemo2Rows(rows, memo2Map) {
       const result = [];
-      for (const row of rows) {
-        const itemNo = rowItemNo(row);
-        const aliases = [...itemNoAliases(itemNo, row.ord_no)];
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const row = rows[rowIndex];
+        const aliases = rowMemo2Aliases(row, row.ord_no, rowIndex);
         for (const alias of aliases) {
           if (memo2Map.has(alias)) {
             result.push({ row, memo: memo2Map.get(alias), code: alias, aliases });
@@ -888,7 +906,9 @@
         detail.ordNo,
         'inv_no,ord_no,hold,drawer_no'
       );
-      return { detail, task: buildTask(invNo, detail.ordNo, shortageRows || [], pickingRows || []) };
+      const task = buildTask(invNo, detail.ordNo, shortageRows || [], pickingRows || []);
+      addLog(`  DB shortage ${shortageRows?.length || 0}건 / picking ${pickingRows?.length || 0}건 / 관리메모2 후보 ${task.memo2Map.size}개`);
+      return { detail, task };
     }
     async function collectDateTasks(date, filters = {}) {
       {
@@ -1077,6 +1097,9 @@
           const matchedCodes = new Set(matched.flatMap(item => item.aliases || [item.code]));
           const unmatchedCodes = [...task.memo2Map.keys()].filter(code => !matchedCodes.has(code));
           if (unmatchedCodes.length) addLog(`  상품순서번호 미매칭: ${unmatchedCodes.join(', ')}`);
+          if (task.memo2Map.size && !matched.length) {
+            addLog(`  상세 item_no 확인: ${rows.map((row, index) => `${index + 1}:${rowItemNo(row) || '-'}`).join(' / ')}`);
+          }
         }
       }
       if (options.doHold && task.writeHold) {
