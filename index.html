@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-misong-flow-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-item-no-key-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1434,10 +1434,10 @@ async function fetchOwnCodeMapForPcodes(rawCodes){
   return map;
 }
 function ownCodeFromShortageRow(row,item,ownMap){
-  const p=String(row?.p_code||item?.code||'').trim();
+  const p=String(row?.sellpia_p_code||item?.sellpiaCode||row?.p_code||item?.code||'').trim();
   return resolveOwnCodeText({
     code:p,
-    prodCode:item?.prodCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'',
+    prodCode:item?.prodCode||item?.resolvedOwnCode||row?.prod_code||row?.own_code||row?.private_code||row?.p_dpcode||(ownMap&&ownMap[p])||'',
     option:item?.option||row?.p_option||'',
     name:item?.name||row?.p_name||''
   });
@@ -1445,23 +1445,62 @@ function ownCodeFromShortageRow(row,item,ownMap){
 function findItemByShortageRow(order,row,ownMap){
   if(!order||!Array.isArray(order.items)||!row) return null;
   const raw=String(row.p_code||row.code||'').trim();
+  const rawItemNo=String(row.item_no||row.itemNo||'').trim();
+  const rawSellpia=String(row.sellpia_p_code||row.sellpiaCode||'').trim();
   const own=ownCodeFromShortageRow(row,null,ownMap);
   const rowName=String(row.p_name||row.name||'').trim();
   return order.items.find(it=>{
+    const itemKey=String(it.itemNo||it.item_no||it.code||'').trim();
     const itemOwn=String(it.prodCode||it.resolvedOwnCode||'').trim();
+    const itemSellpia=String(it.sellpiaCode||it.sellpiaProductCode||'').trim();
     const itemName=String(it.name||'').trim();
     const itemFull=itemNameWithOption(it);
-    return String(it.code||'').trim()===raw ||
+    return (rawItemNo && itemKey===rawItemNo) ||
+      (rawSellpia && itemSellpia===rawSellpia) ||
+      String(it.code||'').trim()===raw ||
       itemOwn===raw ||
+      itemSellpia===raw ||
       (own && itemOwn===own) ||
       (rowName && ((itemName&&rowName.includes(itemName)) || (itemFull&&itemFull.includes(rowName))));
   }) || null;
 }
 function shortageDisplayCode(row,item,ownMap){
-  return ownCodeFromShortageRow(row,item,ownMap) || String(item?.prodCode||item?.resolvedOwnCode||row?.p_code||row?.code||'').trim();
+  const resolved=ownCodeFromShortageRow(row,item,ownMap);
+  if(isValidOwnCode(resolved)) return resolved;
+  const fallback=String(item?.prodCode||item?.resolvedOwnCode||row?.prod_code||row?.own_code||'').trim();
+  return isValidOwnCode(fallback) ? fallback : '';
+}
+function missingOwnCodeKey(row){
+  const inv=String(row?.inv_no||row?.ord_no||'NO_ORDER').trim();
+  const raw=String(row?.p_code||row?.code||'NO_CODE').trim();
+  return '__NO_OWN__:'+inv+':'+raw;
+}
+function ownCodeKeyForRow(row,item,ownMap){
+  const itemCode=String(item?.itemNo||item?.item_no||item?.code||row?.item_no||'').trim();
+  if(itemCode&&!looksLikeSellpiaCode(itemCode)&&!isMissingOwnCodeKey(itemCode)) return itemCode;
+  const display=shortageDisplayCode(row,item,ownMap);
+  if(isValidOwnCode(display)) return display;
+  return missingOwnCodeKey(row);
+}
+function displayOwnCode(value){
+  const v=String(value||'').trim();
+  return isValidOwnCode(v) ? v : '자사코드 없음';
+}
+function isValidOwnCode(value){
+  const v=String(value||'').trim();
+  return !!v && v!=='자사코드 없음' && !looksLikeSellpiaCode(v) && !looksLikeItemNoValue(v) && !isMissingOwnCodeKey(v) && !isItemNoKey(v);
 }
 function looksLikeSellpiaCode(value){
   return /^[0-9]{3,}(?:-\d+)?$/i.test(String(value||'').trim());
+}
+function looksLikeItemNoValue(value){
+  return /^\d{1,3}$/.test(String(value||'').trim());
+}
+function isMissingOwnCodeKey(value){
+  return String(value||'').trim().startsWith('__NO_OWN__:');
+}
+function isItemNoKey(value){
+  return /^\d+_[0-9-]+(?:_[^\s]+)?$/i.test(String(value||'').trim());
 }
 function extractOwnCodeFromText(){
   const blob=[...arguments].map(v=>String(v||'')).join(' ');
@@ -1477,21 +1516,68 @@ function extractOwnCodeFromText(){
 }
 function resolveOwnCodeText(it,ownMap){
   const raw=String(it?.prodCode||it?.dispCode||it?.privateCode||it?.ownCode||'').trim();
-  if(raw&&!looksLikeSellpiaCode(raw)) return raw;
+  if(isValidOwnCode(raw)) return raw;
   const mapped=String((ownMap&&ownMap[String(it?.code||'').trim()])||'').trim();
-  if(mapped&&!looksLikeSellpiaCode(mapped)) return mapped;
+  if(isValidOwnCode(mapped)) return mapped;
   return extractOwnCodeFromText(it?.option,it?.p_option,it?.seller_option_name,it?.name,it?.p_name);
 }
 async function enrichOrderOwnCodes(orders){
   const allItems=(orders||[]).flatMap(o=>o.items||[]);
-  const ownMap=await fetchOwnCodeMapForPcodes(allItems.map(it=>it.code));
+  const ownMap=await fetchOwnCodeMapForPcodes(allItems.map(it=>it.sellpiaCode||it.code));
   allItems.forEach(it=>{
     const resolved=resolveOwnCodeText(it,ownMap);
     it.resolvedOwnCode=resolved;
+    if(resolved&&!looksLikeSellpiaCode(resolved)){
+      it.prodCode=resolved;
+    }
   });
 }
+async function fetchOrderItemOwnMapForShortageRows(rows){
+  const ordNos=compactCodes((rows||[]).map(r=>r?.ord_no));
+  const map={};
+  for(const chunk of chunkArray(ordNos,200)){
+    if(!chunk.length) continue;
+    try{
+      const itemRows=await fetchAllRows(()=>db.from('order_items')
+        .select('ord_no,p_code,prod_code,p_name,p_option,qty,item_no,sort_order')
+        .in('ord_no',chunk));
+      (itemRows||[]).forEach(it=>{
+        const sellpiaCode=String(it.p_code||'').trim();
+        const ownCode=resolveOwnCodeText({
+          code:sellpiaCode,
+          prodCode:it.prod_code||'',
+          option:it.p_option||'',
+          name:it.p_name||''
+        }) || String(it.prod_code||'').trim();
+        if(!sellpiaCode||!ownCode||looksLikeSellpiaCode(ownCode)) return;
+        const item={
+          code:it.item_no||ownCode,
+          itemNo:it.item_no||'',
+          itemSortOrder:it.sort_order,
+          prodCode:ownCode,
+          resolvedOwnCode:ownCode,
+          sellpiaCode,
+          name:it.p_name||'',
+          option:it.p_option||'',
+          qty:it.qty||1
+        };
+        if(it.item_no) map[String(it.ord_no||'')+'|'+String(it.item_no)]=item;
+        map[String(it.ord_no||'')+'|'+sellpiaCode]=item;
+        map[String(it.ord_no||'')+'|'+ownCode]=item;
+      });
+    }catch(e){
+      console.warn('order_items 자사코드 보강 실패:', e);
+    }
+  }
+  return map;
+}
+function shortageRowFallbackItem(row,orderItemOwnMap){
+  if(!row||!orderItemOwnMap) return null;
+  return orderItemOwnMap[String(row.ord_no||'')+'|'+String(row.p_code||'').trim()]||null;
+}
 function inspOwnCodeText(it){
-  return String(it?.resolvedOwnCode||resolveOwnCodeText(it)||'').trim();
+  const v=String(it?.resolvedOwnCode||resolveOwnCodeText(it)||'').trim();
+  return displayOwnCode(v)==='자사코드 없음' ? '' : v;
 }
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
@@ -2068,7 +2154,11 @@ function saveMemo(invNo,code,val){
   }
   const inv_no=seqToReal[invNo]||String(invNo);
   const ord_no_m=noMap[invNo]?.ord_no||inv_no;
-  db.from('picking').upsert({inv_no,ord_no:ord_no_m,p_code:code,memo:val||''},{onConflict:'inv_no,p_code'}).catch(()=>{});
+  const order=(ORDERS_ALL||[]).find(o=>String(o.no)===String(invNo)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no));
+  const item=order?.items?.find(it=>it.code===code||it.itemNo===code);
+  const prod=isValidOwnCode(item?.prodCode||item?.resolvedOwnCode) ? (item.prodCode||item.resolvedOwnCode) : '';
+  if(!item?.code||!prod) return;
+  db.from('picking').upsert({inv_no,ord_no:ord_no_m,item_no:item.itemNo||item.code,item_sort_order:item.itemSortOrder??null,sellpia_p_code:item.sellpiaCode||'',p_code:prod,memo:val||''},{onConflict:'inv_no,item_no'}).catch(()=>{});
 }
 
 function zoomPhoto(url){
@@ -2085,16 +2175,17 @@ function optionHtml(text){
 function photoSafeName(code){
   return String(code||'photo').trim().replace(/[\\/:*?"<>|#%&{}$!`'@+=\s]+/g,'_')||'photo';
 }
-function renderPhotoBox(code,imgUrl,kind='pick'){
+function renderPhotoBox(code,imgUrl,kind='pick',uploadCode=code){
   const cls=kind==='insp'?'insp-photo-cell':'pr-photo';
   const dataCode=htmlEsc(code);
+  const dataUploadCode=htmlEsc(uploadCode||code);
   const url=String(imgUrl||'').trim();
   if(url){
-    return `<div class="${cls} has-img photo-drop-target" data-code="${dataCode}" data-url="${htmlEsc(url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
+    return `<div class="${cls} has-img photo-drop-target" data-code="${dataUploadCode}" data-url="${htmlEsc(url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
       +`<img src="${htmlEsc(url)}" alt="${dataCode}" loading="lazy" onerror="photoImageError(this,this.closest('.photo-drop-target')?.dataset.code||'')">`
     +`</div>`;
   }
-  return `<div class="${cls} photo-drop-target photo-empty" data-code="${dataCode}" title="클릭: 카메라/파일 선택 · 드롭: 사진 저장 (${dataCode})" onclick="event.stopPropagation();openPhotoCapture(this.dataset.code)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
+  return `<div class="${cls} photo-drop-target photo-empty" data-code="${dataUploadCode}" title="클릭: 카메라/파일 선택 · 드롭: 사진 저장 (${dataUploadCode})" onclick="event.stopPropagation();openPhotoCapture(this.dataset.code)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
     +`<span class="photo-empty-ico">📷</span><span class="photo-empty-txt">사진</span>`
   +`</div>`;
 }
@@ -2231,9 +2322,22 @@ async function loadData(silent=false,preserveView=false){
     const itemsByOrd={};
     (itemsData||[]).forEach(it=>{
       if(!itemsByOrd[it.ord_no]) itemsByOrd[it.ord_no]=[];
+      const sellpiaCode=String(it.p_code||'').trim();
+      const resolvedOwnCode=resolveOwnCodeText({
+        code:sellpiaCode,
+        prodCode:it.prod_code||'',
+        option:it.p_option||it.seller_option_name||'',
+        name:it.p_name||it.seller_product_name||''
+      });
+      const prodOwnCode=String(it.prod_code||'').trim();
+      const ownCode=(resolvedOwnCode&&!looksLikeSellpiaCode(resolvedOwnCode))
+        ? resolvedOwnCode
+        : ((prodOwnCode&&!looksLikeSellpiaCode(prodOwnCode)) ? prodOwnCode : missingOwnCodeKey({ord_no:it.ord_no,p_code:sellpiaCode}));
+      const itemKey=String(it.item_no||'').trim()||ownCode;
       itemsByOrd[it.ord_no].push({
-        code:it.p_code||'',qty:it.qty||1,name:it.p_name||'',option:it.p_option||'',
-        prodCode:it.prod_code||'',nal:!!(it.p_code||'').startsWith('낱'),hold:false,
+        code:itemKey,itemNo:String(it.item_no||'').trim(),itemSortOrder:it.sort_order,
+        sellpiaCode,qty:it.qty||1,name:it.p_name||'',option:it.p_option||'',
+        prodCode:ownCode,resolvedOwnCode:ownCode,nal:!!sellpiaCode.startsWith('낱'),hold:false,
         location:it.p_location||'',o_shop_memo2:it.o_shop_memo2||'',
         /* postoffice CSV fields */
         item_no:it.item_no||'',
@@ -2310,7 +2414,19 @@ async function loadData(silent=false,preserveView=false){
       const memo1=cleanSellpiaManageMemo(it.o_shop_memo);
       const memo2=cleanSellpiaManageMemo(it.o_shop_memo2);
       if(memo1&&!drawer[no]) drawer[no]=memo1;
-      if(memo2){const qty=parseInt(memo2)||0; if(qty>0&&qty<10000){const k=no+'-'+(it.p_code||''); shortage[k]=qty; shortageDate[k]=selectedDate;}}
+      if(memo2){
+        const qty=parseInt(memo2)||0;
+        if(qty>0&&qty<10000){
+          const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
+          const item=order?.items.find(row=>
+            String(row.itemNo||'')===String(it.item_no||'') ||
+            String(row.sellpiaCode||'')===String(it.p_code||'') ||
+            String(row.prodCode||row.resolvedOwnCode||'')===String(it.prod_code||'')
+          );
+          const k=no+'-'+(item?.code||it.prod_code||it.p_code||'');
+          shortage[k]=qty; shortageDate[k]=selectedDate;
+        }
+      }
     });
 
     // 5. picking 테이블 → checked/shortage/drawer/holded/memo (스크래퍼 시딩값 위에 덮어씌움)
@@ -2323,7 +2439,8 @@ async function loadData(silent=false,preserveView=false){
       _pickedOrdNos.add(String(noMap[no]?.ord_no||''));
       const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
       const item=findItemByShortageRow(order,row);
-      const codeKey=item?.code||row.p_code;
+      const displayCode=shortageDisplayCode(row,item);
+      const codeKey=ownCodeKeyForRow(row,item);
       const k=no+'-'+codeKey;
       if(row.is_checked) checked[k]=true;
       if((row.shortage_qty||0)>0){ shortage[k]=row.shortage_qty; if(row.shortage_date||row.created_at||row.created||row.updated_at) shortageDate[k]=row.shortage_date||row.created_at||row.created||row.updated_at; }
@@ -2335,7 +2452,8 @@ async function loadData(silent=false,preserveView=false){
       const no=invToNo[row.inv_no]||ordToNo[row.ord_no]; if(!no||!row.p_code) return;
       const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
       const item=findItemByShortageRow(order,row);
-      const codeKey=item?.code||row.p_code;
+      const displayCode=shortageDisplayCode(row,item);
+      const codeKey=ownCodeKeyForRow(row,item);
       const k=no+'-'+codeKey;
       const q=shortageRowQty(row);
       if(q>0&&!shortage[k]) shortage[k]=q;
@@ -2370,14 +2488,16 @@ async function loadData(silent=false,preserveView=false){
     (inspData||[]).forEach(row=>{
       const no=invToNo[row.inv_no]; if(!no) return;
       if(row.p_code==='__done__'){ if(row.passed) inspDone[no]=true; return; }
-      const k=no+'-'+row.p_code;
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
+      const item=findItemByShortageRow(order,row);
+      const k=no+'-'+ownCodeKeyForRow(row,item);
       if(row.insp_memo) memoData[k]=row.insp_memo;
     });
     // 검품탭 메모 캐시 동기화 (3분 새로고침 후 stale 방지)
     Object.assign(insp_itemMemos, memoData);
 
     // 7. 이미지 백그라운드 로드 (PR_system products + System_v1 Supabase Storage catalog)
-    const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.map(it=>it.code||'').filter(Boolean)))];
+    const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.flatMap(it=>[it.code,it.prodCode,it.sellpiaCode]).filter(Boolean)))];
     if(allProdCodes.length){
       loadProductImagesForCodes(allProdCodes)
         .then((stats)=>{
@@ -3489,18 +3609,25 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
     const order=(ORDERS_ALL||[]).find(o=>String(o.no)===String(invNo)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no))
       || (_misongOrdersCache||[]).find(o=>String(o.no)===String(invNo)||String(o.invNo||'')===String(inv_no));
     const item=order?.items?.find(it=>it.code===code||it.prodCode===code);
-    const storageCode=item?.code||code;
+    const itemNo=String(item?.itemNo||item?.item_no||item?.code||'').trim();
+    if(!itemNo) throw new Error('상품 순서번호(item_no)가 없어 저장할 수 없습니다.');
+    const candidateStorageCode=String(item?.prodCode||item?.resolvedOwnCode||code||'').trim();
+    const storageCode=isValidOwnCode(candidateStorageCode) ? candidateStorageCode : '';
+    if(!storageCode) throw new Error('자사코드 매핑이 없어 저장할 수 없습니다.');
     const ord_no=noMap[invNo]?.ord_no||order?.ordNo||order?.ord_no||inv_no;
     // 1. picking 저장
     const {error}=await db.from('picking').upsert(
-      {inv_no,ord_no,p_code:storageCode,is_checked:!!isChecked,shortage_qty:shortageVal||0,drawer_no:drawerVal||'',hold:!!holdVal},
-      {onConflict:'inv_no,p_code'}
+      {inv_no,ord_no,item_no:itemNo,item_sort_order:item?.itemSortOrder??null,sellpia_p_code:item?.sellpiaCode||'',p_code:storageCode,is_checked:!!isChecked,shortage_qty:shortageVal||0,drawer_no:drawerVal||'',hold:!!holdVal},
+      {onConflict:'inv_no,item_no'}
     );
     if(error) throw error;
     // 2. shortage 테이블 동기화
     if((shortageVal||0)>0){
       await db.from('shortage').upsert({
         inv_no, ord_no,
+        item_no: itemNo,
+        item_sort_order: item?.itemSortOrder??null,
+        sellpia_p_code: item?.sellpiaCode||'',
         orderer: order?.buyer||'',
         p_code:  storageCode,
         p_name:  item ? itemNameWithOption(item) : '',
@@ -3510,15 +3637,20 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
         is_gold:   isGold(item||code),
         status:    '배송대기',
         updated_at: new Date().toISOString(),
-      },{onConflict:'inv_no,p_code'});
+      },{onConflict:'inv_no,item_no'});
       shortageStatus[k]='배송대기';
       shortageMemo2[k]=String(shortageVal);
     } else {
       // 부족수량 0 → 피킹탭에서 미송 취소 = shortage 레코드 삭제 (발주 재포함)
       // TODO(soft-delete): 실제 DELETE입니다. NAS 이전 시 deleted_at/status 기반 soft delete로 전환 후보입니다.
-      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',storageCode);
+      await db.from('shortage').delete().eq('inv_no',inv_no).eq('item_no',itemNo);
       delete shortageStatus[k];
       delete shortageMemo2[k];
+    }
+    const legacyCodes=[item?.sellpiaCode, item?.sellpiaProductCode].filter(v=>v&&String(v)!==String(storageCode));
+    for(const legacyCode of [...new Set(legacyCodes)]){
+      await db.from('picking').delete().eq('inv_no',inv_no).eq('p_code',legacyCode);
+      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',legacyCode);
     }
   }finally{_saveQueue.delete(k);}
 }
@@ -4137,13 +4269,15 @@ async function loadMisongData(showToast=false){
     const {data:shRows,error}=await db.from('shortage').select('*');
     if(error) throw error;
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
+    const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
     misongData = (shRows||[]).map(r=>{
       const seqNo = realToSeq[r.inv_no]||'';
       const order = seqNo ? ORDERS_ALL.find(o=>String(o.no)===String(seqNo)) : null;
       const rowShortage=shortageRowQty(r);
       if(workflowStateFromShortageStatus(r.status,rowShortage)===WF_STATUS.INSPECTED) return null;
-      const item = findItemByShortageRow(order,r,shortageOwnMap);
-      const codeKey = item?.code || r.p_code;
+      const item = findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
+      const displayCode = shortageDisplayCode(r,item,shortageOwnMap);
+      const codeKey = ownCodeKeyForRow(r,item,shortageOwnMap);
       const k = seqNo+'-'+codeKey;
       if(rowShortage>0) shortage[(seqNo||r.inv_no)+'-'+codeKey]=rowShortage;
       if(seqNo&&codeKey){
@@ -4159,9 +4293,13 @@ async function loadMisongData(showToast=false){
       const optionPart  = slashIdx>=0 ? fullName.slice(slashIdx+3).trim() : '';
       return {
         inv: r.inv_no,
-        code: codeKey,                          // DB 키 (셀피아 상품코드 우선)
-        sellpiaCode: item?.code || r.p_code,
-        dispCode: shortageDisplayCode(r,item,shortageOwnMap), // 화면 표시용 (자사코드)
+        ordNo: r.ord_no||'',
+        code: codeKey,                          // 업무 상태 키 (자사코드 우선)
+        itemNo: item?.itemNo||item?.item_no||r.item_no||codeKey,
+        itemSortOrder: item?.itemSortOrder??r.item_sort_order,
+        sellpiaCode: item?.sellpiaCode || r.p_code,
+        rawCode: r.p_code,
+        dispCode: displayCode,                  // 화면 표시용 (자사코드)
         product: productPart,                   // 상품명
         option:  optionPart,                    // 옵션명
         arrival: r.arrival_date||'',
@@ -4365,7 +4503,7 @@ function renderCSList(){
     }).map(row=>{
       const arrival  = String(row.arrival||'').trim();
       const code     = String(row.code||'').trim();      // DB 키용
-      const dispCode = String(row.dispCode||row.code||'').trim(); // 화면 표시용
+      const dispCode = displayOwnCode(row.dispCode||row.code); // 화면 표시용
       const status   = String(row.status||'').trim();
       const row14k   = String(row.is14k||'').trim()==='Y';
       const esc2    = s=>escFn(s);
@@ -4448,7 +4586,10 @@ async function updateArrivalDate(inv, code, value, inputEl){
   if(inputEl) inputEl.classList.toggle('filled', !!val);
   misongData.forEach(r=>{ if(r.inv===inv && r.code===code) r.arrival=val; });
   try{
-    await db.from('shortage').update({arrival_date:val||null}).eq('inv_no',inv).eq('p_code',code);
+    await db.from('shortage').update({arrival_date:val||null}).eq('inv_no',inv).eq('item_no',code);
+    for(const legacyCode of legacyMisongCodes(inv,code)){
+      await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+    }
   }catch(e){ console.error(e); }
 }
 
@@ -4459,13 +4600,26 @@ function getDayLabel(elapsed){
   if(d>=3) return '3일차';
   return '1일차';
 }
+function legacyMisongCodes(inv, code){
+  const row=(misongData||[]).find(r=>r.inv===inv&&r.code===code);
+  return [...new Set([row?.sellpiaCode,row?.rawCode].filter(v=>v&&String(v)!==String(code)))];
+}
+function misongRowFor(inv, code){
+  return (misongData||[]).find(r=>r.inv===inv&&r.code===code) || null;
+}
+function misongOwnCodeFor(row){
+  const v=String(row?.prodCode||row?.dispCode||'').trim();
+  return isValidOwnCode(v) ? v : '';
+}
 async function setMisongStatus(inv, code, status){
   event&&event.stopPropagation&&event.stopPropagation();
+  const row=misongRowFor(inv,code);
+  const displayCode=misongOwnCodeFor(row)||String(code||'');
   if(status==='발송대기'){
     const seqNo=realToSeq[inv]||inv;
     if(!confirm(
       'CS 발송대기는 상태 표시만 변경합니다.\n\n'
-      +'대상: '+workNoText(seqNo)+' / '+code+'\n'
+      +'대상: '+workNoText(seqNo)+' / '+displayCode+'\n'
       +'셀피아 관리메모1, 관리메모2, 배송보류는 여기서 반영하지 않습니다.\n\n'
       +'검품/포장 완료 후 내일출고 알림 대상이면 검품 탭에서 처리하세요.\n'
       +'그래도 CS 상태만 발송대기로 표시할까요?'
@@ -4479,18 +4633,29 @@ async function setMisongStatus(inv, code, status){
   renderCSSidebar();
   toast(status ? '✅ '+status+' 처리됨' : '상태 초기화');
   try{
-    await db.from('shortage').upsert({inv_no:inv,p_code:code,status:status||'배송대기'},{onConflict:'inv_no,p_code'});
+    const prod=misongOwnCodeFor(row);
+    if(!row?.itemNo&&!code) throw new Error('상품 순서번호가 없습니다.');
+    if(!prod) throw new Error('자사코드 매핑이 없습니다.');
+    await db.from('shortage').upsert({inv_no:inv,ord_no:row?.ordNo||noMap[seqNo]?.ord_no||inv,item_no:row?.itemNo||code,item_sort_order:row?.itemSortOrder??null,sellpia_p_code:row?.sellpiaCode||'',p_code:prod,status:status||'배송대기'},{onConflict:'inv_no,item_no'});
+    for(const legacyCode of legacyMisongCodes(inv,code)){
+      await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+    }
   }catch(e){ console.error(e); toast('⚠ 저장 실패'); }
 }
 
 // ── 발송완료 미송 삭제 ──
 async function deleteMisongRow(inv, code){
   event.stopPropagation();
-  if(!confirm(inv+' / '+code+' 삭제하시겠습니까?')) return;
+  const row=misongRowFor(inv,code);
+  const displayCode=misongOwnCodeFor(row)||String(code||'');
+  if(!confirm(inv+' / '+displayCode+' 삭제하시겠습니까?')) return;
   try{
     // TODO(soft-delete): 실제 DELETE입니다. NAS 이전 시 deleted_at/status 기반 soft delete로 전환 후보입니다.
-    const {error}=await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',code);
+    const {error}=await db.from('shortage').delete().eq('inv_no',inv).eq('item_no',code);
     if(error) throw error;
+    for(const legacyCode of legacyMisongCodes(inv,code)){
+      await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+    }
     misongData=misongData.filter(r=>!(r.inv===inv&&r.code===code));
     updateAllCSCounts(); renderCSList(); renderCSSidebar();
     toast('🗑 삭제됨');
@@ -4543,7 +4708,14 @@ async function updateCSShortage(inv, code, val, inputEl){
   try{
     const _seq=realToSeq[inv]||inv;
     const _ord=noMap[_seq]?.ord_no||inv;
-    await db.from('picking').upsert({inv_no:inv,ord_no:_ord,p_code:code,shortage_qty:qty},{onConflict:'inv_no,p_code'});
+    const row=misongRowFor(inv,code);
+    const prod=misongOwnCodeFor(row);
+    if(!prod) throw new Error('자사코드 매핑이 없습니다.');
+    await db.from('picking').upsert({inv_no:inv,ord_no:_ord,item_no:row?.itemNo||code,item_sort_order:row?.itemSortOrder??null,sellpia_p_code:row?.sellpiaCode||'',p_code:prod,shortage_qty:qty},{onConflict:'inv_no,item_no'});
+    for(const legacyCode of legacyMisongCodes(inv,code)){
+      await db.from('picking').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+      await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+    }
     toast('✅ 부족수량 저장됨');
   }catch(e){ toast('⚠ '+e.message); }
 }
@@ -4910,15 +5082,17 @@ async function uploadCSDirectData(){
   if(!csDirectParsed||!csDirectParsed.length){ toast('⚠ 파일을 먼저 선택하세요'); return; }
   toast('⏳ 미송현황에 추가 중...',3000);
   try{
-    const upsertRows = csDirectParsed.map(r=>({
+    const upsertRows = csDirectParsed.filter(r=>isValidOwnCode(r.code)&&String(r.itemNo||r.item_no||'').trim()).map(r=>({
       inv_no: String(r.inv),
+      item_no: String(r.itemNo||r.item_no),
       p_code: String(r.code),
       status: '배송대기',
       is_gold: isGold(r.code),
     }));
-    const {error} = await db.from('shortage').upsert(upsertRows,{onConflict:'inv_no,p_code',ignoreDuplicates:true});
+    if(!upsertRows.length){ toast('⚠ 자사코드+상품순서번호가 있는 행이 없습니다'); return; }
+    const {error} = await db.from('shortage').upsert(upsertRows,{onConflict:'inv_no,item_no',ignoreDuplicates:true});
     if(error) throw error;
-    toast('✅ '+csDirectParsed.length+'건 추가됨');
+    toast('✅ '+upsertRows.length+'건 추가됨');
     csDirectParsed = [];
     const drop = document.getElementById('cs-direct-drop');
     const btn = document.getElementById('cs-direct-btn');
@@ -5237,6 +5411,7 @@ async function insp_loadMisongOrders(){
     const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
+    const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
     const invMap={};
     (shRows||[]).forEach(r=>{
       const sq=shortageRowQty(r);
@@ -5250,16 +5425,18 @@ async function insp_loadMisongOrders(){
       const fallbackItems=rows.map(r=>{
         const sq=shortageRowQty(r);
         const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
-        const item=findItemByShortageRow(order,r,shortageOwnMap);
-        const codeKey=item?.code||r.p_code;
+        const item=findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
+        const ownCode=shortageDisplayCode(r,item,shortageOwnMap);
+        const codeKey=ownCodeKeyForRow(r,item,shortageOwnMap);
         const key=(seqNo||inv_no)+'-'+codeKey;
         if(sq>0) shortage[key]=sq;
         shortageStatus[key]=normalizeShortageStatus(r.status);
         shortageMemo2[key]=String(r.memo2_val??'').trim();
-        const ownCode=shortageDisplayCode(r,item,shortageOwnMap);
         return {
           code:codeKey,
-          sellpiaCode:item?.code||r.p_code,
+          itemNo:item?.itemNo||item?.item_no||r.item_no||codeKey,
+          itemSortOrder:item?.itemSortOrder??r.item_sort_order,
+          sellpiaCode:item?.sellpiaCode||r.p_code,
           prodCode:ownCode,
           resolvedOwnCode:ownCode,
           name:item ? item.name : (r.p_name||r.p_code||''),
@@ -5277,16 +5454,17 @@ async function insp_loadMisongOrders(){
         recv: order?.recv||rows[0]?.orderer||'',
         invNo: inv_no,
         items: orderItems.map(it=>{
-          const sr=rows.find(r=>(findItemByShortageRow({items:[it]},r,shortageOwnMap)?.code||r.p_code)===it.code);
+          const sr=rows.find(r=>ownCodeKeyForRow(r,findItemByShortageRow({items:[it]},r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap),shortageOwnMap)===it.code);
           const sq=sr?shortageRowQty(sr):0;
           const ownCode=it.resolvedOwnCode||shortageDisplayCode(sr,it,shortageOwnMap);
           return {...it, prodCode:it.prodCode||ownCode, resolvedOwnCode:ownCode, shortage:shortage[(seqNo||inv_no)+'-'+it.code]||sq||0, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
         }),
         shortItems: rows.map(r=>{
-          const item=findItemByShortageRow(order,r,shortageOwnMap);
-          const codeKey=item?.code||r.p_code;
+          const item=findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
+          const ownCode=shortageDisplayCode(r,item,shortageOwnMap);
+          const codeKey=ownCodeKeyForRow(r,item,shortageOwnMap);
           const sq=shortage[(seqNo||inv_no)+'-'+codeKey]||shortageRowQty(r);
-          return {code:codeKey,prodCode:shortageDisplayCode(r,item,shortageOwnMap),sellpiaCode:item?.code||r.p_code,shortage:sq,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
+          return {code:codeKey,itemNo:item?.itemNo||item?.item_no||r.item_no||codeKey,itemSortOrder:item?.itemSortOrder??r.item_sort_order,prodCode:ownCode,sellpiaCode:item?.sellpiaCode||r.p_code,shortage:sq,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
         }).filter(it=>it.code),
         _isMisong: true
       };
@@ -5473,7 +5651,7 @@ function insp_renderDetail(){
       const isShort = shortSet.has(it.code);
       const shortInfo = (order.shortItems||[]).find(s=>s.code===it.code);
       const is14k=isGold(it);
-      const imgUrl=(photoMap&&photoMap[it.prodCode])||((photoMap&&photoMap[it.code])||'');
+      const imgUrl=(photoMap&&photoMap[it.prodCode])||((photoMap&&photoMap[it.code])||'')||((photoMap&&photoMap[it.sellpiaCode])||'');
       const {prodName,optName}=insp_itemDisplayParts(it);
       const ownCodeText=inspOwnCodeText(it);
       const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
@@ -5483,13 +5661,13 @@ function insp_renderDetail(){
       const ec=it.code.replace(/'/g,"\\'");
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
-        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp')+'</td>'
+        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code)+'</td>'
         +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;font-size:15px;font-weight:900;color:#1A2840;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+( optName?optionHtml(optName):'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>' )+'</td>'
         +'<td class="insp-td-qty">'+it.qty+'</td>'
         +inspProductCell(prodName)
         +inspAmountCell(it)
         +'<td class="insp-td-code '+(is14k?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(is14k?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(is14k?'<span class="insp-gold-badge">🥇</span>':'')+'</td>'
-        +'<td style="width:92px;min-width:92px;max-width:92px;font-size:11px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+( it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
+        +'<td style="width:92px;min-width:92px;max-width:92px;font-size:11px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+( it.sellpiaCode||it.code||'<span style="color:#CCC;">—</span>' )+'</td>'
         +'<td style="text-align:center;width:64px;min-width:64px;max-width:64px;padding:4px 1px;">'
           +'<div class="pi-short'+(shV>0?' has-val':'')+'" style="display:flex;align-items:center;justify-content:center;gap:2px;">'
             +'<button class="sq-btn" style="width:22px;height:22px;font-size:14px;" onclick="insp_adjShort(\''+eNo+'\',\''+ec+'\',-1)">−</button>'
@@ -5562,7 +5740,7 @@ function insp_renderDetail(){
     const itemShort=itemState===WF_STATUS.SHORT;
     const memoId='insp-memo-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal=insp_itemMemos[insp_memoKey(order.no,it.code)]||'';
-    const imgUrl=it.imageUrl||(photoMap&&photoMap[it.code])||'';
+    const imgUrl=it.imageUrl||(photoMap&&photoMap[it.prodCode])||(photoMap&&photoMap[it.code])||(photoMap&&photoMap[it.sellpiaCode])||'';
     const {prodName,optName}=insp_itemDisplayParts(it);
     const _isLabelTab=insp_tabMode==='golditem'||insp_tabMode==='gold';
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
@@ -5572,13 +5750,13 @@ function insp_renderDetail(){
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
-      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp')+'</td>'
+      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code)+'</td>'
       +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;color:#1A2840;font-size:15px;font-weight:900;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+(optName?optionHtml(optName):optionText)+'</td>'
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
       +inspAmountCell(it)
       +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(goldItem?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
-      +'<td style="width:92px;min-width:92px;max-width:92px;color:#666;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(it.code||'<span style="color:#CCC;">—</span>')+'</td>'
+      +'<td style="width:92px;min-width:92px;max-width:92px;color:#666;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(it.sellpiaCode||it.code||'<span style="color:#CCC;">—</span>')+'</td>'
       +(()=>{
           const shV=shortage[order.no+'-'+it.code]||0;
           const sid='insp-sh-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
@@ -5886,7 +6064,7 @@ function insp_exportLabelCSV(){
       sourceRows.push({
         invNo:o.invNo||'',
         orderNo:o.no||'',
-        productCode:it.code||'',
+        productCode:it.sellpiaCode||it.code||'',
         privateCode:it.prodCode||'',
         productName:it.name||'',
         optionName:it.option||'',
@@ -6073,7 +6251,9 @@ function setupRealtime(){
       if(_saveQueue.size>0) return;
       const r=payload.new||{};
       const no=invToNo[r.inv_no]; if(!no) return;
-      const k=no+'-'+r.p_code;
+      const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
+      const item=findItemByShortageRow(order,r);
+      const k=no+'-'+ownCodeKeyForRow(r,item);
       if(r.is_checked) checked[k]=true; else delete checked[k];
       if((r.shortage_qty||0)>0){ shortage[k]=r.shortage_qty; shortageStatus[k]='배송대기'; shortageMemo2[k]=String(r.shortage_qty); }
       else { delete shortage[k]; delete shortageStatus[k]; delete shortageMemo2[k]; }
@@ -6118,7 +6298,7 @@ async function loadMisongPickingData(showToast=false){
       o.items.forEach(it=>{
         const k=o.no+'-'+it.code;
         const sh=shortage[k]||0;
-        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:it.code,sellpiaCode:it.code,prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
+        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:it.code,itemNo:it.itemNo||it.code,itemSortOrder:it.itemSortOrder,sellpiaCode:it.sellpiaCode||'',prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
       });
     });
   }
@@ -6126,6 +6306,7 @@ async function loadMisongPickingData(showToast=false){
     const {data:shRows,error}=await db.from('shortage').select('*').range(0,9999);
     if(error) throw error;
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
+    const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
     (shRows||[]).forEach(r=>{
       const status=normalizeShortageStatus(r.status);
       const sh=shortageRowQty(r);
@@ -6133,9 +6314,9 @@ async function loadMisongPickingData(showToast=false){
       if(!shouldShow || !r.p_code) return;
       const seqNo = realToSeq[r.inv_no]||String(r.inv_no||r.ord_no||'');
       const order = realToSeq[r.inv_no] ? ORDERS_ALL.find(o=>String(o.no)===String(realToSeq[r.inv_no])) : null;
-      const item = findItemByShortageRow(order,r,shortageOwnMap);
-      const codeKey = item?.code || r.p_code;
+      const item = findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
       const ownCode = shortageDisplayCode(r,item,shortageOwnMap);
+      const codeKey = ownCodeKeyForRow(r,item,shortageOwnMap);
       const k = seqNo+'-'+codeKey;
       if(sh>0) shortage[k]=sh;
       shortageStatus[k]=status;
@@ -6146,7 +6327,9 @@ async function loadMisongPickingData(showToast=false){
         invNo: r.inv_no||'',
         ordNo: r.ord_no||'',
         code: codeKey,
-        sellpiaCode: item?.code||r.p_code,
+        itemNo: item?.itemNo||item?.item_no||r.item_no||codeKey,
+        itemSortOrder: item?.itemSortOrder??r.item_sort_order,
+        sellpiaCode: item?.sellpiaCode||r.p_code,
         prodCode: ownCode,
         name: item ? itemNameWithOption(item) : (r.p_name||''),
         buyer: order?.buyer||r.orderer||'',
@@ -6214,7 +6397,9 @@ function getMisongMaps(){
 }
 function renderMisongItemRow(r,maps,extraClass=''){
   const isDone=getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY;
-  const prodCode = r.prodCode||r.dispCode||maps.codeToProdCode[r.code]||r.code;
+  const rawProdCode = r.prodCode||r.dispCode||maps.codeToProdCode[r.code]||r.code;
+  const prodCode = displayOwnCode(rawProdCode)==='자사코드 없음' ? '' : displayOwnCode(rawProdCode);
+  const displayCode = displayOwnCode(rawProdCode);
   const imgUrl = photoMap[prodCode]||photoMap[r.sellpiaCode]||photoMap[r.code]||'';
   const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
   const itemName = maps.itemNameMap[String(r.seq)+'-'+r.code]||r.name||'';
@@ -6227,7 +6412,7 @@ function renderMisongItemRow(r,maps,extraClass=''){
     <div class="misong-thumb" onclick="${imgUrl?`zoomPhoto('${imgUrl.replace(/'/g,"\\'")}')`:''}">${imgHtml}</div>
     <div class="misong-seq">${itemSeq||'—'}</div>
     <div class="misong-main">
-      <div class="misong-code-line"><span class="misong-code">${htmlEsc(prodCode)}</span>${renderMisongDateBadge(r)}</div>
+      <div class="misong-code-line"><span class="misong-code ${prodCode?'':'missing'}">${htmlEsc(displayCode)}</span>${renderMisongDateBadge(r)}</div>
       <div class="misong-name">${htmlEsc(itemName)}</div>
     </div>
     <div class="misong-short-ctrl">
@@ -6292,7 +6477,8 @@ function renderMisongList(){
     listEl.innerHTML = [...codeMap.entries()].sort((a,b)=>compareSelfCodeRoute(a[1][0]?.prodCode||maps.codeToProdCode[a[0]]||a[0],b[1][0]?.prodCode||maps.codeToProdCode[b[0]]||b[0])).map(([code,rows])=>{
       const totalSh = rows.reduce((s,r)=>s+r.shortage,0);
       const allDoneC = rows.every(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY);
-      const prodCode = rows[0]?.prodCode||rows[0]?.dispCode||maps.codeToProdCode[code]||code;
+      const rawProdCode = rows[0]?.prodCode||rows[0]?.dispCode||maps.codeToProdCode[code]||code;
+      const prodCode = displayOwnCode(rawProdCode);
       const itemsHtml = rows.map(r=>{
         const dr=String(drawer[r.seq]||r.drawer||'').trim();
         const realInv=seqToReal[r.seq]||r.invNo||'';
@@ -6391,29 +6577,35 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     const _ord2=row?.ordNo||noMap[seq]?.ord_no||inv_no;
     const order=ORDERS_ALL.find(o=>String(o.no)===String(seq)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no));
     const item=order?.items.find(it=>it.code===code||it.prodCode===code);
-    const storageCode=item?.code||row?.sellpiaCode||code;
-    const {error}=await db.from('picking').upsert({inv_no,ord_no:_ord2,p_code:storageCode,shortage_qty:newShortage},{onConflict:'inv_no,p_code'});
+    const itemNo=String(item?.itemNo||item?.item_no||item?.code||row?.itemNo||row?.item_no||code||'').trim();
+    if(!itemNo) throw new Error('상품 순서번호(item_no)가 없어 미송 저장을 중단했습니다.');
+    const candidateStorageCode=String(item?.prodCode||item?.resolvedOwnCode||row?.prodCode||row?.dispCode||'').trim();
+    const storageCode=isValidOwnCode(candidateStorageCode) ? candidateStorageCode : '';
+    if(!storageCode) throw new Error('자사코드 매핑이 없어 미송 저장을 중단했습니다.');
+    const {error}=await db.from('picking').upsert({inv_no,ord_no:_ord2,item_no:itemNo,item_sort_order:item?.itemSortOrder??row?.itemSortOrder??null,sellpia_p_code:item?.sellpiaCode||row?.sellpiaCode||'',p_code:storageCode,shortage_qty:newShortage},{onConflict:'inv_no,item_no'});
     if(error) throw error;
     // shortage 테이블 동기화
     if(newShortage>0){
       await db.from('shortage').upsert({
         inv_no, ord_no:_ord2,
+        item_no:itemNo, item_sort_order:item?.itemSortOrder??row?.itemSortOrder??null, sellpia_p_code:item?.sellpiaCode||row?.sellpiaCode||'',
         orderer: order?.buyer||row?.buyer||'',
         p_code: storageCode, p_name: item ? itemNameWithOption(item) : (row?.name||''),
         short_qty: newShortage, memo2_val: String(newShortage), is_gold: isGold(item||code),
         status: '배송대기', updated_at: new Date().toISOString(),
-      },{onConflict:'inv_no,p_code'});
+      },{onConflict:'inv_no,item_no'});
     } else {
       // 미송피킹 완료: 삭제 대신 '피킹완료' 상태로 변경 → 메모 업데이터가 셀피아에 'ㅁ' 씀
       await db.from('shortage').upsert({
-        inv_no, ord_no:_ord2, p_code:storageCode,
+        inv_no, ord_no:_ord2, item_no:itemNo, item_sort_order:item?.itemSortOrder??row?.itemSortOrder??null, sellpia_p_code:item?.sellpiaCode||row?.sellpiaCode||'', p_code:storageCode,
         short_qty: 0, memo2_val: 'ㅁ', status: '피킹완료',
         updated_at: new Date().toISOString(),
-      },{onConflict:'inv_no,p_code'});
+      },{onConflict:'inv_no,item_no'});
     }
-    if(storageCode!==code){
-      await db.from('picking').delete().eq('inv_no',inv_no).eq('p_code',code);
-      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',code);
+    const legacyCodes=[code,row?.sellpiaCode,item?.sellpiaCode,item?.sellpiaProductCode].filter(v=>v&&String(v)!==String(storageCode));
+    for(const legacyCode of [...new Set(legacyCodes)]){
+      await db.from('picking').delete().eq('inv_no',inv_no).eq('p_code',legacyCode);
+      await db.from('shortage').delete().eq('inv_no',inv_no).eq('p_code',legacyCode);
     }
     const k=String(seq)+'-'+code;
     if(newShortage===0) delete shortage[k]; else shortage[k]=newShortage;

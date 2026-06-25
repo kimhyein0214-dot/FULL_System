@@ -500,6 +500,15 @@
     function rowOwnCode(row) {
       return normal(row.p_dpcode || row.p_dp_code || row.c_dp_code);
     }
+    function extractOwnCodeFromText() {
+      const blob = [...arguments].map(v => normal(v)).join(' ');
+      const direct = blob.match(/\[[A-Z]{1,4}-\d{1,2}-\d{1,2}(?:_\d+)?\]/i);
+      if (direct) return direct[0].toUpperCase();
+      const pStyle = blob.match(/\[P\]\s*([A-Z])[-\s]*(\d{1,2})[-\s]*(\d{1,2})\s*\]?/i);
+      if (pStyle) return '[P] ' + pStyle[1].toUpperCase() + '-' + pStyle[2].padStart(2, '0') + '-' + pStyle[3].padStart(2, '0') + ' ]';
+      const compact = blob.match(/\b([A-Z]{2,4})[-\s]*(\d{1,2})[-\s]*(\d{1,2})(?:_(\d+))?\b/i);
+      return compact ? '[' + compact[1].toUpperCase() + '-' + compact[2].padStart(2, '0') + '-' + compact[3].padStart(2, '0') + (compact[4] ? '_' + compact[4] : '') + ']' : '';
+    }
     function updateGridRow(row, fields) {
       Object.assign(row, fields);
       try {
@@ -630,9 +639,9 @@
         task.writeHold = true;
         task.reason = '발송대기: 내일출고 메모 + 메모2 ㅁ + 배송보류 해제';
         for (const row of nextShipRows) {
-          const pCode = normal(row.p_code);
-          if (!pCode) continue;
-          task.memo2Map.set(pCode, normal(row.memo2_val) || 'ㅁ');
+          const itemNo = normal(row.item_no);
+          if (!itemNo) continue;
+          task.memo2Map.set(itemNo, normal(row.memo2_val) || 'ㅁ');
         }
         return task;
       }
@@ -642,8 +651,8 @@
         task.hold = true;
         task.reason = '미송 발생: 서랍번호 + 부족수량 + 배송보류';
         for (const row of activeRows) {
-          const pCode = normal(row.p_code);
-          if (pCode) task.memo2Map.set(pCode, String(Number(row.short_qty || 0)));
+          const itemNo = normal(row.item_no);
+          if (itemNo) task.memo2Map.set(itemNo, String(Number(row.short_qty || 0)));
         }
         return task;
       }
@@ -652,8 +661,8 @@
         task.writeHold = false;
         task.reason = '부분 미송피킹: 피킹된 상품만 관리메모2 ㅁ';
         for (const row of pickedRows) {
-          const pCode = normal(row.p_code);
-          if (pCode) task.memo2Map.set(pCode, normal(row.memo2_val) || 'ㅁ');
+          const itemNo = normal(row.item_no);
+          if (itemNo) task.memo2Map.set(itemNo, normal(row.memo2_val) || 'ㅁ');
         }
         return task;
       }
@@ -669,8 +678,8 @@
     function matchMemo2Rows(rows, memo2Map) {
       const result = [];
       for (const row of rows) {
-        const pCode = rowProductCode(row);
-        if (memo2Map.has(pCode)) result.push({ row, memo: memo2Map.get(pCode), code: pCode });
+        const itemNo = rowItemNo(row);
+        if (memo2Map.has(itemNo)) result.push({ row, memo: memo2Map.get(itemNo), code: itemNo });
       }
       return result;
     }
@@ -682,7 +691,7 @@
         'shortage',
         invNo,
         detail.ordNo,
-        'inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val'
+        'inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val'
       );
       const pickingRows = await dbRowsByInvoiceOrOrder(
         'picking',
@@ -721,10 +730,10 @@
 
         let shortageRows;
         try {
-          shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold');
+          shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold');
         } catch (err) {
           addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
-          shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'ord_no,short_qty,drawer_no,status,p_code,memo2_val');
+          shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val');
         }
         if (!shortageRows.length) return [];
 
@@ -787,10 +796,10 @@
       const d1 = d1Obj.toISOString().slice(0, 10).replace(/-/g, '');
       let shortageRows;
       try {
-        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=inv_no,ord_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold`);
+        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold`);
       } catch (err) {
         addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
-        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=ord_no,short_qty,drawer_no,status,p_code,memo2_val`);
+        shortageRows = await dbRequest(`shortage?ord_no=gte.${d0}&ord_no=lt.${d1}&select=ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val`);
       }
       if (!shortageRows.length) return [];
       const ordNos = uniq(shortageRows.map(row => row.ord_no));
@@ -877,7 +886,7 @@
           for (const item of matched) await updateMemo('o_shop_memo2', item.row, item.memo, false);
           actions.push(`관리메모2 ${matched.length}건`);
           const unmatchedCodes = [...task.memo2Map.keys()].filter(code => !matched.some(item => item.code === code));
-          if (unmatchedCodes.length) addLog(`  상품코드 미매칭: ${unmatchedCodes.join(', ')}`);
+          if (unmatchedCodes.length) addLog(`  상품순서번호 미매칭: ${unmatchedCodes.join(', ')}`);
         }
       }
       if (options.doHold && task.writeHold) {
