@@ -506,6 +506,10 @@
       }
       const plainMatch = raw.match(/\[(\d+)\]$/);
       if (plainMatch) add(plainMatch[1]);
+      const prefixedPlain = raw.match(/^\d+_(\d{10,})$/);
+      if (prefixedPlain) add(prefixedPlain[1]);
+      const lastSegment = raw.match(/_(\d{10,})$/);
+      if (lastSegment) add(lastSegment[1]);
 
       const numeric = raw.match(/^\d+$/);
       if (numeric && orderNo) {
