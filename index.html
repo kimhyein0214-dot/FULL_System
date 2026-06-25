@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-product-code-image-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-storage-image-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1241,7 +1241,7 @@ const APP_CONFIG={
     supabaseUrl:'https://bpgvqmtsjgegnrdzmpep.supabase.co',
     supabaseKey:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwZ3ZxbXRzamdlZ25yZHptcGVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjc0NTIsImV4cCI6MjA5NzMwMzQ1Mn0.tIxMFEUqALi2gywDxKJpxEZ9qcGhYRw8QJeMtRjKFDI',
     table:'sellpia_product_images',
-    view:'sellpia_product_images_public',
+    view:'product_images_resolved',
     bucket:'product-images',
     preferStorage:true
   },
@@ -1353,7 +1353,7 @@ function productImageUrlForItem(item){
 }
 function imageUrlFromRow(row){
   if(!row) return '';
-  return row.storage_public_url||row.image_url||row.source_image_url||'';
+  return row.display_image_url||row.storage_public_url||row.image_url||row.source_image_url||row.legacy_image_url||'';
 }
 function systemStoragePublicUrlsForCode(code){
   const key=String(code||'').trim();
@@ -1414,18 +1414,18 @@ async function fetchPrProductImages(codes){
 }
 async function fetchSystemImageCatalog(codes){
   if(!imageCatalogDb) return [];
-  const view=IMAGE_CATALOG_CONFIG.view||'sellpia_product_images_public';
+  const view=IMAGE_CATALOG_CONFIG.view||'product_images_resolved';
   const byKey=new Map();
   for(const chunk of chunkArray(codes)){
     const {data:pRows,error:pError}=await imageCatalogDb
       .from(view)
-      .select('p_code,own_code,storage_public_url,source_image_url,upload_status')
+      .select('p_code,own_code,legacy_image_url,storage_public_url,source_image_url,display_image_url,display_image_source,system_upload_status')
       .in('p_code',chunk);
     if(pError) throw new Error(pError.message);
     (pRows||[]).forEach(row=>byKey.set('p:'+row.p_code,row));
     const {data:oRows,error:oError}=await imageCatalogDb
       .from(view)
-      .select('p_code,own_code,storage_public_url,source_image_url,upload_status')
+      .select('p_code,own_code,legacy_image_url,storage_public_url,source_image_url,display_image_url,display_image_source,system_upload_status')
       .in('own_code',chunk);
     if(oError) throw new Error(oError.message);
     (oRows||[]).forEach(row=>byKey.set('o:'+row.own_code,row));
@@ -1449,7 +1449,7 @@ async function loadProductImagesForCodes(rawCodes){
       ...prRows.flatMap(row=>[row.p_code,row.own_code])
     ]);
     const catalogRows=await fetchSystemImageCatalog(catalogCodes);
-    stats.catalogApplied=applyImageRows(catalogRows,{preferExisting:true});
+    stats.catalogApplied=applyImageRows(catalogRows,{preferExisting:false});
     const catalogByOwnCode=new Map();
     catalogRows.forEach(row=>{
       const url=imageUrlFromRow(row);
@@ -2403,7 +2403,7 @@ function blobToDataUrl(blob){
 async function uploadProductPhotoToStorage(code,blob){
   if(!imageCatalogDb) throw new Error('이미지 DB 연결 없음');
   const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
-  const path=photoSafeName(code)+'.jpg';
+  const path='sellpia/'+photoSafeName(code)+'.jpg';
   const {error}=await imageCatalogDb.storage.from(bucket).upload(path,blob,{contentType:'image/jpeg',upsert:true,cacheControl:'3600'});
   if(error) throw new Error(error.message||'Storage 업로드 실패');
   const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
@@ -2418,13 +2418,13 @@ async function upsertProductPhotoMetadata(code,aliasKeys,storageInfo,blob){
   const row={
     p_code:key,
     own_code:ownCode||null,
-    bucket:storageInfo.bucket||IMAGE_CATALOG_CONFIG.bucket||'product-images',
-    storage_path:storageInfo.path||(photoSafeName(key)+'.jpg'),
+    storage_bucket:storageInfo.bucket||IMAGE_CATALOG_CONFIG.bucket||'product-images',
+    storage_path:storageInfo.path||('sellpia/'+photoSafeName(key)+'.jpg'),
     storage_public_url:storageInfo.publicUrl||'',
     source_image_url:storageInfo.publicUrl||'',
     upload_status:'uploaded',
-    mime_type:'image/jpeg',
-    size_bytes:blob?.size||null,
+    content_type:'image/jpeg',
+    byte_size:blob?.size||null,
     updated_at:new Date().toISOString()
   };
   const {error}=await imageCatalogDb.from(table).upsert(row,{onConflict:'p_code'});
@@ -2461,7 +2461,7 @@ async function handlePhotoFiles(code,files,aliases=''){
     try{
       localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));
       const local=JSON.parse(localStorage.getItem('pickingLocalPhotoUploads')||'{}');
-      local[key]={url,aliases:aliasKeys,updatedAt:new Date().toISOString(),serverSaved:savedOnServer,metaSaved,fileName:photoSafeName(key)+'.jpg'};
+      local[key]={url,aliases:aliasKeys,updatedAt:new Date().toISOString(),serverSaved:savedOnServer,metaSaved,fileName:'sellpia/'+photoSafeName(key)+'.jpg'};
       localStorage.setItem('pickingLocalPhotoUploads',JSON.stringify(local));
     }catch(e){
       console.warn('photo cache warning',e);
