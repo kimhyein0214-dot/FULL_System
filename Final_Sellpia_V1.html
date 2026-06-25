@@ -95,7 +95,7 @@
     </ul>
   </main>
   <script>
-    const href = "javascript:(()=>{const s=document.createElement('script');s.src='https://kimhyein0214-dot.github.io/FULL_System/Final_Sellpia_V1.js?v=0623-order-memo-v2';s.referrerPolicy='no-referrer';document.documentElement.appendChild(s);})()";
+    const href = "javascript:(()=>{const s=document.createElement('script');s.src='https://kimhyein0214-dot.github.io/FULL_System/Final_Sellpia_V1.js?v='+Date.now();s.referrerPolicy='no-referrer';document.documentElement.appendChild(s);})()";
     document.getElementById('bookmarklet').href = href;
     document.getElementById('copy').addEventListener('click', async () => {
       await navigator.clipboard.writeText(href);
