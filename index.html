@@ -1316,6 +1316,41 @@ function chunkArray(arr,size=800){
 function compactCodes(values){
   return [...new Set((values||[]).map(v=>String(v||'').trim()).filter(Boolean))];
 }
+function itemSellpiaImageCode(item){
+  const direct=String(item?.imageCode||item?.sellpiaCode||item?.sellpiaProductCode||item?.p_code||item?.productCode||'').trim();
+  if(direct) return direct;
+  const code=String(item?.code||'').trim();
+  return looksLikeSellpiaCode(code) ? code : '';
+}
+function imageLoadCodesForOrders(orders){
+  return compactCodes((orders||[]).flatMap(o=>(o.items||[]).map(itemSellpiaImageCode)));
+}
+function photoLookupKeysForItem(item){
+  const imageCode=itemSellpiaImageCode(item);
+  return compactCodes([
+    imageCode,
+    item?.sellpiaCode,
+    item?.sellpiaProductCode,
+    item?.p_code,
+    item?.productCode,
+    item?.code,
+    item?.itemNo,
+    item?.item_no,
+    item?.prodCode,
+    item?.resolvedOwnCode,
+    item?.ownCode,
+    item?.privateCode
+  ]);
+}
+function productImageUrlForItem(item){
+  const direct=String(item?.imageUrl||item?.image_url||'').trim();
+  if(direct) return direct;
+  for(const key of photoLookupKeysForItem(item)){
+    const url=photoMap&&photoMap[key];
+    if(url) return url;
+  }
+  return '';
+}
 function imageUrlFromRow(row){
   if(!row) return '';
   return row.storage_public_url||row.image_url||row.source_image_url||'';
@@ -2639,9 +2674,9 @@ async function loadData(silent=false,preserveView=false){
     Object.assign(insp_itemMemos, memoData);
 
     // 7. 이미지 백그라운드 로드 (PR_system products + System_v1 Supabase Storage catalog)
-    const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.flatMap(it=>[it.code,it.prodCode,it.sellpiaCode]).filter(Boolean)))];
-    if(allProdCodes.length){
-      loadProductImagesForCodes(allProdCodes)
+    const allImageCodes=imageLoadCodesForOrders(ORDERS_ALL);
+    if(allImageCodes.length){
+      loadProductImagesForCodes(allImageCodes)
         .then((stats)=>{
           if(stats.prApplied||stats.catalogApplied||stats.storageFallbackApplied) rerenderAfterPhotoMapUpdate();
           if(stats.errors.length) console.warn('image load warning',stats.errors);
@@ -3197,7 +3232,7 @@ function renderLeft(){
   const multi=buildMultiMap(jo);
   let flat=[];
   sourceOrders.forEach(o=>o.items.forEach((it,idx2)=>{
-    flat.push({no:o.no,buyer:o.buyer,recv:o.recv||'',code:it.code,nal:it.nal,qty:it.qty,seq:idx2+1,name:it.name||'',option:it.option||'',seller_option_name:it.seller_option_name||'',prodCode:it.prodCode||'',goldItem:isGold(it),inGoldInv:joGoldNos.has(o.no)&&!isGold(it),location:it.location||''});
+    flat.push({no:o.no,buyer:o.buyer,recv:o.recv||'',code:it.code,itemNo:it.itemNo||'',nal:it.nal,qty:it.qty,seq:idx2+1,name:it.name||'',option:it.option||'',seller_option_name:it.seller_option_name||'',prodCode:it.prodCode||'',resolvedOwnCode:it.resolvedOwnCode||'',sellpiaCode:itemSellpiaImageCode(it),imageUrl:it.imageUrl||'',goldItem:isGold(it),inGoldInv:joGoldNos.has(o.no)&&!isGold(it),location:it.location||''});
   }));
   flat.sort((a,b)=>{
     const cc=compareSelfCodeRoute(a.prodCode||a.code,b.prodCode||b.code);
@@ -3263,11 +3298,11 @@ function renderLeft(){
         :`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`;
 
     const drVal=drawer[f.no]||'';
-    const _photoUrl=photoMap[f.code]||photoMap[_pcode]||photoMap[f.sellpiaCode]||'';
+    const _photoUrl=productImageUrlForItem(f);
     listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
-        <div class="pr-photo-wrap">${renderPhotoBox(f.code,_photoUrl,'pick',f.sellpiaCode||f.code,[f.prodCode,_pcode])}</div>
+        <div class="pr-photo-wrap">${renderPhotoBox(f.code,_photoUrl,'pick',f.sellpiaCode||f.code,[f.sellpiaCode,f.prodCode,f.resolvedOwnCode,_pcode])}</div>
       </div>
       <div class="deck-content">
         <div class="deck-card-head">
@@ -5819,7 +5854,7 @@ function insp_renderDetail(){
       const isShort = shortSet.has(it.code);
       const shortInfo = (order.shortItems||[]).find(s=>s.code===it.code);
       const is14k=isGold(it);
-      const imgUrl=(photoMap&&photoMap[it.prodCode])||((photoMap&&photoMap[it.code])||'')||((photoMap&&photoMap[it.sellpiaCode])||'');
+      const imgUrl=productImageUrlForItem(it);
       const {prodName,optName}=insp_itemDisplayParts(it);
       const ownCodeText=inspOwnCodeText(it);
       const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
@@ -5829,7 +5864,7 @@ function insp_renderDetail(){
       const ec=it.code.replace(/'/g,"\\'");
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
-        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.prodCode,it.resolvedOwnCode])+'</td>'
+        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.sellpiaCode,it.prodCode,it.resolvedOwnCode])+'</td>'
         +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;font-size:15px;font-weight:900;color:#1A2840;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+( optName?optionHtml(optName):'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>' )+'</td>'
         +'<td class="insp-td-qty">'+it.qty+'</td>'
         +inspProductCell(prodName)
@@ -5908,7 +5943,7 @@ function insp_renderDetail(){
     const itemShort=itemState===WF_STATUS.SHORT;
     const memoId='insp-memo-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal=insp_itemMemos[insp_memoKey(order.no,it.code)]||'';
-    const imgUrl=it.imageUrl||(photoMap&&photoMap[it.prodCode])||(photoMap&&photoMap[it.code])||(photoMap&&photoMap[it.sellpiaCode])||'';
+    const imgUrl=productImageUrlForItem(it);
     const {prodName,optName}=insp_itemDisplayParts(it);
     const _isLabelTab=insp_tabMode==='golditem'||insp_tabMode==='gold';
     const labelDisp=_isLabelTab&&goldItem?expandLabelNums(insp_goldLabelMap[order.no+'-'+it.code]):'';
@@ -5918,7 +5953,7 @@ function insp_renderDetail(){
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
-      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.prodCode,it.resolvedOwnCode])+'</td>'
+      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.sellpiaCode,it.prodCode,it.resolvedOwnCode])+'</td>'
       +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;color:#1A2840;font-size:15px;font-weight:900;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+(optName?optionHtml(optName):optionText)+'</td>'
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
@@ -6098,7 +6133,7 @@ function insp_openZoomIdx(i){
   if(!order) return;
   const items=insp_tabMode==='golditem'?order.items.filter(it=>isGold(it)):order.items;
   const it=items[i];
-  const imgUrl=it?(it.imageUrl||(photoMap&&photoMap[it.prodCode])||(photoMap&&photoMap[it.code])||(photoMap&&photoMap[it.sellpiaCode])||''):'';
+  const imgUrl=it?productImageUrlForItem(it):'';
   if(!imgUrl){toast('📷 연동된 사진이 없어요');return;}
   zoomPhoto(imgUrl);
 }
@@ -6275,10 +6310,10 @@ function insp_exportLabelCSV(){
 async function insp_linkImages(){
   // PR_system products + System_v1 Supabase Storage catalog에서 이미지 로드
   toast('⏳ 사진 새로고침 중...',3000);
-  const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.flatMap(it=>[it.code,it.prodCode,it.sellpiaCode]).filter(Boolean)))];
-  if(!allProdCodes.length){ toast('⚠ 상품코드 없음'); return; }
+  const allImageCodes=imageLoadCodesForOrders(ORDERS_ALL);
+  if(!allImageCodes.length){ toast('⚠ 상품코드 없음'); return; }
   try{
-    const stats=await loadProductImagesForCodes(allProdCodes);
+    const stats=await loadProductImagesForCodes(allImageCodes);
     if(stats.prApplied||stats.catalogApplied||stats.storageFallbackApplied){
       rerenderAfterPhotoMapUpdate();
       const msg='✅ 사진 연동 완료! PR '+stats.prApplied.toLocaleString()+' / System_v1 '+stats.catalogApplied.toLocaleString()+' / Storage '+(stats.storageFallbackApplied||0).toLocaleString();
@@ -6568,7 +6603,7 @@ function renderMisongItemRow(r,maps,extraClass=''){
   const rawProdCode = r.prodCode||r.dispCode||maps.codeToProdCode[r.code]||r.code;
   const prodCode = displayOwnCode(rawProdCode)==='자사코드 없음' ? '' : displayOwnCode(rawProdCode);
   const displayCode = displayOwnCode(rawProdCode);
-  const imgUrl = photoMap[prodCode]||photoMap[r.sellpiaCode]||photoMap[r.code]||'';
+  const imgUrl = productImageUrlForItem({...r,prodCode});
   const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
   const itemName = maps.itemNameMap[String(r.seq)+'-'+r.code]||r.name||'';
   const imgHtml = imgUrl
