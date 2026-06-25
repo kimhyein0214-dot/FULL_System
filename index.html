@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-invoice-hold-index-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0625-image-db-gift-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1240,7 +1240,9 @@ const APP_CONFIG={
     enabled:true,
     supabaseUrl:'https://bpgvqmtsjgegnrdzmpep.supabase.co',
     supabaseKey:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwZ3ZxbXRzamdlZ25yZHptcGVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjc0NTIsImV4cCI6MjA5NzMwMzQ1Mn0.tIxMFEUqALi2gywDxKJpxEZ9qcGhYRw8QJeMtRjKFDI',
+    table:'sellpia_product_images',
     view:'sellpia_product_images_public',
+    bucket:'product-images',
     preferStorage:true
   },
   apiBaseUrl:'',
@@ -1318,6 +1320,14 @@ function imageUrlFromRow(row){
   if(!row) return '';
   return row.storage_public_url||row.image_url||row.source_image_url||'';
 }
+function systemStoragePublicUrlForCode(code){
+  const key=String(code||'').trim();
+  if(!key||!imageCatalogDb) return '';
+  const bucket=IMAGE_CATALOG_CONFIG.bucket||'product-images';
+  const path='sellpia/'+photoSafeName(key)+'.jpg';
+  const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
+  return data&&data.publicUrl?data.publicUrl:'';
+}
 function applyImageRows(rows,{preferExisting=false}={}){
   let applied=0;
   (rows||[]).forEach(row=>{
@@ -1363,7 +1373,7 @@ async function fetchSystemImageCatalog(codes){
 }
 async function loadProductImagesForCodes(rawCodes){
   const codes=compactCodes(rawCodes);
-  const stats={requested:codes.length,prApplied:0,catalogApplied:0,errors:[]};
+  const stats={requested:codes.length,prApplied:0,catalogApplied:0,storageFallbackApplied:0,errors:[]};
   if(!codes.length) return stats;
   let prRows=[];
   try{
@@ -1395,8 +1405,34 @@ async function loadProductImagesForCodes(rawCodes){
   }catch(e){
     stats.errors.push('System_v1 image catalog: '+e.message);
   }
+  if(imageCatalogDb&&IMAGE_CATALOG_CONFIG.preferStorage){
+    const fallbackCodes=compactCodes([
+      ...codes,
+      ...prRows.flatMap(row=>[row.p_code])
+    ]);
+    fallbackCodes.forEach(code=>{
+      if(photoMap[code]) return;
+      const url=systemStoragePublicUrlForCode(code);
+      if(!url) return;
+      photoMap[code]=url;
+      const linked=prRows.find(row=>String(row.p_code||'').trim()===String(code).trim());
+      if(linked?.own_code&&!photoMap[linked.own_code]) photoMap[linked.own_code]=url;
+      stats.storageFallbackApplied++;
+    });
+  }
   try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
   return stats;
+}
+function rerenderAfterPhotoMapUpdate(){
+  renderLeft();
+  if(document.getElementById('sys-insp')?.classList.contains('active')){
+    insp_renderList();
+    insp_renderDetail();
+  }
+  if(document.getElementById('sys-misong')?.classList.contains('active')){
+    renderMisongList();
+    renderMisongSidebar();
+  }
 }
 async function fetchOwnCodeMapForPcodes(rawCodes){
   const codes=compactCodes(rawCodes);
@@ -2175,30 +2211,46 @@ function optionHtml(text){
 function photoSafeName(code){
   return String(code||'photo').trim().replace(/[\\/:*?"<>|#%&{}$!`'@+=\s]+/g,'_')||'photo';
 }
-function renderPhotoBox(code,imgUrl,kind='pick',uploadCode=code){
+function photoAliasAttr(values){
+  return htmlEsc(JSON.stringify(compactCodes(values)));
+}
+function photoAliasesFromAttr(value){
+  if(!value) return [];
+  try{
+    const parsed=JSON.parse(value);
+    return Array.isArray(parsed)?compactCodes(parsed):[];
+  }catch(e){
+    return compactCodes(String(value).split(/[,\s]+/));
+  }
+}
+function renderPhotoBox(code,imgUrl,kind='pick',uploadCode=code,aliasCodes=[]){
   const cls=kind==='insp'?'insp-photo-cell':'pr-photo';
   const dataCode=htmlEsc(code);
-  const dataUploadCode=htmlEsc(uploadCode||code);
+  const primaryUploadCode=String(uploadCode||code||'').trim();
+  const dataUploadCode=htmlEsc(primaryUploadCode);
+  const dataAliases=photoAliasAttr([code,primaryUploadCode,...(aliasCodes||[])]);
   const url=String(imgUrl||'').trim();
   if(url){
-    return `<div class="${cls} has-img photo-drop-target" data-code="${dataUploadCode}" data-url="${htmlEsc(url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
-      +`<img src="${htmlEsc(url)}" alt="${dataCode}" loading="lazy" onerror="photoImageError(this,this.closest('.photo-drop-target')?.dataset.code||'')">`
+    return `<div class="${cls} has-img photo-drop-target" data-code="${dataUploadCode}" data-aliases="${dataAliases}" data-url="${htmlEsc(url)}" title="클릭: 확대 / 드롭: 사진 교체" onclick="event.stopPropagation();zoomPhoto(this.dataset.url)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code,this.dataset.aliases)">`
+      +`<img src="${htmlEsc(url)}" alt="${dataCode}" loading="lazy" onerror="photoImageError(this,this.closest('.photo-drop-target')?.dataset.code||'',this.closest('.photo-drop-target')?.dataset.aliases||'')">`
     +`</div>`;
   }
-  return `<div class="${cls} photo-drop-target photo-empty" data-code="${dataUploadCode}" title="클릭: 카메라/파일 선택 · 드롭: 사진 저장 (${dataUploadCode})" onclick="event.stopPropagation();openPhotoCapture(this.dataset.code)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code)">`
+  return `<div class="${cls} photo-drop-target photo-empty" data-code="${dataUploadCode}" data-aliases="${dataAliases}" title="클릭: 카메라/파일 선택 · 드롭: 사진 저장 (${dataUploadCode})" onclick="event.stopPropagation();openPhotoCapture(this.dataset.code,this.dataset.aliases)" ondragover="photoDragOver(event)" ondragleave="photoDragLeave(event)" ondrop="photoDrop(event,this.dataset.code,this.dataset.aliases)">`
     +`<span class="photo-empty-ico">📷</span><span class="photo-empty-txt">사진</span>`
   +`</div>`;
 }
-function photoImageError(img,code){
+function photoImageError(img,code,aliases=''){
   const box=img.closest('.pr-photo,.insp-photo-cell');
-  if(box) box.outerHTML=renderPhotoBox(code,'',box.classList.contains('insp-photo-cell')?'insp':'pick');
+  compactCodes([code,...photoAliasesFromAttr(aliases)]).forEach(key=>{ delete photoMap[key]; });
+  try{localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));}catch(e){}
+  if(box) box.outerHTML=renderPhotoBox(code,'',box.classList.contains('insp-photo-cell')?'insp':'pick',code,photoAliasesFromAttr(box.dataset.aliases));
 }
-function openPhotoCapture(code){
+function openPhotoCapture(code,aliases=''){
   const input=document.createElement('input');
   input.type='file';
   input.accept='image/*';
   input.capture='environment';
-  input.onchange=()=>handlePhotoFiles(code,input.files);
+  input.onchange=()=>handlePhotoFiles(code,input.files,aliases);
   input.click();
 }
 function photoDragOver(e){
@@ -2211,11 +2263,11 @@ function photoDragLeave(e){
   e.stopPropagation();
   e.currentTarget.classList.remove('dragging');
 }
-function photoDrop(e,code){
+function photoDrop(e,code,aliases=''){
   e.preventDefault();
   e.stopPropagation();
   e.currentTarget.classList.remove('dragging');
-  handlePhotoFiles(code,e.dataTransfer&&e.dataTransfer.files);
+  handlePhotoFiles(code,e.dataTransfer&&e.dataTransfer.files,aliases);
 }
 function readFileAsDataUrl(file){
   return new Promise((resolve,reject)=>{
@@ -2263,9 +2315,31 @@ async function uploadProductPhotoToStorage(code,blob){
   const {error}=await imageCatalogDb.storage.from(bucket).upload(path,blob,{contentType:'image/jpeg',upsert:true,cacheControl:'3600'});
   if(error) throw new Error(error.message||'Storage 업로드 실패');
   const {data}=imageCatalogDb.storage.from(bucket).getPublicUrl(path);
-  return data&&data.publicUrl?data.publicUrl:'';
+  return {publicUrl:data&&data.publicUrl?data.publicUrl:'',bucket,path};
 }
-async function handlePhotoFiles(code,files){
+async function upsertProductPhotoMetadata(code,aliasKeys,storageInfo,blob){
+  if(!imageCatalogDb) throw new Error('이미지 DB 연결 없음');
+  const key=String(code||'').trim();
+  if(!key) throw new Error('셀피아코드 없음');
+  const table=IMAGE_CATALOG_CONFIG.table||'sellpia_product_images';
+  const ownCode=(aliasKeys||[]).find(v=>isValidOwnCode(v))||'';
+  const row={
+    p_code:key,
+    own_code:ownCode||null,
+    bucket:storageInfo.bucket||IMAGE_CATALOG_CONFIG.bucket||'product-images',
+    storage_path:storageInfo.path||('sellpia/'+photoSafeName(key)+'.jpg'),
+    storage_public_url:storageInfo.publicUrl||'',
+    source_image_url:storageInfo.publicUrl||'',
+    upload_status:'uploaded',
+    mime_type:'image/jpeg',
+    size_bytes:blob?.size||null,
+    updated_at:new Date().toISOString()
+  };
+  const {error}=await imageCatalogDb.from(table).upsert(row,{onConflict:'p_code'});
+  if(error) throw new Error(error.message||'이미지 메타 DB 저장 실패');
+  return row;
+}
+async function handlePhotoFiles(code,files,aliases=''){
   const file=files&&files[0];
   const key=String(code||'').trim();
   if(!key){toast('⚠ 셀피아코드 없음');return;}
@@ -2273,19 +2347,29 @@ async function handlePhotoFiles(code,files){
   toast('⏳ '+key+' 사진 저장 중...',3000);
   try{
     const blob=await imageFileToJpegBlob(file);
-    let url='', savedOnServer=false, serverError='';
+    let url='', savedOnServer=false, metaSaved=false, serverError='', metaError='';
+    const aliasKeys=compactCodes([key,...photoAliasesFromAttr(aliases)]);
     try{
-      url=await uploadProductPhotoToStorage(key,blob);
+      const storageInfo=await uploadProductPhotoToStorage(key,blob);
+      url=storageInfo.publicUrl;
       savedOnServer=!!url;
+      if(savedOnServer){
+        try{
+          await upsertProductPhotoMetadata(key,aliasKeys,storageInfo,blob);
+          metaSaved=true;
+        }catch(e){
+          metaError=e.message||String(e);
+        }
+      }
     }catch(e){
       serverError=e.message||String(e);
       url=await blobToDataUrl(blob);
     }
-    photoMap[key]=url;
+    aliasKeys.forEach(aliasKey=>{ photoMap[aliasKey]=url; });
     try{
       localStorage.setItem('pickingPhotoCache',JSON.stringify(photoMap));
       const local=JSON.parse(localStorage.getItem('pickingLocalPhotoUploads')||'{}');
-      local[key]={url,updatedAt:new Date().toISOString(),serverSaved:savedOnServer,fileName:photoSafeName(key)+'.jpg'};
+      local[key]={url,aliases:aliasKeys,updatedAt:new Date().toISOString(),serverSaved:savedOnServer,metaSaved,fileName:photoSafeName(key)+'.jpg'};
       localStorage.setItem('pickingLocalPhotoUploads',JSON.stringify(local));
     }catch(e){
       console.warn('photo cache warning',e);
@@ -2295,8 +2379,9 @@ async function handlePhotoFiles(code,files){
       insp_renderList();
       insp_renderDetail();
     }
-    toast(savedOnServer?'✅ '+key+'.jpg 서버 저장 완료':'✅ '+key+'.jpg 로컬 저장 완료 (서버 권한 필요)',savedOnServer?2500:4500);
+    toast(savedOnServer?(metaSaved?'✅ '+key+'.jpg 서버+DB 저장 완료':'⚠ '+key+'.jpg 서버 저장 / DB 메타 실패'):'✅ '+key+'.jpg 로컬 저장 완료 (서버 권한 필요)',savedOnServer?3000:4500);
     if(serverError) console.warn('Storage upload skipped:',serverError);
+    if(metaError) console.warn('Image metadata upsert failed:',metaError);
   }catch(e){
     toast('❌ 사진 저장 실패: '+e.message,4000);
   }
@@ -2501,7 +2586,7 @@ async function loadData(silent=false,preserveView=false){
     if(allProdCodes.length){
       loadProductImagesForCodes(allProdCodes)
         .then((stats)=>{
-          if(stats.prApplied||stats.catalogApplied) renderLeft();
+          if(stats.prApplied||stats.catalogApplied||stats.storageFallbackApplied) rerenderAfterPhotoMapUpdate();
           if(stats.errors.length) console.warn('image load warning',stats.errors);
         });
     }
@@ -3121,11 +3206,11 @@ function renderLeft(){
         :`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.code)}',1)">+</button></div>${sh?'<button class="bulk-short-btn" onclick="event.stopPropagation();bulkShortageAfter('+f.no+',\''+esc(f.code)+'\')">이후↓</button>':''}</div>`;
 
     const drVal=drawer[f.no]||'';
-    const _photoUrl=photoMap[f.code]||photoMap[_pcode]||'';
+    const _photoUrl=photoMap[f.code]||photoMap[_pcode]||photoMap[f.sellpiaCode]||'';
     listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
-        <div class="pr-photo-wrap">${renderPhotoBox(f.code,_photoUrl,'pick')}</div>
+        <div class="pr-photo-wrap">${renderPhotoBox(f.code,_photoUrl,'pick',f.sellpiaCode||f.code,[f.prodCode,_pcode])}</div>
       </div>
       <div class="deck-content">
         <div class="deck-card-head">
@@ -5596,6 +5681,13 @@ function formatSellpiaAmount(raw,amount){
   const n=Number(amount);
   return Number.isFinite(n) ? n.toLocaleString('ko-KR')+'원' : '—';
 }
+function sellpiaAmountNumber(raw,amount){
+  const direct=Number(amount);
+  if(Number.isFinite(direct)&&direct>0) return direct;
+  const digits=String(raw??'').replace(/[^\d.-]/g,'');
+  const parsed=Number(digits);
+  return Number.isFinite(parsed)?parsed:0;
+}
 function inspAmountCell(it){
   return '<td class="insp-td-amount" style="text-align:left;width:64px;min-width:64px;max-width:64px;font-size:13px;font-weight:900;color:#0F5132;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
     +htmlEsc(formatSellpiaAmount(it?.sellpiaItemSalesAmountRaw,it?.sellpiaItemSalesAmount))
@@ -5612,6 +5704,25 @@ function inspOrderTotalBadge(order){
   const label=formatSellpiaAmount(order.sellpiaOrderTotalAmountRaw,order.sellpiaOrderTotalAmount);
   if(label==='—') return '';
   return '<div class="insp-dh-total" style="font-size:12px;font-weight:900;color:#0F5132;background:#DFF6E8;border:1px solid #BFE9CE;border-radius:6px;padding:3px 8px;white-space:nowrap;">총금액 '+htmlEsc(label)+'</div>';
+}
+function inspOrderHasGiftText(order){
+  const texts=[
+    order?.orderMemo,order?.seller,order?.buyer,order?.recv,
+    ...(order?.items||[]).flatMap(it=>[
+      it?.name,it?.option,it?.seller_product_name,it?.seller_option_name,
+      it?.prodCode,it?.resolvedOwnCode,it?.sellpiaCode
+    ])
+  ];
+  return texts.some(v=>String(v||'').includes('사은품'));
+}
+function inspGiftCheckBadge(order){
+  if(!order) return '';
+  const total=sellpiaAmountNumber(order.sellpiaOrderTotalAmountRaw,order.sellpiaOrderTotalAmount);
+  if(total<20000||inspOrderHasGiftText(order)) return '';
+  return '<div class="insp-gift-check-badge" title="총 주문금액 2만원 이상 · 주문 데이터에 사은품 정보 없음" style="font-size:12px;font-weight:900;color:#B42318;background:#FEE4E2;border:1px solid #F97066;border-radius:6px;padding:3px 8px;white-space:nowrap;">사은품확인!</div>';
+}
+function inspOrderAmountBadges(order){
+  return inspOrderTotalBadge(order)+inspGiftCheckBadge(order);
 }
 function inspSellpiaOrderMemoText(order){
   return String(order?.orderMemo||'').trim();
@@ -5661,7 +5772,7 @@ function insp_renderDetail(){
       const ec=it.code.replace(/'/g,"\\'");
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
-        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code)+'</td>'
+        +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.prodCode,it.resolvedOwnCode])+'</td>'
         +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;font-size:15px;font-weight:900;color:#1A2840;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+( optName?optionHtml(optName):'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>' )+'</td>'
         +'<td class="insp-td-qty">'+it.qty+'</td>'
         +inspProductCell(prodName)
@@ -5691,7 +5802,7 @@ function insp_renderDetail(){
           +' <span style="font-size:10px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:1px 5px;">미송 '+shortCnt+'종</span>'
         +'</div>'
         +(chBadge(order.no)||'')
-        +inspOrderTotalBadge(order)
+        +inspOrderAmountBadges(order)
         +'<div class="insp-dh-stat">전체 '+order.items.length+'종</div>'
         +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
           +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
@@ -5750,7 +5861,7 @@ function insp_renderDetail(){
     return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
-      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code)+'</td>'
+      +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.prodCode,it.resolvedOwnCode])+'</td>'
       +'<td class="insp-option-cell" title="'+htmlEsc(optName||'')+'" style="width:420px;min-width:420px;max-width:420px;color:#1A2840;font-size:15px;font-weight:900;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.25;">'+(optName?optionHtml(optName):optionText)+'</td>'
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
@@ -5778,7 +5889,7 @@ function insp_renderDetail(){
       +'<div class="insp-dh-no">'+label+'</div>'
       +'<div class="insp-dh-buyer">'+buyerLabel(order.buyer,order.recv||'')+(isGoldInv?' <span class="insp-gold-badge">🥇 골드</span>':'')+(hasMisong?' <span style="background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:800;">미송</span>':'')+'</div>'
       +(chBadge(order.no)||'')
-      +inspOrderTotalBadge(order)
+      +inspOrderAmountBadges(order)
       +'<div class="insp-dh-stat">'+items.length+'종</div>'
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
         +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
@@ -5930,7 +6041,7 @@ function insp_openZoomIdx(i){
   if(!order) return;
   const items=insp_tabMode==='golditem'?order.items.filter(it=>isGold(it)):order.items;
   const it=items[i];
-  const imgUrl=it?(it.imageUrl||(photoMap&&photoMap[it.prodCode])||''):'';
+  const imgUrl=it?(it.imageUrl||(photoMap&&photoMap[it.prodCode])||(photoMap&&photoMap[it.code])||(photoMap&&photoMap[it.sellpiaCode])||''):'';
   if(!imgUrl){toast('📷 연동된 사진이 없어요');return;}
   zoomPhoto(imgUrl);
 }
@@ -6107,13 +6218,13 @@ function insp_exportLabelCSV(){
 async function insp_linkImages(){
   // PR_system products + System_v1 Supabase Storage catalog에서 이미지 로드
   toast('⏳ 사진 새로고침 중...',3000);
-  const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.map(it=>it.code||'').filter(Boolean)))];
+  const allProdCodes=[...new Set(ORDERS_ALL.flatMap(o=>o.items.flatMap(it=>[it.code,it.prodCode,it.sellpiaCode]).filter(Boolean)))];
   if(!allProdCodes.length){ toast('⚠ 상품코드 없음'); return; }
   try{
     const stats=await loadProductImagesForCodes(allProdCodes);
-    if(stats.prApplied||stats.catalogApplied){
-      renderLeft();
-      const msg='✅ 사진 연동 완료! PR '+stats.prApplied.toLocaleString()+' / System_v1 '+stats.catalogApplied.toLocaleString();
+    if(stats.prApplied||stats.catalogApplied||stats.storageFallbackApplied){
+      rerenderAfterPhotoMapUpdate();
+      const msg='✅ 사진 연동 완료! PR '+stats.prApplied.toLocaleString()+' / System_v1 '+stats.catalogApplied.toLocaleString()+' / Storage '+(stats.storageFallbackApplied||0).toLocaleString();
       toast(stats.errors.length?msg+' (일부 경고 있음)':msg);
     } else toast('⚠ 연동된 사진 없음');
   }catch(e){toast('❌ 사진 연동 실패: '+e.message);}
