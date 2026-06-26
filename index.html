@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v6">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v7">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1591,6 +1591,10 @@ function displayOwnCode(value){
   const v=String(value||'').trim();
   return isValidOwnCode(v) ? v : '자사코드 없음';
 }
+function displayOwnCodeBlank(value){
+  const v=displayOwnCode(value);
+  return v==='자사코드 없음' ? '' : v;
+}
 function isValidOwnCode(value){
   const v=String(value||'').trim();
   return !!v && v!=='자사코드 없음' && !looksLikeSellpiaCode(v) && !looksLikeItemNoValue(v) && !isMissingOwnCodeKey(v) && !isItemNoKey(v);
@@ -2985,8 +2989,9 @@ function renderRightDetail(no){
     const done2=[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), isHold=itemState===WF_STATUS.HOLD, shVal=shortage[no+'-'+it.code]||0;
     const seq=it.seqLabel||idx+1;
     const itemTitle=it.displayName||itemNameWithOption(it);
+    const rpOwnCode=displayOwnCodeBlank(it.prodCode||it.resolvedOwnCode||'');
     const canCheck=!gItem&&!isHold;
-    return `<div class="rp-item${gItem?' gold':''}${done2?' done':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><button class="rp-check-btn${done2?' checked':''}" ${canCheck?`onclick="event.stopPropagation();tog(${no},'${esc(it.code)}')"`:'disabled'}>${done2?'✓':''}</button><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:24px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${it.prodCode||it.code}${gItem?' 골드':''} ${renderLocationBadge(it.location)}${it.mergedCount>1?` <span class="merge-badge">${it.mergedCount}줄</span>`:''}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
+    return `<div class="rp-item${gItem?' gold':''}${done2?' done':''}" style="cursor:pointer;" onclick="scrollToCode('${escId(it.prodCode||it.code)}')"><button class="rp-check-btn${done2?' checked':''}" ${canCheck?`onclick="event.stopPropagation();tog(${no},'${esc(it.code)}')"`:'disabled'}>${done2?'✓':''}</button><span style="font-size:13px;font-weight:900;color:#8B4513;min-width:24px;flex-shrink:0;">${seq}</span><div class="rp-code" style="flex:1;min-width:0;color:${done2?'#00CC66':isHold?'#E65100':gItem?'var(--gold)':'#000000'};font-size:11px;"><div>${rpOwnCode}${gItem?' 골드':''} ${renderLocationBadge(it.location)}${it.mergedCount>1?` <span class="merge-badge">${it.mergedCount}줄</span>`:''}</div><div style="font-size:9px;font-weight:600;color:#777;line-height:1.25;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(itemTitle)}</div></div><div style="display:flex;align-items:center;gap:2px;flex-shrink:0;" onclick="event.stopPropagation()"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)" style="width:20px;height:20px;font-size:11px;">&minus;</button><span style="font-size:12px;font-weight:700;min-width:14px;text-align:center;color:${shVal>0?'var(--red)':'var(--muted)'};">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)" style="width:20px;height:20px;font-size:11px;">+</button></div><div class="rp-qty" style="margin-left:6px;flex-shrink:0;">${it.qty}개</div></div>`;
   }).join('');
 }
 
@@ -3262,6 +3267,7 @@ function renderLeft(){
   const seenCodeAnchors=new Set();
   flat.forEach(f=>{
     const _pcode=f.prodCode||f.code;
+    const _displayPcode=displayOwnCodeBlank(f.prodCode||f.resolvedOwnCode||'');
     const isM=!!multi[_pcode], c=multi[_pcode]||{b:'#B0BEC5',t:'var(--text)',bg:'#fff'};
     const goldDimmed=f.goldItem&&viewMode!=='gold';
     const itemState=getItemWorkflowState(f.no,f.code);
@@ -3294,7 +3300,7 @@ function renderLeft(){
       </div>
       <div class="deck-content">
         <div class="deck-card-head">
-          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${f.nal?'<span class="nal-badge">낱</span> ':''}${f.goldItem?'🥇 ':''}${_pcode}</span>${optionText?`<span class="deck-card-option">${optionHtml(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
+          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${_displayPcode?(f.nal?'<span class="nal-badge">낱</span> ':'')+(f.goldItem?'🥇 ':'')+_displayPcode:''}</span>${optionText?`<span class="deck-card-option">${optionHtml(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
           <div class="deck-card-name">${esc(itemNameOnly(f))}</div>
           <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
         </div>
@@ -3480,7 +3486,7 @@ function renderPickingSlotBoard(orders, trayCtx){
       const seq=idx+1;
       const state=getItemWorkflowState(order.no,it.code);
       const meta=slotStatusMeta(state,it);
-      const displayCode=it.prodCode||it.code||'';
+      const displayCode=displayOwnCodeBlank(it.prodCode||it.resolvedOwnCode||'');
       slots[slotIdx].push({order,it,seq,state,meta,displayCode});
     });
   });
@@ -3506,7 +3512,7 @@ function renderPickingSlotBoard(orders, trayCtx){
       return `<div class="slot-hit ${r.meta.cls}${Number(currentPopupNo)===Number(r.order.no)?' selected':''}" data-inv="${r.order.no}" title="${title}" onclick="selectInv(${Number(r.order.no)});scrollToCode('${codeId}')">`
         +checkHtml
         +`<div class="slot-main">`
-          +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'코드없음')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
+          +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
         +`</div>`
         +`<div class="slot-state">${r.meta.label}${shortageVal?` ${shortageVal}`:''}</div>`
       +`</div>`;
@@ -3567,11 +3573,12 @@ function openPopup(no){
     const c=multi[it.code]||{b:'#B0BEC5',t:'var(--text)',bg:'#fff'};
     const itemState=getItemWorkflowState(no,it.code);
     const gItem=isGold(it), done=[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), isHold=itemState===WF_STATUS.HOLD, shVal=shortage[no+'-'+it.code]||0, hasV=itemState===WF_STATUS.SHORT, inGInv=gInv&&!gItem;
+    const popupOwnCode=displayOwnCodeBlank(it.prodCode||it.resolvedOwnCode||'');
 
     let ordBg='#B0BEC5',ordTxt=String(i+1);
     if(done){ordBg='#0E7A4A';ordTxt='✓';} else if(gItem){ordBg='#C49A00';ordTxt='🥇';} else if(isHold){ordBg='#FFB74D';ordTxt='⏸';} else if(multi[it.code]) ordBg=c.b;
 
-    return `<div class="pitem${done?' done':''}${gItem?' is-gold':''}${isHold?' is-hold':''}"><div class="pi-ord" style="background:${ordBg};font-size:${ordTxt==='✓'?'12':'10'}px;" onclick="${gItem||isHold?'':`tog(${no},'${esc(it.code)}')`}">${ordTxt}</div><div class="pi-inf"><div class="pi-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':c.t}">${it.prodCode||it.code}${inGInv?' <span class="gi-badge">🥇송장</span>':''} ${renderLocationBadge(it.location)}</div><div class="pi-name">${esc(itemNameWithOption(it))}</div>${gItem?'<div style="font-size:10px;color:var(--gold);margin-top:2px;">골드 담당자 처리</div>':isHold?'<div style="font-size:10px;color:#E65100;margin-top:2px;">보류됨</div>':`<div class="pi-short${hasV?' has-val':''}"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)">+</button></div>`}</div><div class="pi-qty">${it.qty}개</div></div>`;
+    return `<div class="pitem${done?' done':''}${gItem?' is-gold':''}${isHold?' is-hold':''}"><div class="pi-ord" style="background:${ordBg};font-size:${ordTxt==='✓'?'12':'10'}px;" onclick="${gItem||isHold?'':`tog(${no},'${esc(it.code)}')`}">${ordTxt}</div><div class="pi-inf"><div class="pi-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':c.t}">${popupOwnCode}${inGInv?' <span class="gi-badge">🥇송장</span>':''} ${renderLocationBadge(it.location)}</div><div class="pi-name">${esc(itemNameWithOption(it))}</div>${gItem?'<div style="font-size:10px;color:var(--gold);margin-top:2px;">골드 담당자 처리</div>':isHold?'<div style="font-size:10px;color:#E65100;margin-top:2px;">보류됨</div>':`<div class="pi-short${hasV?' has-val':''}"><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${no},'${esc(it.code)}',1)">+</button></div>`}</div><div class="pi-qty">${it.qty}개</div></div>`;
   }).join('');
   document.getElementById('popup-overlay').style.display='flex';
 }
@@ -6614,8 +6621,8 @@ function getMisongMaps(){
 function renderMisongItemRow(r,maps,extraClass=''){
   const isDone=getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY;
   const rawProdCode = r.prodCode||r.dispCode||maps.codeToProdCode[r.code]||r.code;
-  const prodCode = displayOwnCode(rawProdCode)==='자사코드 없음' ? '' : displayOwnCode(rawProdCode);
-  const displayCode = displayOwnCode(rawProdCode);
+  const prodCode = displayOwnCodeBlank(rawProdCode);
+  const displayCode = prodCode;
   const imgUrl = productImageUrlForItem({...r,prodCode});
   const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
   const itemName = maps.itemNameMap[String(r.seq)+'-'+r.code]||r.name||'';
@@ -6694,7 +6701,7 @@ function renderMisongList(){
       const totalSh = rows.reduce((s,r)=>s+r.shortage,0);
       const allDoneC = rows.every(r=>getMisongRowWorkflowState(r)===WF_STATUS.REPICKED_READY);
       const rawProdCode = rows[0]?.prodCode||rows[0]?.dispCode||maps.codeToProdCode[code]||code;
-      const prodCode = displayOwnCode(rawProdCode);
+      const prodCode = displayOwnCodeBlank(rawProdCode);
       const itemsHtml = rows.map(r=>{
         const dr=String(drawer[r.seq]||r.drawer||'').trim();
         const realInv=seqToReal[r.seq]||r.invNo||'';
