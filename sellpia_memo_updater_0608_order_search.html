@@ -457,7 +457,7 @@
       return hit;
     }
     function findOrderHitInGrid(invNo, ordNo = '') {
-      const targets = [ordNo, isLikelyInvoiceNo(invNo) ? invNo : ''].map(normal).filter(Boolean);
+      const targets = [isLikelyInvoiceNo(invNo) ? invNo : ''].map(normal).filter(Boolean);
       if (!targets.length) return null;
       return getGridRows('grid7').find(({ item }) => {
         const blob = rowBlob(item);
@@ -997,11 +997,14 @@
           if (!bucket.invNo) bucket.invNo = isLikelyInvoiceNo(row.inv_no) ? normal(row.inv_no) : (isLikelyInvoiceNo(orderMeta.get(ord)?.invNo) ? orderMeta.get(ord).invNo : '');
           bucket.pickingRows.push(row);
         }
-        return [...byOrd.entries()].map(([ordNo, bucket]) => ({
+        const tasks = [...byOrd.entries()].map(([ordNo, bucket]) => ({
           invNo: bucket.invNo,
           ordNo,
           task: buildTask(bucket.invNo, ordNo, bucket.shortageRows, bucket.pickingRows)
-        })).filter(item => item.ordNo);
+        }));
+        const missingInvoiceCount = tasks.filter(item => !isLikelyInvoiceNo(item.invNo)).length;
+        if (missingInvoiceCount) addLog(`  송장번호 없는 주문 ${missingInvoiceCount}건 제외`);
+        return tasks.filter(item => isLikelyInvoiceNo(item.invNo));
       }
       const d0 = date.replace(/-/g, '');
       const d1Obj = new Date(date + 'T00:00:00');
@@ -1066,14 +1069,18 @@
         if (!bucket.invNo && row.inv_no) bucket.invNo = normal(row.inv_no);
         bucket.pickingRows.push(row);
       }
-      return [...byOrd.entries()].map(([ordNo, bucket]) => ({
+      const tasks = [...byOrd.entries()].map(([ordNo, bucket]) => ({
         invNo: bucket.invNo,
         ordNo,
         task: buildTask(bucket.invNo, ordNo, bucket.shortageRows, bucket.pickingRows)
-      })).filter(item => item.invNo);
+      }));
+      const missingInvoiceCount = tasks.filter(item => !isLikelyInvoiceNo(item.invNo)).length;
+      if (missingInvoiceCount) addLog(`  송장번호 없는 주문 ${missingInvoiceCount}건 제외`);
+      return tasks.filter(item => isLikelyInvoiceNo(item.invNo));
     }
     async function applyTask(task, options, detailFromSingle) {
       const invNo = task.invNo;
+      if (!isLikelyInvoiceNo(invNo)) throw new Error(`송장번호가 없어 주문번호 검색으로 fallback하지 않습니다: ${task.ordNo || '-'}`);
       let detail = detailFromSingle;
       if (!detail) {
         const hit = findOrderHitInGrid(invNo, task.ordNo) || await searchInvoice(invNo, task.ordNo);
