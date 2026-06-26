@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v17">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v18">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -2658,11 +2658,11 @@ async function loadData(silent=false,preserveView=false){
     const todayInvNos=(ordersData||[]).map(r=>String(r.inv_no).trim()).filter(Boolean);
     inspDone={};
     const inspData=todayInvNos.length
-      ? await fetchAllRows(()=>db.from('inspection').select('inv_no,p_code,insp_memo,passed').in('inv_no',todayInvNos))
+      ? await fetchAllRows(()=>db.from('inspection').select('inv_no,item_no,p_code,insp_memo,passed').in('inv_no',todayInvNos))
       : [];
     (inspData||[]).forEach(row=>{
       const no=invToNo[row.inv_no]; if(!no) return;
-      if(row.p_code==='__done__'){ if(row.passed) setInspectionDoneState({no,invNo:row.inv_no},true); return; }
+      if(row.p_code==='__done__'||row.item_no==='__done__'){ if(row.passed) setInspectionDoneState({no,invNo:row.inv_no},true); return; }
       const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
       const item=findItemByShortageRow(order,row);
       const k=no+'-'+ownCodeKeyForRow(row,item);
@@ -5499,10 +5499,13 @@ function insp_saveMemo(invNo,code,val){
   clearTimeout(insp_memoSaveTimer[k]);
   insp_memoSaveTimer[k]=setTimeout(()=>{
     const inv_no=seqToReal[invNo]||String(invNo);
+    const item_no=String(code||'').trim();
+    if(!item_no) return;
     db.from('inspection').upsert(
-      {inv_no,p_code:code,insp_memo:val||'',memo_updated_at:new Date().toISOString()},
-      {onConflict:'inv_no,p_code'}
-    ).catch(e=>console.warn('메모 저장 실패',e));
+      {inv_no,item_no,p_code:code,insp_memo:val||'',memo_updated_at:new Date().toISOString()},
+      {onConflict:'inv_no,item_no'}
+    ).then(({error})=>{ if(error) throw error; })
+     .catch(e=>console.warn('메모 저장 실패',e));
   },800);
 }
 
@@ -6270,7 +6273,7 @@ async function insp_toggleDone(invNo){
   renderDoneState();
   const inv_no=invKey;
   try{
-    const {error:doneErr}=await db.from('inspection').upsert({inv_no,p_code:'__done__',passed:nextDone},{onConflict:'inv_no,p_code'});
+    const {error:doneErr}=await db.from('inspection').upsert({inv_no,item_no:'__done__',p_code:'__done__',passed:nextDone},{onConflict:'inv_no,item_no'});
     if(doneErr) throw doneErr;
     if(nextDone){
       // 검품완료: '피킹완료' 상태인 shortage → '검품완료' + memo2_val='' (메모 업데이터가 셀피아 메모 클리어)
