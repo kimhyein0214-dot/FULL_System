@@ -4820,16 +4820,6 @@ body{
   min-width:0 !important;
   color:#111827 !important;
 }
-.slot-inv,
-.slot-seq{
-  font-size:11px !important;
-  line-height:1.15 !important;
-  font-weight:900 !important;
-  white-space:nowrap !important;
-}
-.slot-seq{
-  color:#475569 !important;
-}
 .slot-qty{
   color:#0F172A !important;
   background:#DBEAFE !important;
@@ -4843,7 +4833,7 @@ body{
 }
 .slot-code{
   min-width:0 !important;
-  max-width:104px !important;
+  max-width:none !important;
   font-size:11px !important;
   line-height:1.15 !important;
   font-weight:900 !important;

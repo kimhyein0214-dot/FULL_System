@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v3">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v4">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3496,17 +3496,15 @@ function renderPickingSlotBoard(orders, trayCtx){
     const body=visibleRows.length?visibleRows.map(r=>{
       const shortageVal=Number(shortage[r.order.no+'-'+r.it.code]||0);
       const codeId=escId(r.displayCode||r.it.code||'');
-      const realInv=displayInvoiceNo(r.order.no);
       const itemTitle=itemNameWithOption(r.it);
       const title=esc(`${workNoText(r.order.no)} ${buyerLabel(r.order.buyer,r.order.recv)} ${r.displayCode} ${itemTitle}`);
       return `<div class="slot-hit ${r.meta.cls}${Number(currentPopupNo)===Number(r.order.no)?' selected':''}" data-inv="${r.order.no}" title="${title}" onclick="selectInv(${Number(r.order.no)});scrollToCode('${codeId}')">`
         +`<div class="slot-lamp"></div>`
         +`<div class="slot-main">`
-          +`<div class="slot-line"><span class="slot-inv">${workNoHtml(r.order.no,'sm')}</span><span class="slot-seq">${r.seq}번</span><span class="slot-qty">${Number(r.it.qty)||1}개</span><span class="slot-code">${esc(r.displayCode||'코드없음')}</span></div>`
+          +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'코드없음')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
           +`<div class="slot-name">${esc(itemTitle||'상품명 없음')}</div>`
         +`</div>`
         +`<div class="slot-state">${r.meta.label}${shortageVal?` ${shortageVal}`:''}</div>`
-        +`${realInv?`<div class="slot-real">송장 ${esc(realInv)}</div>`:''}`
       +`</div>`;
     }).join(''):`<div class="slot-empty">${rows.length?'피킹 완료':'상품 없음'}</div>`;
     return `<section class="slot-panel slot-panel-${slotNo}">`
