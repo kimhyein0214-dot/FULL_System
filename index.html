@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v13">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v14">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1115,7 +1115,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
         </div>
         <div class="cs-list-footer">
           <span class="cs-list-footer-cnt" id="cs-footer-cnt">0명</span>
-          <button class="cs-dl-main" id="cs-dl-btn" onclick="downloadCSCurrent()" disabled>📥 CSV 다운로드</button>
+          <button class="cs-dl-main" id="cs-dl-btn" onclick="downloadCSCurrent()" disabled>📥 엑셀 다운로드</button>
           <button class="cs-dl-main" id="cs-done-clean-btn" onclick="cleanMisongDone()" style="background:#4A1A1A;margin-left:6px;">🗑 처리완료 정리</button>
         </div>
       </div>
@@ -5029,7 +5029,7 @@ function showInvTmplPreview(inv){
   document.body.appendChild(ov);
 }
 
-// ── CSV 다운로드 (알림톡 메시지 포함) ──
+// ── 알림톡 템플릿 엑셀 다운로드 (일반/내일출고 시트 분리) ──
 function downloadCSCurrent(){
   // 현재 3단계 필터 상태에 맞는 rows 가져오기
   let items;
@@ -5041,48 +5041,36 @@ function downloadCSCurrent(){
   }
   if(!items.length){ toast('대상 없음'); return; }
 
-  // 송장 단위로 그룹핑
+  if(typeof XLSX==='undefined'){
+    toast('⚠ 엑셀 생성 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.');
+    return;
+  }
+
   const invMap = new Map();
-  items.forEach(row=>{ if(!invMap.has(row.inv)) invMap.set(row.inv,[]); invMap.get(row.inv).push(row); });
+  items.forEach(row=>{
+    if(!invMap.has(row.inv)) invMap.set(row.inv,[]);
+    invMap.get(row.inv).push(row);
+  });
+  const isTomorrowRow = row => {
+    const invRows = invMap.get(row.inv)||[row];
+    return invRows.every(rr=>csRowShortageQty(rr)===0);
+  };
+  const normalRows = [['전화번호','#{NAME}','#{PRODUCT}','#{OPTION}']];
+  const tomorrowRows = [['전화번호','#{NAME}']];
 
-  const esc = s => '"'+String(s||'').replace(/"/g,'""')+'"';
-  let csv = '전화번호,주문자명,송장번호,상품목록,경과일,알림톡내용\n';
-  const seen = new Set();
-
-  let rowCount = 0;
-  invMap.forEach((invRows, inv)=>{
-    const first = invRows[0];
-    const phone = String(first.phone||first.recPhone||'').trim();
-    // 송장 중복 방지 (전화번호가 있으면 전화번호 기준, 없으면 송장번호 기준)
-    const dedupeKey = phone || ('inv_'+inv);
-    if(seen.has(dedupeKey)) return;
-    seen.add(dedupeKey);
-
-    const name = String(first.name||'').trim();
-    const seqNo4dl = realToSeq[inv] || inv;
-    const shortRowsDl = invRows.filter(r=>(shortage[seqNo4dl+'-'+r.code]||0)>0 || Number(r.shortage||0)>0);
-    const tmplRowsDl = shortRowsDl.length ? shortRowsDl : invRows;
-    const products = tmplRowsDl.map(r=>formatProductWithArrival(r)).join('\n');
-    const elapsed = Number(first.elapsed)||0;
-    const is14k = invRows.some(r=>String(r.is14k||'').trim()==='Y');
-
-    // 템플릿 키 결정 + 메시지 생성
-    let tmplKey;
-    if(is14k){ tmplKey = elapsed>=5?'14k_5':'14k_1'; }
-    else if(elapsed>=10){ tmplKey='d10'; }
-    else if(elapsed>=5){ tmplKey='d5_hi'; }
-    else if(elapsed>=3){ tmplKey='d3_pf'; }
-    else { tmplKey='d1'; }
-
-    let msg = csTemplates[tmplKey]||TMPL_PRESETS[tmplKey]?.text||'';
-    const options = invRows.map(r=>String(r.option||'')).filter(Boolean).join(', ');
-    msg = msg.replace(/#{NAME}/g, name)
-             .replace(/#{PRODUCT}/g, products)
-             .replace(/#{OPTION}/g, options||'—')
-             .replace(/#{SHOPNAME}/g, '핑크로켓');
-
-    csv += `${phone||''},${esc(name)},${esc(seqToReal[inv]||inv)},${esc(products)},${elapsed},${esc(msg)}\n`;
-    rowCount++;
+  items.forEach(row=>{
+    const phone = String(row.phone||row.recPhone||'').trim();
+    const name = String(row.name||row.buyer||row.orderer||'').trim();
+    if(isTomorrowRow(row)){
+      tomorrowRows.push([phone,name]);
+      return;
+    }
+    normalRows.push([
+      phone,
+      name,
+      String(row.product||'').trim(),
+      String(row.option||'').trim()
+    ]);
   });
 
   const now = new Date();
@@ -5090,15 +5078,17 @@ function downloadCSCurrent(){
   const typeLabel = currentCSType==='gold'?'14K':currentCSType==='all'?'전체':'일반';
   const dayLabel = currentCSDay||'전체';
   const statusLabel = currentCSStatus||'처리X';
-  const filename = ds+'_CS_'+typeLabel+'_'+dayLabel+(statusLabel?'_'+statusLabel:'')+'.csv';
+  const filename = ds+'_알림톡_'+typeLabel+'_'+dayLabel+(statusLabel?'_'+statusLabel:'')+'.xlsx';
 
-  const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href=url; a.download=filename;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-  toast('✅ '+filename+' ('+rowCount+'건)');
+  const wb = XLSX.utils.book_new();
+  const wsNormal = XLSX.utils.aoa_to_sheet(normalRows);
+  wsNormal['!cols'] = [{wch:16},{wch:14},{wch:42},{wch:42}];
+  const wsTomorrow = XLSX.utils.aoa_to_sheet(tomorrowRows);
+  wsTomorrow['!cols'] = [{wch:16},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsNormal, '알림톡');
+  XLSX.utils.book_append_sheet(wb, wsTomorrow, '내일출고');
+  XLSX.writeFile(wb, filename, {bookType:'xlsx'});
+  toast('✅ '+filename+' (알림톡 '+(normalRows.length-1)+'건 / 내일출고 '+(tomorrowRows.length-1)+'건)');
 }
 
 // ── 템플릿 탭 자동생성 (모든 타입 한번에 표시) ──
