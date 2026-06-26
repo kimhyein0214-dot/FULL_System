@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v16">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v17">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -2662,15 +2662,15 @@ async function loadData(silent=false,preserveView=false){
       : [];
     (inspData||[]).forEach(row=>{
       const no=invToNo[row.inv_no]; if(!no) return;
-      if(row.p_code==='__done__'){ if(row.passed) inspDone[no]=true; return; }
+      if(row.p_code==='__done__'){ if(row.passed) setInspectionDoneState({no,invNo:row.inv_no},true); return; }
       const order=ORDERS_ALL.find(o=>String(o.no)===String(no));
       const item=findItemByShortageRow(order,row);
       const k=no+'-'+ownCodeKeyForRow(row,item);
       if(row.insp_memo) memoData[k]=row.insp_memo;
     });
-    Object.entries(inspDoneLocalOverrides).forEach(([no,val])=>{
-      if(val) inspDone[no]=true;
-      else delete inspDone[no];
+    Object.entries(inspDoneLocalOverrides).forEach(([key,val])=>{
+      const overrideOrder=inspOrderByNo(key)||{no:invToNo[key]||key,invNo:seqToReal[key]||key};
+      setInspectionDoneState(overrideOrder,!!val);
     });
     // 검품탭 메모 캐시 동기화 (3분 새로고침 후 stale 방지)
     Object.assign(insp_itemMemos, memoData);
@@ -4450,7 +4450,7 @@ function getItemWorkflowState(no, code, opts={}){
 }
 function getOrderWorkflowState(order){
   if(!order||!order.items) return WF_STATUS.NORMAL;
-  if(inspDone[order.no]) return WF_STATUS.INSPECTED;
+  if(isInspectionDone(order)) return WF_STATUS.INSPECTED;
   const states=order.items.filter(it=>!isGold(it)).map(it=>getItemWorkflowState(order.no,it.code));
   if(states.some(s=>s===WF_STATUS.SHORT)) return WF_STATUS.SHORT;
   if(states.some(s=>s===WF_STATUS.REPICKED_READY)) return WF_STATUS.REPICKED_READY;
@@ -5421,6 +5421,38 @@ let inspMemoColW = parseInt(localStorage.getItem('inspMemoColW')||'170');
 let insp_misongCacheReady = false;
 const insp_savingDone = new Set();
 
+function inspOrderByNo(no){
+  const raw=String(no||'').trim();
+  return (insp_filteredList||[]).find(o=>String(o.no)===raw||String(o.invNo||'')===raw)
+    || (ORDERS_ALL||[]).find(o=>String(o.no)===raw||String(o.invNo||'')===raw)
+    || (_misongOrdersCache||[]).find(o=>String(o.no)===raw||String(o.invNo||'')===raw)
+    || null;
+}
+function inspDoneKeyFor(orderOrNo){
+  if(orderOrNo&&typeof orderOrNo==='object'){
+    return String(orderOrNo.invNo||seqToReal[orderOrNo.no]||orderOrNo.no||'').trim();
+  }
+  const raw=String(orderOrNo||'').trim();
+  const order=inspOrderByNo(raw);
+  return String(order?.invNo||seqToReal[raw]||raw).trim();
+}
+function isInspectionDone(orderOrNo){
+  const key=inspDoneKeyFor(orderOrNo);
+  const no=orderOrNo&&typeof orderOrNo==='object'?String(orderOrNo.no||''):String(orderOrNo||'');
+  return !!(inspDone[key]||inspDone[no]);
+}
+function setInspectionDoneState(orderOrNo,val){
+  const key=inspDoneKeyFor(orderOrNo);
+  const no=orderOrNo&&typeof orderOrNo==='object'?String(orderOrNo.no||''):String(orderOrNo||'');
+  if(val){
+    if(key) inspDone[key]=true;
+    if(no) inspDone[no]=true;
+  } else {
+    if(key) delete inspDone[key];
+    if(no) delete inspDone[no];
+  }
+}
+
 function insp_startColResize(e){
   e.preventDefault();
   const handle=e.target;
@@ -5819,7 +5851,7 @@ function insp_getFiltered(){
   if(insp_tabMode==='misong') return insp_buildMisongList();
   if(insp_tabMode==='gold') list = insp_allOrdersForStats().filter(o=>insp_GOLD_NOS.has(o.no)||o.items.some(it=>isGold(it)));
   else if(insp_tabMode==='golditem') list = insp_allOrdersForStats().filter(o=>o.items.some(it=>isGold(it)));
-  else if(insp_tabMode==='undone') list = insp_allOrdersForStats().filter(o=>!inspDone[o.no]);
+  else if(insp_tabMode==='undone') list = insp_allOrdersForStats().filter(o=>!isInspectionDone(o));
   else list = insp_allOrdersForStats();
   if(insp_searchQuery){
     const q = insp_searchQuery;
@@ -5848,9 +5880,8 @@ function insp_renderAll(){
 
 function insp_updateStats(){
   const statOrders=insp_allOrdersForStats();
-  const validNos=new Set(statOrders.map(o=>String(o.no)));
   const tot=statOrders.length;
-  const don=Object.keys(inspDone).filter(k=>inspDone[k]&&validNos.has(String(k))).length;
+  const don=statOrders.filter(o=>isInspectionDone(o)).length;
   const pct=tot?Math.round(don/tot*100):0;
   const el=id=>document.getElementById(id);
   if(el('insp-prog-fill')) el('insp-prog-fill').style.width=pct+'%';
@@ -5869,7 +5900,7 @@ function insp_renderList(){
     return;
   }
   wrap.innerHTML=insp_filteredList.map((o,i)=>{
-    const done=!!inspDone[o.no], isGoldInv=insp_GOLD_NOS.has(o.no), focused=i===insp_focusIdx;
+    const done=isInspectionDone(o), isGoldInv=insp_GOLD_NOS.has(o.no), focused=i===insp_focusIdx;
     const hasMisong=o._isMisong?true:o.items.some(it=>[WF_STATUS.SHORT,WF_STATUS.REPICKED_READY].includes(getItemWorkflowState(o.no,it.code)));
     let label;
     if(insp_tabMode==='golditem'){
@@ -6075,7 +6106,7 @@ function insp_renderDetail(){
       +'<div class="insp-key-hint"><span class="insp-kh"><span class="insp-kbd">빨간 행</span> = 미송 항목 · 입고예정일/상태는 CS탭에서 수정</span></div>';
     return;
   }
-  const done=!!inspDone[order.no], isGoldInv=insp_GOLD_NOS.has(order.no);
+  const done=isInspectionDone(order), isGoldInv=insp_GOLD_NOS.has(order.no);
   const items=insp_tabMode==='golditem'?order.items.filter(it=>isGold(it)):order.items;
   let label;
   if(insp_tabMode==='golditem'){
@@ -6221,24 +6252,26 @@ function insp_saveDrawer(invNo, val){
 
 async function insp_toggleDone(invNo){
   if(insp_tabMode==='misong') return;
-  const invKey=String(invNo);
+  const order=inspOrderByNo(invNo)||{no:invNo,invNo:seqToReal[invNo]||String(invNo)};
+  const invKey=inspDoneKeyFor(order);
   if(insp_savingDone.has(invKey)) return;
   insp_savingDone.add(invKey);
-  const prevDone=!!inspDone[invNo];
+  const prevDone=isInspectionDone(order);
   const nextDone=!prevDone;
   const renderDoneState=()=>{
-    if(insp_tabMode==='undone'&&inspDone[invNo]){
-      const newList=insp_allOrdersForStats().filter(o=>!inspDone[o.no]);
+    if(insp_tabMode==='undone'&&isInspectionDone(order)){
+      const newList=insp_allOrdersForStats().filter(o=>!isInspectionDone(o));
       if(insp_focusIdx>=newList.length) insp_focusIdx=Math.max(0,newList.length-1);
     }
     insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar();
   };
-  inspDone[invNo]=nextDone;
+  setInspectionDoneState(order,nextDone);
   inspDoneLocalOverrides[invKey]=nextDone;
   renderDoneState();
-  const inv_no=seqToReal[invNo]||String(invNo);
+  const inv_no=invKey;
   try{
-    await db.from('inspection').upsert({inv_no,p_code:'__done__',passed:nextDone},{onConflict:'inv_no,p_code'});
+    const {error:doneErr}=await db.from('inspection').upsert({inv_no,p_code:'__done__',passed:nextDone},{onConflict:'inv_no,p_code'});
+    if(doneErr) throw doneErr;
     if(nextDone){
       // 검품완료: '피킹완료' 상태인 shortage → '검품완료' + memo2_val='' (메모 업데이터가 셀피아 메모 클리어)
       await db.from('shortage').update({status:'검품완료', memo2_val:'', updated_at:new Date().toISOString()})
@@ -6271,7 +6304,7 @@ async function insp_toggleDone(invNo){
       toast('↩ 완료 취소');
     }
   }catch(e){
-    inspDone[invNo]=prevDone;
+    setInspectionDoneState(order,prevDone);
     inspDoneLocalOverrides[invKey]=prevDone;
     renderDoneState();
     toast('⚠ 검품 완료 저장 실패: '+(e.message||e));
@@ -6330,10 +6363,9 @@ function insp_renderSidebar(){
   const wrap=document.getElementById('jo-side-list');
   if(!wrap) return;
   const statOrders=insp_allOrdersForStats();
-  const validNos=new Set(statOrders.map(o=>String(o.no)));
   const tot=statOrders.length;
-  const don=Object.keys(inspDone).filter(k=>inspDone[k]&&validNos.has(String(k))).length;
-  const undone=statOrders.filter(o=>!inspDone[o.no]).length;
+  const don=statOrders.filter(o=>isInspectionDone(o)).length;
+  const undone=statOrders.filter(o=>!isInspectionDone(o)).length;
   const gold=ORDERS_ALL.filter(o=>insp_GOLD_NOS.has(o.no)).length;
   const goldItem=ORDERS_ALL.filter(o=>o.items.some(it=>isGold(it))).length;
   const groups=[
