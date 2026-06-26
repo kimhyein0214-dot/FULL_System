@@ -439,6 +439,7 @@
       triggerValue(input, target);
       const before = rowBlob(getGridItem('grid7', 0));
       await runOrderSearch();
+      let changedFallbackLogged = false;
       const hit = await waitFor(() => {
         const rows = getGridRows('grid7');
         if (!rows.length) return false;
@@ -450,7 +451,14 @@
         }
         const firstBlob = rowBlob(rows[0].item);
         if (firstBlob && firstBlob !== before) {
-          addLog('  검색 결과는 바뀌었지만 grid 데이터에서 송장번호를 확인하지 못했습니다.');
+          if (useInvoice) {
+            addLog(`  검색 결과 변경 확인: grid 데이터에 송장번호가 없어 첫 행으로 진행 (${rows.length}행)`);
+            return rows[0];
+          }
+          if (!changedFallbackLogged) {
+            addLog('  검색 결과는 바뀌었지만 grid 데이터에서 검색값을 확인하지 못했습니다.');
+            changedFallbackLogged = true;
+          }
         }
         return false;
       }, CONFIG.searchTimeout);
