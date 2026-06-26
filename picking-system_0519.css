@@ -4811,7 +4811,7 @@ body{
   min-width:0 !important;
   display:flex !important;
   flex-direction:column !important;
-  gap:1px !important;
+  gap:2px !important;
 }
 .slot-line{
   display:flex !important;
@@ -4821,8 +4821,7 @@ body{
   color:#111827 !important;
 }
 .slot-inv,
-.slot-seq,
-.slot-qty{
+.slot-seq{
   font-size:11px !important;
   line-height:1.15 !important;
   font-weight:900 !important;
@@ -4833,18 +4832,40 @@ body{
 }
 .slot-qty{
   color:#0F172A !important;
-  background:#E2E8F0 !important;
-  border-radius:3px !important;
-  padding:1px 4px !important;
+  background:#DBEAFE !important;
+  border:1px solid #93C5FD !important;
+  border-radius:4px !important;
+  padding:1px 5px !important;
+  font-size:12px !important;
+  line-height:1.15 !important;
+  font-weight:950 !important;
+  white-space:nowrap !important;
 }
 .slot-code{
-  font-size:10px !important;
+  min-width:0 !important;
+  max-width:104px !important;
+  font-size:11px !important;
   line-height:1.15 !important;
   font-weight:900 !important;
-  color:#334155 !important;
+  color:#0F172A !important;
+  background:#EFF6FF !important;
+  border:1px solid #BFDBFE !important;
+  border-radius:4px !important;
+  padding:1px 4px !important;
   white-space:nowrap !important;
   overflow:hidden !important;
   text-overflow:ellipsis !important;
+}
+.slot-name{
+  color:#334155 !important;
+  font-size:10px !important;
+  line-height:1.2 !important;
+  font-weight:800 !important;
+  display:-webkit-box !important;
+  -webkit-line-clamp:2 !important;
+  -webkit-box-orient:vertical !important;
+  overflow:hidden !important;
+  word-break:keep-all !important;
 }
 .slot-state{
   justify-self:end !important;
