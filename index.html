@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v11">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v12">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -5439,6 +5439,11 @@ function formatCsvTextCell(value){
   // Excel이 11-78, 1-26 같은 상품코드를 날짜로 자동 변환하지 않도록 텍스트 수식 형태로 내보냅니다.
   return '="'+text.replace(/"/g,'""')+'"';
 }
+function formatLabelProductCode(value){
+  // 라벨 프로그램은 Excel 수식형(="...")을 원문으로 읽지 못하는 경우가 있어
+  // 라벨 CSV에서는 상품코드를 그대로 내보냅니다.
+  return String(value??'').trim();
+}
 function normalizeOptionName(optionName){
   let value=String(optionName||'').trim();
   if(value.includes(':')) value=value.split(':').pop();
@@ -5516,7 +5521,7 @@ function buildLabelCsvRows(rows,options={}){
       expandedRow.label_key=labelKey;
       csvRows.push([
         labelNo,
-        formatCsvTextCell(expandedRow.productCode||''),
+        formatLabelProductCode(expandedRow.productCode||''),
         target.code,
         productName,
         optionName,
@@ -5541,6 +5546,32 @@ function downloadCsv(filename,rows){
   };
   const csv=(rows||[]).map(r=>r.map(esc).join(',')).join('\r\n');
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function encodeUtf16LeWithBom(text){
+  const out=new Uint8Array(2+text.length*2);
+  out[0]=0xFF; out[1]=0xFE;
+  for(let i=0;i<text.length;i++){
+    const code=text.charCodeAt(i);
+    out[2+i*2]=code&0xFF;
+    out[3+i*2]=code>>8;
+  }
+  return out;
+}
+function downloadLabelCsv(filename,rows){
+  const esc=v=>{
+    const s=String(v??'');
+    return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  const csv=(rows||[]).map(r=>r.map(esc).join(',')).join('\r\n');
+  const blob=new Blob([encodeUtf16LeWithBom(csv)],{type:'text/csv;charset=utf-16le;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;
@@ -6322,7 +6353,7 @@ function insp_exportLabelCSV(){
     return;
   }
 
-  downloadCsv(formatLabelCsvFilename(),rows);
+  downloadLabelCsv(formatLabelCsvFilename(),rows);
   savePrintedLabelHistory(result.labelKeys);
   console.log('[label csv] 결과', {
     원본행수:stats.originalRows,
