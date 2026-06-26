@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v2">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3473,10 +3473,11 @@ function slotStatusMeta(state, item){
 
 function renderPickingSlotBoard(orders, trayCtx){
   const slots=[[],[],[],[]];
-  (orders||[]).forEach(order=>{
+  (orders||[]).forEach((order,orderIdx)=>{
+    const joPos=getJoPos(order.no);
+    const slotIdx=joPos ? Math.min(3,Math.max(0,Number(joPos.pos)||0)) : (orderIdx % 4);
     (order.items||[]).forEach((it,idx)=>{
       const seq=idx+1;
-      const slotIdx=Math.min(3,Math.max(0,(Number(seq)||1)-1));
       const state=getItemWorkflowState(order.no,it.code);
       const meta=slotStatusMeta(state,it);
       const displayCode=it.prodCode||it.code||'';
