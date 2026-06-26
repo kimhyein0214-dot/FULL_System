@@ -5072,8 +5072,11 @@ body{
 
 @media (orientation: portrait) and (max-width:1100px), (max-width:900px){
   .deck-content .deck-card-body{
-    display:grid !important;
-    grid-template-columns:1fr !important;
+    display:flex !important;
+    flex-direction:row !important;
+    flex-wrap:nowrap !important;
+    align-items:center !important;
+    justify-content:start !important;
     gap:5px !important;
     width:100% !important;
     max-width:100% !important;
@@ -5083,38 +5086,56 @@ body{
   .deck-content .deck-main,
   .deck-content .deck-actions{
     display:grid !important;
-    width:100% !important;
-    max-width:100% !important;
     min-width:0 !important;
     gap:5px !important;
   }
   .deck-content .deck-main{
-    grid-template-columns:54px minmax(0,1fr) !important;
+    grid-template-columns:54px minmax(112px,1fr) !important;
+    flex:1 1 auto !important;
+    width:auto !important;
+    max-width:none !important;
   }
   .deck-content .deck-actions{
-    grid-template-columns:minmax(116px,128px) minmax(0,1fr) !important;
+    grid-template-columns:78px 118px !important;
+    flex:0 0 201px !important;
+    width:201px !important;
+    max-width:201px !important;
   }
-  .deck-card-body .short-cell,
-  .deck-card-body .pr-drawer-cell{
-    width:100% !important;
+  .deck-card-body .order-cell{
     min-width:0 !important;
-    max-width:none !important;
-    height:58px !important;
+    overflow:hidden !important;
   }
   .deck-card-body .short-cell{
+    width:78px !important;
+    min-width:78px !important;
+    max-width:78px !important;
+    height:56px !important;
+    padding:3px !important;
+  }
+  .deck-card-body .pr-drawer-cell{
+    width:118px !important;
+    min-width:118px !important;
+    max-width:118px !important;
+    height:56px !important;
     padding:4px 5px !important;
   }
+  .deck-card-body .pr-drawer-btn{
+    width:100% !important;
+    min-width:0 !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+  }
   .deck-card-body .short-ctrl-row{
-    height:32px !important;
-    gap:5px !important;
+    height:30px !important;
+    gap:2px !important;
   }
   .deck-card-body .sq-btn{
-    width:32px !important;
-    height:32px !important;
-    font-size:20px !important;
+    width:26px !important;
+    height:30px !important;
+    font-size:19px !important;
   }
   .deck-card-body .sq-val{
-    min-width:22px !important;
-    font-size:20px !important;
+    min-width:16px !important;
+    font-size:19px !important;
   }
 }
