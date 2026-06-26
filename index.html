@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v12">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v13">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -5401,7 +5401,7 @@ function expandLabelNums(info) {
   return nums.join(', ');
 }
 
-const LABEL_CSV_HEADER=['라벨번호','상품코드','자사코드','판매처상품명','판매처옵션명','수량','접수일자','수취인'];
+const LABEL_CSV_HEADER=['라벨번호','상품코드','자사코드','판매처 상품명','판매처 옵션명','수량','접수일자','수취인'];
 const LABEL_WEEKDAYS=['일','월','화','수','목','금','토'];
 function createLabelExportStats(){
   return {

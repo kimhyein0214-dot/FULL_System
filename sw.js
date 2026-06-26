@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0626-pick-panel-v12';
+const CACHE_NAME = 'picking-system-0626-pick-panel-v13';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0626-pick-panel-v12',
+  './picking-system_0519.css?v=0626-pick-panel-v13',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
