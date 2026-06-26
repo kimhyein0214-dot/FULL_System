@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v4">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v6">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3491,22 +3491,26 @@ function renderPickingSlotBoard(orders, trayCtx){
   const panels=slots.map((rows,idx)=>{
     const doneCnt=rows.filter(r=>['picked','ready'].includes(r.meta.cls)).length;
     const shortCnt=rows.filter(r=>r.meta.cls==='short').length;
-    const visibleRows=rows.filter(r=>!['picked','ready'].includes(r.meta.cls));
+    const visibleRows=rows;
     const slotNo=idx+1;
     const body=visibleRows.length?visibleRows.map(r=>{
       const shortageVal=Number(shortage[r.order.no+'-'+r.it.code]||0);
       const codeId=escId(r.displayCode||r.it.code||'');
       const itemTitle=itemNameWithOption(r.it);
       const title=esc(`${workNoText(r.order.no)} ${buyerLabel(r.order.buyer,r.order.recv)} ${r.displayCode} ${itemTitle}`);
+      const checkedLike=['picked','ready'].includes(r.meta.cls);
+      const canToggle=['todo','picked'].includes(r.meta.cls);
+      const checkHtml=canToggle
+        ? `<button class="slot-check${checkedLike?' is-checked':''}" onclick="event.stopPropagation();tog(${Number(r.order.no)},'${esc(r.it.code)}')" title="${checkedLike?'피킹 완료 해제':'피킹 완료 체크'}"></button>`
+        : `<button class="slot-check${checkedLike?' is-checked':''} is-disabled ${r.meta.cls}" onclick="event.stopPropagation()" title="${r.meta.label}"></button>`;
       return `<div class="slot-hit ${r.meta.cls}${Number(currentPopupNo)===Number(r.order.no)?' selected':''}" data-inv="${r.order.no}" title="${title}" onclick="selectInv(${Number(r.order.no)});scrollToCode('${codeId}')">`
-        +`<div class="slot-lamp"></div>`
+        +checkHtml
         +`<div class="slot-main">`
           +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'코드없음')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
-          +`<div class="slot-name">${esc(itemTitle||'상품명 없음')}</div>`
         +`</div>`
         +`<div class="slot-state">${r.meta.label}${shortageVal?` ${shortageVal}`:''}</div>`
       +`</div>`;
-    }).join(''):`<div class="slot-empty">${rows.length?'피킹 완료':'상품 없음'}</div>`;
+    }).join(''):`<div class="slot-empty">상품 없음</div>`;
     return `<section class="slot-panel slot-panel-${slotNo}">`
       +`<div class="slot-head"><span>${slotNo}번 슬롯</span><strong>${doneCnt}/${rows.length}</strong>${shortCnt?`<em>미송 ${shortCnt}</em>`:''}</div>`
       +`<div class="slot-list">${body}</div>`
