@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v19">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v20">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -5499,10 +5499,13 @@ function insp_saveMemo(invNo,code,val){
   clearTimeout(insp_memoSaveTimer[k]);
   insp_memoSaveTimer[k]=setTimeout(()=>{
     const inv_no=seqToReal[invNo]||String(invNo);
+    const seq_no=realToSeq[inv_no]||String(invNo);
+    const order=ORDERS_ALL.find(o=>String(o.no)===String(seq_no)||String(o.invNo||'')===String(inv_no));
+    const ord_no=order?.ordNo||order?.ord_no||noMap[seq_no]?.ord_no||noMap[invNo]?.ord_no||inv_no;
     const item_no=String(code||'').trim();
     if(!item_no) return;
     db.from('inspection').upsert(
-      {inv_no,item_no,p_code:code,insp_memo:val||'',memo_updated_at:new Date().toISOString()},
+      {inv_no,ord_no,item_no,p_code:code,insp_memo:val||'',memo_updated_at:new Date().toISOString()},
       {onConflict:'inv_no,p_code'}
     ).then(({error})=>{ if(error) throw error; })
      .catch(e=>console.warn('메모 저장 실패',e));
@@ -6272,8 +6275,9 @@ async function insp_toggleDone(invNo){
   inspDoneLocalOverrides[invKey]=nextDone;
   renderDoneState();
   const inv_no=invKey;
+  const ord_no=order?.ordNo||order?.ord_no||noMap[order?.no]?.ord_no||noMap[realToSeq[inv_no]]?.ord_no||inv_no;
   try{
-    const {error:doneErr}=await db.from('inspection').upsert({inv_no,item_no:'__done__',p_code:'__done__',passed:nextDone},{onConflict:'inv_no,p_code'});
+    const {error:doneErr}=await db.from('inspection').upsert({inv_no,ord_no,item_no:'__done__',p_code:'__done__',passed:nextDone},{onConflict:'inv_no,p_code'});
     if(doneErr) throw doneErr;
     if(nextDone){
       // 검품완료: '피킹완료' 상태인 shortage → '검품완료' + memo2_val='' (메모 업데이터가 셀피아 메모 클리어)
