@@ -4893,6 +4893,17 @@ body{
   font-weight:950 !important;
   white-space:nowrap !important;
 }
+.slot-gift{
+  color:#B42318 !important;
+  background:#FEE4E2 !important;
+  border:1px solid #F97066 !important;
+  border-radius:4px !important;
+  padding:1px 4px !important;
+  font-size:10px !important;
+  line-height:1.1 !important;
+  font-weight:950 !important;
+  white-space:nowrap !important;
+}
 .slot-code{
   min-width:0 !important;
   max-width:none !important;
@@ -5056,5 +5067,54 @@ body{
   .slot-hit{
     min-height:40px !important;
     padding:4px !important;
+  }
+}
+
+@media (orientation: portrait) and (max-width:1100px), (max-width:900px){
+  .deck-content .deck-card-body{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:5px !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    padding:0 !important;
+  }
+  .deck-content .deck-main,
+  .deck-content .deck-actions{
+    display:grid !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    gap:5px !important;
+  }
+  .deck-content .deck-main{
+    grid-template-columns:54px minmax(0,1fr) !important;
+  }
+  .deck-content .deck-actions{
+    grid-template-columns:minmax(116px,128px) minmax(0,1fr) !important;
+  }
+  .deck-card-body .short-cell,
+  .deck-card-body .pr-drawer-cell{
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    height:58px !important;
+  }
+  .deck-card-body .short-cell{
+    padding:4px 5px !important;
+  }
+  .deck-card-body .short-ctrl-row{
+    height:32px !important;
+    gap:5px !important;
+  }
+  .deck-card-body .sq-btn{
+    width:32px !important;
+    height:32px !important;
+    font-size:20px !important;
+  }
+  .deck-card-body .sq-val{
+    min-width:22px !important;
+    font-size:20px !important;
   }
 }

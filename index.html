@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v8">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v9">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3223,7 +3223,6 @@ function renderLeft(){
 
   const joGoldNos=new Set(GOLD_ORDERS.map(o=>o.no));
   const sourceOrders=(viewGlobal && viewMode!=='all') ? ORDERS_ALL : jo;
-  const orderByNo=new Map(sourceOrders.map(o=>[Number(o.no),o]));
   const multi=buildMultiMap(jo);
   let flat=[];
   sourceOrders.forEach(o=>o.items.forEach((it,idx2)=>{
@@ -3295,8 +3294,8 @@ function renderLeft(){
 
     const drVal=drawer[f.no]||'';
     const _photoUrl=productImageUrlForItem(f);
-    const _giftBadge=inspGiftCheckBadge(orderByNo.get(Number(f.no)));
-    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
+    const _slotKey=escId(`${f.no}_${f.itemNo||f.seq||f.code}`);
+    listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${currentSlotItemKey===_slotKey?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-slot-key="${_slotKey}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
         <div class="pr-photo-wrap">${renderPhotoBox(f.code,_photoUrl,'pick',f.sellpiaCode||f.code,[f.sellpiaCode,f.prodCode,f.resolvedOwnCode,_pcode])}</div>
@@ -3305,7 +3304,7 @@ function renderLeft(){
         <div class="deck-card-head">
           <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${_displayPcode?(f.nal?'<span class="nal-badge">낱</span> ':'')+(f.goldItem?'🥇 ':'')+_displayPcode:''}</span>${optionText?`<span class="deck-card-option">${optionHtml(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
           <div class="deck-card-name">${esc(itemNameOnly(f))}</div>
-          <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}${_giftBadge}</div>
+          <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
         </div>
         <div class="deck-card-body">
           <div class="deck-main">
@@ -3392,7 +3391,8 @@ function handleDeckCardClick(e,no,card){
   if(e?.target?.closest?.('.pr-memo-cell,.short-cell,input,textarea,select')) return;
   const sc=card.closest('.deck-scroll');
   if(sc?._deckIgnoreClick) return;
-  selectInv(no);
+  currentSlotItemKey=String(card.dataset.slotKey||'');
+  selectInv(no,{keepSlotSelection:true});
   if(sc){
     updateDeckFocus(sc);
   }
@@ -3504,14 +3504,15 @@ function renderPickingSlotBoard(orders, trayCtx){
     const slotNo=idx+1;
     const headerOrder=rows[0]?.order;
     const headerLabel=headerOrder
-      ? `${workNoHtml(headerOrder.no,'sm')} <span class="slot-head-buyer">${esc(buyerLabel(headerOrder.buyer,headerOrder.recv))}</span>`
+      ? `<span class="work-no sm">${shortWorkNoText(headerOrder.no)}</span> <span class="slot-head-buyer">${esc(buyerLabel(headerOrder.buyer,headerOrder.recv))}</span>`
       : `${slotNo}번`;
     const body=visibleRows.length?visibleRows.map(r=>{
       const shortageVal=Number(shortage[r.order.no+'-'+r.it.code]||0);
       const codeId=escId(r.displayCode||r.it.code||'');
-      const slotKey=escId(`${r.order.no}_${r.it.code||r.seq}`);
+      const slotKey=escId(`${r.order.no}_${r.it.itemNo||r.seq||r.it.code}`);
       const itemTitle=itemNameWithOption(r.it);
       const title=esc(`${workNoText(r.order.no)} ${buyerLabel(r.order.buyer,r.order.recv)} ${r.displayCode} ${itemTitle}`);
+      const giftMini=inspGiftCheckBadge(r.order)?'<span class="slot-gift">사은품!!</span>':'';
       const checkedLike=['picked','ready'].includes(r.meta.cls);
       const canToggle=['todo','picked'].includes(r.meta.cls);
       const checkHtml=canToggle
@@ -3520,7 +3521,7 @@ function renderPickingSlotBoard(orders, trayCtx){
       return `<div class="slot-hit ${r.meta.cls}${currentSlotItemKey===slotKey?' selected':''}" data-inv="${r.order.no}" data-slot-key="${slotKey}" title="${title}" onclick="selectSlotItem(${Number(r.order.no)},'${slotKey}','${codeId}')">`
         +checkHtml
         +`<div class="slot-main">`
-          +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
+          +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span>${giftMini}</div>`
         +`</div>`
         +`<div class="slot-state">${r.meta.label}${shortageVal?` ${shortageVal}`:''}</div>`
       +`</div>`;
@@ -3551,7 +3552,7 @@ function selectInv(no,opts={}){
     c.classList.toggle('selected', !!currentSlotItemKey&&c.dataset.slotKey===currentSlotItemKey);
   });
   document.querySelectorAll('.pick-row[data-inv]').forEach(row=>{
-    row.classList.toggle('is-selected', Number(row.dataset.inv)===no);
+    row.classList.toggle('is-selected', !!currentSlotItemKey&&row.dataset.slotKey===currentSlotItemKey);
   });
   renderRightDetail(no);
 }
