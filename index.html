@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v14">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v15">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -4500,10 +4500,15 @@ async function loadMisongData(showToast=false){
       const dateVal = getShortageBaseDate(r,seqNo);
       const buyerName = order?.buyer || r.orderer || '';
       const fullName  = item?.name || r.p_name || '';
-      // p_name 형식: "상품명 / 옵션명[코드]" → product/option 분리
-      const slashIdx  = fullName.indexOf(' / ');
-      const productPart = slashIdx>=0 ? fullName.slice(0,slashIdx).trim() : fullName;
-      const optionPart  = slashIdx>=0 ? fullName.slice(slashIdx+3).trim() : '';
+      let productPart = item ? itemNameOnly(item) : String(r.p_name||'').trim();
+      let optionPart  = item ? itemOptionOnly(item) : String(r.p_option||r.seller_option_name||'').trim();
+      if(!optionPart&&fullName.indexOf(' / ')>=0){
+        const nameParts = fullName.split(' / ');
+        productPart = nameParts.shift().trim();
+        optionPart = nameParts.join(' / ').trim();
+      } else if(optionPart&&productPart.endsWith(' / '+optionPart)){
+        productPart = productPart.slice(0,-(' / '+optionPart).length).trim();
+      }
       return {
         inv: r.inv_no,
         ordNo: r.ord_no||'',
@@ -4525,7 +4530,10 @@ async function loadMisongData(showToast=false){
         buyer: buyerName,
         orderer: buyerName,
         name: buyerName,
-        phone: order?.phone||'',
+        phone: order?.phone||order?.receiverMobile||order?.receiverTel||'',
+        recPhone: order?.receiverMobile||order?.receiverTel||'',
+        receiverMobile: order?.receiverMobile||'',
+        receiverTel: order?.receiverTel||'',
         elapsed: 0,
         done: (normalizeCSStatus(r.status)==='발송완료')?'✓':'',
         regDate: dateVal,
@@ -5059,7 +5067,7 @@ function downloadCSCurrent(){
   const tomorrowRows = [['전화번호','#{NAME}']];
 
   items.forEach(row=>{
-    const phone = String(row.phone||row.recPhone||'').trim();
+    const phone = String(row.phone||row.recPhone||row.receiverMobile||row.receiverTel||'').trim();
     const name = String(row.name||row.buyer||row.orderer||'').trim();
     if(isTomorrowRow(row)){
       tomorrowRows.push([phone,name]);
@@ -5069,7 +5077,7 @@ function downloadCSCurrent(){
       phone,
       name,
       String(row.product||'').trim(),
-      String(row.option||'').trim()
+      String(row.option||row.seller_option_name||row.p_option||'').trim()
     ]);
   });
 
