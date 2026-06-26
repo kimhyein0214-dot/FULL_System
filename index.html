@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0625-storage-upload-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3449,65 +3449,85 @@ function getBottomTrayContext(){
   const currentJo=jos[curJo]||[];
   if(viewGlobal&&viewMode==='short'){
     const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT));
-    return {orders,label:'📦 미송 주문서',empty:'미송 주문서가 없습니다'};
+    return {orders,label:'🟩 미송 현황',empty:'미송 상품이 없습니다'};
   }
   if(viewGlobal&&viewMode==='hold'){
     const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.HOLD));
-    return {orders,label:'📦 보류 주문서',empty:'보류 주문서가 없습니다'};
+    return {orders,label:'🟩 보류 현황',empty:'보류 상품이 없습니다'};
   }
   if(viewGlobal&&viewMode==='nodrawer'){
     const orders=ORDERS_ALL.filter(o=>o.items.some(it=>!isGold(it)&&getItemWorkflowState(o.no,it.code)===WF_STATUS.SHORT)&&!String(drawer[o.no]||'').trim());
-    return {orders,label:'📦 서랍없는 주문서',empty:'서랍번호 미입력 주문서가 없습니다'};
+    return {orders,label:'🟩 서랍 현황',empty:'서랍번호 미입력 상품이 없습니다'};
   }
-  return {orders:currentJo,label:zoneSortMode?'📦 종별 주문서':'📦 조별 주문서',empty:'주문서가 없습니다'};
+  return {orders:currentJo,label:'🟩 피킹 현황',empty:'표시할 상품이 없습니다'};
+}
+
+function slotStatusMeta(state, item){
+  if(isGold(item)) return {cls:'gold',label:'골드'};
+  if(state===WF_STATUS.SHORT) return {cls:'short',label:'미송'};
+  if(state===WF_STATUS.HOLD) return {cls:'hold',label:'보류'};
+  if(state===WF_STATUS.REPICKED_READY) return {cls:'ready',label:'미송완료'};
+  if(state===WF_STATUS.PICKED||state===WF_STATUS.INSPECTED) return {cls:'picked',label:'완료'};
+  return {cls:'todo',label:'대기'};
+}
+
+function renderPickingSlotBoard(orders, trayCtx){
+  const slots=[[],[],[],[]];
+  (orders||[]).forEach(order=>{
+    (order.items||[]).forEach((it,idx)=>{
+      const seq=idx+1;
+      const slotIdx=Math.min(3,Math.max(0,(Number(seq)||1)-1));
+      const state=getItemWorkflowState(order.no,it.code);
+      const meta=slotStatusMeta(state,it);
+      const displayCode=it.prodCode||it.code||'';
+      slots[slotIdx].push({order,it,seq,state,meta,displayCode});
+    });
+  });
+
+  const total=slots.reduce((sum,rows)=>sum+rows.length,0);
+  if(!total) return `<div class="tray-empty">${trayCtx.empty}</div>`;
+
+  const panels=slots.map((rows,idx)=>{
+    const doneCnt=rows.filter(r=>['picked','ready'].includes(r.meta.cls)).length;
+    const shortCnt=rows.filter(r=>r.meta.cls==='short').length;
+    const slotNo=idx+1;
+    const body=rows.length?rows.map(r=>{
+      const shortageVal=Number(shortage[r.order.no+'-'+r.it.code]||0);
+      const codeId=escId(r.displayCode||r.it.code||'');
+      const realInv=displayInvoiceNo(r.order.no);
+      const title=esc(`${workNoText(r.order.no)} ${buyerLabel(r.order.buyer,r.order.recv)} ${r.displayCode} ${itemNameWithOption(r.it)}`);
+      return `<div class="slot-hit ${r.meta.cls}${Number(currentPopupNo)===Number(r.order.no)?' selected':''}" data-inv="${r.order.no}" title="${title}" onclick="selectInv(${Number(r.order.no)});scrollToCode('${codeId}')">`
+        +`<div class="slot-lamp"></div>`
+        +`<div class="slot-main">`
+          +`<div class="slot-line"><span class="slot-inv">${workNoHtml(r.order.no,'sm')}</span><span class="slot-seq">${r.seq}번</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
+          +`<div class="slot-code">${esc(r.displayCode||'코드없음')}</div>`
+        +`</div>`
+        +`<div class="slot-state">${r.meta.label}${shortageVal?` ${shortageVal}`:''}</div>`
+        +`${realInv?`<div class="slot-real">송장 ${esc(realInv)}</div>`:''}`
+      +`</div>`;
+    }).join(''):`<div class="slot-empty">상품 없음</div>`;
+    return `<section class="slot-panel slot-panel-${slotNo}">`
+      +`<div class="slot-head"><span>${slotNo}번 슬롯</span><strong>${doneCnt}/${rows.length}</strong>${shortCnt?`<em>미송 ${shortCnt}</em>`:''}</div>`
+      +`<div class="slot-list">${body}</div>`
+    +`</section>`;
+  }).join('');
+  return `<div class="slot-board">${panels}</div>`;
 }
 
 function renderRight(){
   if(!jos.length) return;
   const trayCtx=getBottomTrayContext();
-  const jo=trayCtx.orders||[];
-  const goldNos=new Set(GOLD_ORDERS.map(o=>o.no));
-  const multi=buildMultiMap(jo);
-
-  const cells=[];
-  for(let i=0;i<jo.length;i++){
-    const order=jo[i];
-    if(!order) continue;
-    const gInv=goldNos.has(order.no);
-    const regItems=order.items.filter(it=>!isGold(it));
-    const doneCnt=regItems.filter(it=>[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(getItemWorkflowState(order.no,it.code))).length;
-    const allDone=regItems.length>0&&doneCnt===regItems.length;
-    const hasShort=order.items.some(it=>getItemWorkflowState(order.no,it.code)===WF_STATUS.SHORT);
-    const hasHold=order.items.some(it=>getItemWorkflowState(order.no,it.code)===WF_STATUS.HOLD);
-    const drVal=drawer[order.no]||'';
-    
-    const hcls=gInv?'gold':allDone?'done':hasShort?'short':hasHold?'hold':'def';
-    const statColor=gInv?'var(--gold)':allDone?'var(--green)':hasShort?'var(--red)':hasHold?'#E65100':'var(--muted)';
-    const statTxt=gInv?'🥇':allDone?'✅ 완료':hasShort?'⚠ 미송':hasHold?'⏸ 보류':doneCnt+'/'+regItems.length;
-    const sortBadges=`<span class="ic-kind">${order.itemKindCount||new Set(order.items.map(it=>it.prodCode||it.code)).size}종</span><span class="ic-kind qty">${order.totalItemQty||order.items.reduce((s,it)=>s+(Number(it.qty)||1),0)}개</span>${gInv?'<span class="ic-gold-badge">골드 포함</span>':''}`;
-
-    const items=order.items.map(it=>{
-      const c=multi[it.code]||{b:'#B0BEC5'};
-      const itemState=getItemWorkflowState(order.no,it.code);
-      const done=[WF_STATUS.PICKED,WF_STATUS.INSPECTED].includes(itemState), sh=itemState===WF_STATUS.SHORT, isHold=itemState===WF_STATUS.HOLD, gItem=isGold(it), inGInv=gInv&&!gItem;
-      const dotColor=gItem?'#D4A800':inGInv?'rgba(200,168,75,0.5)':done?'#0E7A4A':isHold?'#FFB74D':sh?'#E57373':c.b;
-      const itemTitle=itemNameWithOption(it);
-      return `<div class="ic-item"><div class="ic-dot" style="background:${dotColor}"></div><div class="ic-item-code" style="color:${done?'var(--green)':isHold?'#FFB74D':gItem?'var(--gold)':'var(--text)'}"><div>${it.prodCode||it.code}${inGInv?'<span style="font-size:8px;color:rgba(200,168,75,0.8);margin-left:2px;">골드</span>':''}</div><div style="font-size:9px;font-weight:600;color:var(--muted);line-height:1.25;margin-top:1px;">${esc(itemTitle)}</div></div><span class="ic-item-qty">${it.qty}개</span>${renderLocationBadge(it.location)}${sh?`<span class="ic-item-short">부족 ${shortage[order.no+'-'+it.code]}</span>`:''}</div>`;
-    }).join('');
-
-    const realInv=displayInvoiceNo(order.no);
-    cells.push(`<div class="inv-card${allDone?' done':''}${hasShort?' has-short':''}${gInv?' is-gold':''}${hasHold?' is-hold':''}" data-inv="${order.no}" onclick="selectInv(${order.no})"><div class="ic-hdr ${hcls}"><div class="ic-no" style="color:${hasShort?'var(--red)':allDone?'var(--green)':hasHold?'#E65100':'var(--text)'}">${workNoHtml(order.no,'sm')}</div><div class="ic-buyer">${buyerLabel(order.buyer,order.recv)}${chBadge(order.no)}</div><div class="ic-stat" style="color:${statColor}">${statTxt}</div></div><div class="ic-meta">${sortBadges}</div><div class="ic-body">${items}</div><div class="ic-foot" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch;gap:3px;"><div style="display:flex;align-items:center;gap:8px;"><span class="ic-dr-lbl">서랍</span><button class="ic-dr-btn${drVal?' has-val':''}" onclick="openKeypad(${order.no},'${esc(drVal)}',this)">${drVal?drVal:'입력'}</button></div>${realInv?`<div style="font-size:9px;color:var(--muted);padding-left:22px;letter-spacing:0;line-height:1.2;">송장 ${esc(realInv)}</div>`:''}</div></div>`);
-  }
   const btLbl=document.getElementById('bt-lbl');
   if(btLbl) btLbl.textContent=trayCtx.label;
-  document.getElementById('jo-scroll').innerHTML=cells.length
-    ? `<div class="inv-grid">${cells.join('')}</div>`
-    : `<div class="tray-empty">${trayCtx.empty}</div>`;
+  document.getElementById('jo-scroll').innerHTML=renderPickingSlotBoard(trayCtx.orders||[],trayCtx);
 }
 
 function selectInv(no){
   no=Number(no); currentPopupNo=no;
   document.querySelectorAll('.inv-card').forEach(c=>{
+    c.classList.toggle('selected', Number(c.dataset.inv)===no);
+  });
+  document.querySelectorAll('.slot-hit[data-inv]').forEach(c=>{
     c.classList.toggle('selected', Number(c.dataset.inv)===no);
   });
   document.querySelectorAll('.pick-row[data-inv]').forEach(row=>{
