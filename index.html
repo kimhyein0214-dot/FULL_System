@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-slot-status-v7">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v8">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1771,6 +1771,7 @@ try{
 
 let colors={},ci=0, curJo=0, viewMode='all', viewGlobal=false;
 let currentPopupNo=null;
+let currentSlotItemKey='';
 let manualJo={};
 try{localStorage.removeItem('pickingManualJo');}catch(e){}
 
@@ -3222,6 +3223,7 @@ function renderLeft(){
 
   const joGoldNos=new Set(GOLD_ORDERS.map(o=>o.no));
   const sourceOrders=(viewGlobal && viewMode!=='all') ? ORDERS_ALL : jo;
+  const orderByNo=new Map(sourceOrders.map(o=>[Number(o.no),o]));
   const multi=buildMultiMap(jo);
   let flat=[];
   sourceOrders.forEach(o=>o.items.forEach((it,idx2)=>{
@@ -3293,6 +3295,7 @@ function renderLeft(){
 
     const drVal=drawer[f.no]||'';
     const _photoUrl=productImageUrlForItem(f);
+    const _giftBadge=inspGiftCheckBadge(orderByNo.get(Number(f.no)));
     listHtml+=`<div${_anchorAttr} class="pick-row pick-deck-card${Number(currentPopupNo)===Number(f.no)?' is-selected':''}${done?' done':''}${sh?' has-short':''}${goldDimmed?' is-gold':''}${isHold?' is-hold':''}${f.inGoldInv?' in-gold-inv':''}${f.sameProductClass||''}" data-code="${_codeId}" data-inv="${f.no}" data-k="${f.no}-${esc(f.code)}" onclick="handleDeckCardClick(event,${f.no},this)">
       <div class="deck-photo-rail">
         <div class="pr-check" ${goldDimmed||isHold?'':`onclick="event.stopPropagation();tog(${f.no},'${esc(f.code)}')"`}><div class="pr-circle">${goldDimmed?'G':isHold?'H':done?'&#10003;':''}</div></div>
@@ -3302,7 +3305,7 @@ function renderLeft(){
         <div class="deck-card-head">
           <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${_displayPcode?(f.nal?'<span class="nal-badge">낱</span> ':'')+(f.goldItem?'🥇 ':'')+_displayPcode:''}</span>${optionText?`<span class="deck-card-option">${optionHtml(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
           <div class="deck-card-name">${esc(itemNameOnly(f))}</div>
-          <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
+          <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}${_giftBadge}</div>
         </div>
         <div class="deck-card-body">
           <div class="deck-main">
@@ -3499,9 +3502,14 @@ function renderPickingSlotBoard(orders, trayCtx){
     const shortCnt=rows.filter(r=>r.meta.cls==='short').length;
     const visibleRows=rows;
     const slotNo=idx+1;
+    const headerOrder=rows[0]?.order;
+    const headerLabel=headerOrder
+      ? `${workNoHtml(headerOrder.no,'sm')} <span class="slot-head-buyer">${esc(buyerLabel(headerOrder.buyer,headerOrder.recv))}</span>`
+      : `${slotNo}번`;
     const body=visibleRows.length?visibleRows.map(r=>{
       const shortageVal=Number(shortage[r.order.no+'-'+r.it.code]||0);
       const codeId=escId(r.displayCode||r.it.code||'');
+      const slotKey=escId(`${r.order.no}_${r.it.code||r.seq}`);
       const itemTitle=itemNameWithOption(r.it);
       const title=esc(`${workNoText(r.order.no)} ${buyerLabel(r.order.buyer,r.order.recv)} ${r.displayCode} ${itemTitle}`);
       const checkedLike=['picked','ready'].includes(r.meta.cls);
@@ -3509,7 +3517,7 @@ function renderPickingSlotBoard(orders, trayCtx){
       const checkHtml=canToggle
         ? `<button class="slot-check${checkedLike?' is-checked':''}" onclick="event.stopPropagation();tog(${Number(r.order.no)},'${esc(r.it.code)}')" title="${checkedLike?'피킹 완료 해제':'피킹 완료 체크'}"></button>`
         : `<button class="slot-check${checkedLike?' is-checked':''} is-disabled ${r.meta.cls}" onclick="event.stopPropagation()" title="${r.meta.label}"></button>`;
-      return `<div class="slot-hit ${r.meta.cls}${Number(currentPopupNo)===Number(r.order.no)?' selected':''}" data-inv="${r.order.no}" title="${title}" onclick="selectInv(${Number(r.order.no)});scrollToCode('${codeId}')">`
+      return `<div class="slot-hit ${r.meta.cls}${currentSlotItemKey===slotKey?' selected':''}" data-inv="${r.order.no}" data-slot-key="${slotKey}" title="${title}" onclick="selectSlotItem(${Number(r.order.no)},'${slotKey}','${codeId}')">`
         +checkHtml
         +`<div class="slot-main">`
           +`<div class="slot-line"><span class="slot-code">${esc(r.displayCode||'')}</span><span class="slot-qty">${Number(r.it.qty)||1}개</span></div>`
@@ -3518,7 +3526,7 @@ function renderPickingSlotBoard(orders, trayCtx){
       +`</div>`;
     }).join(''):`<div class="slot-empty">상품 없음</div>`;
     return `<section class="slot-panel slot-panel-${slotNo}">`
-      +`<div class="slot-head"><span>${slotNo}번 슬롯</span><strong>${doneCnt}/${rows.length}</strong>${shortCnt?`<em>미송 ${shortCnt}</em>`:''}</div>`
+      +`<div class="slot-head"><span>${headerLabel}</span><strong>${doneCnt}/${rows.length}</strong>${shortCnt?`<em>미송 ${shortCnt}</em>`:''}</div>`
       +`<div class="slot-list">${body}</div>`
     +`</section>`;
   }).join('');
@@ -3533,18 +3541,25 @@ function renderRight(){
   document.getElementById('jo-scroll').innerHTML=renderPickingSlotBoard(trayCtx.orders||[],trayCtx);
 }
 
-function selectInv(no){
+function selectInv(no,opts={}){
   no=Number(no); currentPopupNo=no;
+  if(!opts.keepSlotSelection) currentSlotItemKey='';
   document.querySelectorAll('.inv-card').forEach(c=>{
     c.classList.toggle('selected', Number(c.dataset.inv)===no);
   });
-  document.querySelectorAll('.slot-hit[data-inv]').forEach(c=>{
-    c.classList.toggle('selected', Number(c.dataset.inv)===no);
+  document.querySelectorAll('.slot-hit[data-slot-key]').forEach(c=>{
+    c.classList.toggle('selected', !!currentSlotItemKey&&c.dataset.slotKey===currentSlotItemKey);
   });
   document.querySelectorAll('.pick-row[data-inv]').forEach(row=>{
     row.classList.toggle('is-selected', Number(row.dataset.inv)===no);
   });
   renderRightDetail(no);
+}
+
+function selectSlotItem(no,slotKey,codeId){
+  currentSlotItemKey=String(slotKey||'');
+  selectInv(no,{keepSlotSelection:true});
+  if(codeId) scrollToCode(codeId);
 }
 
 function openPopup(no){

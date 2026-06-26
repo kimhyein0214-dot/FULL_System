@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0626-slot-status-v7';
+const CACHE_NAME = 'picking-system-0626-pick-panel-v8';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0626-slot-status-v7',
+  './picking-system_0519.css?v=0626-pick-panel-v8',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
