@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v15">
+<link rel="stylesheet" href="picking-system_0519.css?v=0626-pick-panel-v16">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -477,11 +477,13 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .cs-item.st-partial{border-left:4px solid #FF9800;}
 .cs-item.st-wait{border-left:4px solid var(--hold);background:rgba(184,122,58,0.04);}
 .cs-item.st-done{opacity:0.5;border-left:4px solid #00CC66;background:#F0FDF7;}
-.cs-item-top{display:grid;grid-template-columns:90px 100px 1fr 80px auto auto;align-items:center;gap:4px;padding:8px 12px;background:var(--surface);border-bottom:1.5px solid var(--border);cursor:pointer;}
+.cs-item-top{display:grid;grid-template-columns:28px 90px 100px 1fr 80px auto auto;align-items:center;gap:4px;padding:8px 12px;background:var(--surface);border-bottom:1.5px solid var(--border);cursor:pointer;}
+.cs-select-check{width:20px;height:20px;border:2px solid #B1C7DE;border-radius:4px;background:#fff;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:900;cursor:pointer;}
+.cs-select-check.checked{background:#2F80ED;border-color:#2F80ED;}
 .cs-item-name{font-size:12px;font-weight:900;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cs-item-phone{font-size:11px;color:var(--muted);background:var(--card);border-radius:5px;padding:2px 7px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cs-item-day{font-size:10px;font-weight:800;color:#C0392B;background:#FDECEA;border-radius:4px;padding:2px 6px;flex-shrink:0;text-align:center;white-space:nowrap;}
-.cs-tbl-hdr{display:grid;grid-template-columns:90px 100px 1fr 80px auto auto;gap:4px;padding:8px 12px;background:#000000;font-size:11px;font-weight:700;color:#fff;position:sticky;top:0;z-index:1;border-radius:8px 8px 0 0;}
+.cs-tbl-hdr{display:grid;grid-template-columns:28px 90px 100px 1fr 80px auto auto;gap:4px;padding:8px 12px;background:#000000;font-size:11px;font-weight:700;color:#fff;position:sticky;top:0;z-index:1;border-radius:8px 8px 0 0;}
 .cs-tbl-hdr span{white-space:nowrap;}
 /* 배지들 */
 .cs-14k{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:900;background:#FFF8E1;color:#B8860B;border:1px solid #E8D080;flex-shrink:0;}
@@ -1115,6 +1117,8 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
         </div>
         <div class="cs-list-footer">
           <span class="cs-list-footer-cnt" id="cs-footer-cnt">0명</span>
+          <button class="cs-dl-main" id="cs-selected-done-btn" onclick="completeSelectedCS()" disabled style="background:#1A6B3A;margin-left:6px;">✓ 선택 완료</button>
+          <button class="cs-dl-main" id="cs-selected-clean-btn" onclick="cleanSelectedCSDone()" disabled style="background:#4A1A1A;margin-left:6px;">🗑 선택 정리</button>
           <button class="cs-dl-main" id="cs-dl-btn" onclick="downloadCSCurrent()" disabled>📥 엑셀 다운로드</button>
           <button class="cs-dl-main" id="cs-done-clean-btn" onclick="cleanMisongDone()" style="background:#4A1A1A;margin-left:6px;">🗑 처리완료 정리</button>
         </div>
@@ -1746,6 +1750,7 @@ try{const cm=localStorage.getItem('csMemoData');if(cm)csMemoData=JSON.parse(cm);
 let currentCSType='normal';  // normal | gold
 let currentCSDay='전체';        // 항상 전체 (일차 탭 제거)
 let currentCSStatus='';         // '' (처리X) | 부분발송 | 발송대기 | 발송완료 | 전체
+let csSelectedInvs = new Set(); // CS 송장 단위 일괄 처리 선택
 let csTemplates={};          // {key: text}
 let currentTmplKey='';
 let makeshopParsed=null;     // 메이크샵 CSV 파싱 결과
@@ -2663,6 +2668,10 @@ async function loadData(silent=false,preserveView=false){
       const k=no+'-'+ownCodeKeyForRow(row,item);
       if(row.insp_memo) memoData[k]=row.insp_memo;
     });
+    Object.entries(inspDoneLocalOverrides).forEach(([no,val])=>{
+      if(val) inspDone[no]=true;
+      else delete inspDone[no];
+    });
     // 검품탭 메모 캐시 동기화 (3분 새로고침 후 stale 방지)
     Object.assign(insp_itemMemos, memoData);
 
@@ -3020,7 +3029,11 @@ function setSysTab(tab){
     if(inspPanel)   inspPanel.style.display='flex';
     if(misongPanel) misongPanel.style.display='none';
     if(sbBottom)    sbBottom.style.display='none';
-    if(!insp_initialized) insp_loadData(); else insp_renderAll();
+    if(!insp_initialized) insp_loadData();
+    else {
+      insp_renderAll();
+      insp_refreshMisongCache(true).catch(()=>{});
+    }
     insp_renderSidebar();
   } else if(tab==='misong'){
     if(leftPanel)   leftPanel.style.display='none';
@@ -4641,6 +4654,8 @@ function renderCSList(){
   const subEl    = document.getElementById('cs-list-sub');
   const footerEl = document.getElementById('cs-footer-cnt');
   const dlBtn    = document.getElementById('cs-dl-btn');
+  const selDoneBtn = document.getElementById('cs-selected-done-btn');
+  const selCleanBtn = document.getElementById('cs-selected-clean-btn');
 
   let rows;
   let titleText;
@@ -4675,12 +4690,16 @@ function renderCSList(){
   const invMap = new Map();
   rows.forEach(row=>{ if(!invMap.has(row.inv)) invMap.set(row.inv,[]); invMap.get(row.inv).push(row); });
   const invGroups = [...invMap.entries()];
+  const visibleInvs = new Set(invGroups.map(([inv])=>inv));
+  [...csSelectedInvs].forEach(inv=>{ if(!visibleInvs.has(inv)) csSelectedInvs.delete(inv); });
 
   if(titleEl) titleEl.textContent = titleText;
   if(dayBadgeEl) dayBadgeEl.textContent = dayDispLabel + ' ' + rows.length + '건';
   if(subEl) subEl.textContent = invGroups.length ? invGroups.length+'건' : '';
-  if(footerEl) footerEl.textContent = invGroups.length+'건';
+  if(footerEl) footerEl.textContent = invGroups.length+'건 · 선택 '+csSelectedInvs.size+'건';
   if(dlBtn) dlBtn.disabled = !invGroups.length;
+  if(selDoneBtn) selDoneBtn.disabled = !csSelectedInvs.size;
+  if(selCleanBtn) selCleanBtn.disabled = !csSelectedInvs.size;
 
   if(!listEl) return;
   if(!invGroups.length){
@@ -4693,7 +4712,7 @@ function renderCSList(){
 
   const isHistory = currentCSStatus==='발송완료';
 
-  const tblHdr = '<div class="cs-tbl-hdr"><span>주문자</span><span>연락처</span><span>송장번호</span><span>서랍번호</span><span>배지</span><span>경과</span></div>';
+  const tblHdr = '<div class="cs-tbl-hdr"><span></span><span>주문자</span><span>연락처</span><span>송장번호</span><span>서랍번호</span><span>배지</span><span>경과</span></div>';
 
   listEl.innerHTML = tblHdr + invGroups.map(([inv, invRows])=>{
     const first   = invRows[0];
@@ -4782,8 +4801,10 @@ function renderCSList(){
     const memoSafeId = 'cs-memo-'+inv.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal = (csMemoData[inv]||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const memoHtml = `<div class="cs-memo-row" onclick="event.stopPropagation()"><span class="cs-memo-lbl">💬</span><textarea id="${memoSafeId}" class="cs-memo-ta${memoVal?' has-val':''}" placeholder="고객 요청사항 메모..." onblur="saveCSMemo('${escFn(inv)}',this.value)" onkeydown="if(event.key==='Escape')this.blur(); event.stopPropagation();">${memoVal}</textarea></div>`;
+    const isSelected = csSelectedInvs.has(inv);
     return `<div class="cs-item${invStClass}">
       <div class="cs-item-top" onclick="showInvTmplPreview('${escFn(inv)}')">
+        <button class="cs-select-check${isSelected?' checked':''}" onclick="toggleCSSelect('${escFn(inv)}',event)">${isSelected?'✓':''}</button>
         <span class="cs-item-name" title="${escFn(name)}">${name}</span>
         <span class="cs-item-phone">${phone||'—'}</span>
         <span style="font-size:10px;font-weight:700;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${displayInv}</span>
@@ -4832,8 +4853,34 @@ function misongOwnCodeFor(row){
   const v=String(row?.prodCode||row?.dispCode||'').trim();
   return isValidOwnCode(v) ? v : '';
 }
+function toggleCSSelect(inv, ev){
+  if(ev&&ev.stopPropagation) ev.stopPropagation();
+  if(csSelectedInvs.has(inv)) csSelectedInvs.delete(inv);
+  else csSelectedInvs.add(inv);
+  renderCSList();
+}
+async function persistMisongStatus(row,status){
+  if(!row) return;
+  const inv=row.inv, code=row.code;
+  const seqNo=realToSeq[inv]||inv;
+  const prod=misongOwnCodeFor(row);
+  if(!row.itemNo&&!code) throw new Error('상품 순서번호가 없습니다.');
+  if(!prod) throw new Error('자사코드 매핑이 없습니다.');
+  await db.from('shortage').upsert({
+    inv_no:inv,
+    ord_no:row.ordNo||noMap[seqNo]?.ord_no||inv,
+    item_no:row.itemNo||code,
+    item_sort_order:row.itemSortOrder??null,
+    sellpia_p_code:row.sellpiaCode||'',
+    p_code:prod,
+    status:status||'배송대기'
+  },{onConflict:'inv_no,item_no'});
+  for(const legacyCode of legacyMisongCodes(inv,code)){
+    await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+  }
+}
 async function setMisongStatus(inv, code, status){
-  event&&event.stopPropagation&&event.stopPropagation();
+  if(typeof event!=='undefined'&&event&&event.stopPropagation) event.stopPropagation();
   const row=misongRowFor(inv,code);
   const displayCode=misongOwnCodeFor(row)||String(code||'');
   if(status==='발송대기'){
@@ -4850,18 +4897,55 @@ async function setMisongStatus(inv, code, status){
   const seqNo=realToSeq[inv]||inv;
   shortageStatus[seqNo+'-'+code]=normalizeShortageStatus(status||'배송대기');
   updateAllCSCounts();
-  if(status==='발송완료'){ switchCSStatus('발송완료'); } else { renderCSList(); }
+  renderCSList();
   renderCSSidebar();
   toast(status ? '✅ '+status+' 처리됨' : '상태 초기화');
   try{
-    const prod=misongOwnCodeFor(row);
-    if(!row?.itemNo&&!code) throw new Error('상품 순서번호가 없습니다.');
-    if(!prod) throw new Error('자사코드 매핑이 없습니다.');
-    await db.from('shortage').upsert({inv_no:inv,ord_no:row?.ordNo||noMap[seqNo]?.ord_no||inv,item_no:row?.itemNo||code,item_sort_order:row?.itemSortOrder??null,sellpia_p_code:row?.sellpiaCode||'',p_code:prod,status:status||'배송대기'},{onConflict:'inv_no,item_no'});
-    for(const legacyCode of legacyMisongCodes(inv,code)){
-      await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
-    }
+    await persistMisongStatus(row,status);
   }catch(e){ console.error(e); toast('⚠ 저장 실패'); }
+}
+
+async function completeSelectedCS(){
+  const invs=[...csSelectedInvs];
+  if(!invs.length){ toast('선택된 송장이 없습니다'); return; }
+  const rows=misongData.filter(r=>invs.includes(r.inv)&&normalizeCSStatus(r.status)!=='발송완료');
+  if(!rows.length){ toast('선택 항목은 이미 완료 상태입니다'); return; }
+  rows.forEach(r=>{
+    r.status='발송완료';
+    r.done='✓';
+    const seqNo=realToSeq[r.inv]||r.inv;
+    shortageStatus[seqNo+'-'+r.code]='발송완료';
+  });
+  updateAllCSCounts(); renderCSList(); renderCSSidebar();
+  toast('⏳ 선택 '+rows.length+'건 처리 중...',5000);
+  try{
+    await Promise.all(rows.map(r=>persistMisongStatus(r,'발송완료')));
+    toast('✅ 선택 '+rows.length+'건 완료');
+  }catch(e){
+    console.error(e);
+    toast('⚠ 선택 완료 저장 실패');
+    loadMisongData(false);
+  }
+}
+
+async function cleanSelectedCSDone(){
+  const invs=[...csSelectedInvs];
+  const rows=misongData.filter(r=>invs.includes(r.inv)&&normalizeCSStatus(r.status)==='발송완료');
+  if(!rows.length){ toast('선택된 발송완료 행이 없습니다'); return; }
+  if(!confirm('선택된 발송완료 '+rows.length+'건을 삭제하시겠습니까?')) return;
+  try{
+    await Promise.all(rows.map(async r=>{
+      await db.from('shortage').delete().eq('inv_no',r.inv).eq('item_no',r.itemNo||r.code);
+      for(const legacyCode of legacyMisongCodes(r.inv,r.code)){
+        await db.from('shortage').delete().eq('inv_no',r.inv).eq('p_code',legacyCode);
+      }
+    }));
+    const removeKeys=new Set(rows.map(r=>r.inv+'|'+r.code));
+    misongData=misongData.filter(r=>!removeKeys.has(r.inv+'|'+r.code));
+    rows.forEach(r=>csSelectedInvs.delete(r.inv));
+    updateAllCSCounts(); renderCSList(); renderCSSidebar();
+    toast('✅ 선택 정리 완료');
+  }catch(e){ console.error(e); toast('⚠ 선택 정리 실패'); }
 }
 
 // ── 발송완료 미송 삭제 ──
@@ -5328,6 +5412,7 @@ let insp_focusIdx = 0;
 let insp_filteredList = [];
 let insp_itemFocusIdx = 0;
 let insp_searchQuery = '';   // 검품 검색어 (송장번호/주문자)
+let inspDoneLocalOverrides = {}; // keep recent inspection toggles across auto refresh
 // insp_itemMemos already declared globally
 let insp_memoSaveTimer = {};
 let insp_parsedRows = [];
@@ -5608,11 +5693,8 @@ function computeGoldLabelMapFE() {
 // 피킹 시스템 데이터(ORDERS_ALL) 공유해서 검품 초기화
 function insp_loadData(){
   insp_GOLD_NOS = new Set(GOLD_ORDERS.map(o=>o.no));
-  inspDone = {};
   insp_itemMemos = {};
   ORDERS_ALL.forEach(o=>{
-    const regItems=o.items.filter(it=>!isGold(it)||insp_GOLD_NOS.has(o.no));
-    if(regItems.length>0&&regItems.every(it=>checked[o.no+'-'+it.code])) inspDone[o.no]=true;
     o.items.forEach(it=>{
       const mk=insp_memoKey(o.no,it.code);
       // inspMemo 우선, 없으면 피킹메모에서 가져옴
@@ -5623,19 +5705,22 @@ function insp_loadData(){
   insp_goldLabelMap = computeGoldLabelMapFE();
   insp_initialized=true;
   insp_renderAll();
-  insp_loadMisongOrders().then(()=>{
-    insp_misongCacheReady=true;
-    if(insp_tabMode==='all'||insp_tabMode==='misong'){
-      insp_renderAll();
-      insp_renderSidebar();
-    }
-  });
+  insp_refreshMisongCache(true);
+}
+
+async function insp_refreshMisongCache(renderAfter=false){
+  await insp_loadMisongOrders();
+  insp_misongCacheReady=true;
+  if(renderAfter){
+    insp_renderAll();
+    insp_renderSidebar();
+  }
 }
 
 function insp_setTab(t){
   insp_tabMode=t;
   if(t==='misong'){
-    insp_loadMisongOrders().then(()=>{ insp_misongCacheReady=true; insp_filteredList=insp_buildMisongList(); insp_focusIdx=0; insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar(); });
+    insp_refreshMisongCache(true).then(()=>{ insp_filteredList=insp_buildMisongList(); insp_focusIdx=0; insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar(); });
   }
   ['all','gold','golditem','undone','misong'].forEach(x=>{
     const el=document.getElementById('insp-tab-'+x);
@@ -5732,8 +5817,8 @@ function insp_allOrdersForStats(){
 function insp_getFiltered(){
   let list;
   if(insp_tabMode==='misong') return insp_buildMisongList();
-  if(insp_tabMode==='gold') list = ORDERS_ALL.filter(o=>insp_GOLD_NOS.has(o.no));
-  else if(insp_tabMode==='golditem') list = ORDERS_ALL.filter(o=>o.items.some(it=>isGold(it)));
+  if(insp_tabMode==='gold') list = insp_allOrdersForStats().filter(o=>insp_GOLD_NOS.has(o.no)||o.items.some(it=>isGold(it)));
+  else if(insp_tabMode==='golditem') list = insp_allOrdersForStats().filter(o=>o.items.some(it=>isGold(it)));
   else if(insp_tabMode==='undone') list = insp_allOrdersForStats().filter(o=>!inspDone[o.no]);
   else list = insp_allOrdersForStats();
   if(insp_searchQuery){
@@ -6149,6 +6234,7 @@ async function insp_toggleDone(invNo){
     insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar();
   };
   inspDone[invNo]=nextDone;
+  inspDoneLocalOverrides[invKey]=nextDone;
   renderDoneState();
   const inv_no=seqToReal[invNo]||String(invNo);
   try{
@@ -6186,6 +6272,7 @@ async function insp_toggleDone(invNo){
     }
   }catch(e){
     inspDone[invNo]=prevDone;
+    inspDoneLocalOverrides[invKey]=prevDone;
     renderDoneState();
     toast('⚠ 검품 완료 저장 실패: '+(e.message||e));
   }finally{
@@ -6879,6 +6966,10 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     if(newShortage===0) delete shortage[k]; else shortage[k]=newShortage;
     shortageStatus[k]=newShortage===0?'피킹완료':'배송대기';
     shortageMemo2[k]=newShortage===0?'ㅁ':String(newShortage);
+    insp_misongCacheReady=false;
+    if(document.getElementById('sys-insp')?.classList.contains('active')){
+      insp_refreshMisongCache(true).catch(()=>{});
+    }
   }catch(e){
     const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
     if(row&&prevShortage!==undefined){
