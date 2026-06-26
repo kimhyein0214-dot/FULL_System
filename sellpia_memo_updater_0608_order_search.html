@@ -440,23 +440,27 @@
       const before = rowBlob(getGridItem('grid7', 0));
       await runOrderSearch();
       let changedFallbackLogged = false;
+      const expectedOrdNo = normal(ordNo);
       const hit = await waitFor(() => {
         const rows = getGridRows('grid7');
         if (!rows.length) return false;
-        const hit = rows.find(({ item }) => rowBlob(item).includes(String(target)));
+        const hit = rows.find(({ item }) => {
+          const blob = rowBlob(item);
+          return blob.includes(String(target)) || (!!expectedOrdNo && blob.includes(expectedOrdNo));
+        });
         if (hit) return hit;
         if (rows.length === 1) {
-          addLog('  검색 결과 1건: grid 데이터에 송장번호가 없어도 해당 행으로 진행');
-          return rows[0];
+          if (!expectedOrdNo) {
+            addLog('  검색 결과 1건: grid 데이터에 송장번호가 없어도 해당 행으로 진행');
+            return rows[0];
+          }
+          addLog(`  검색 결과 1건이지만 주문번호 불일치: 기대 ${expectedOrdNo}`);
+          return false;
         }
         const firstBlob = rowBlob(rows[0].item);
         if (firstBlob && firstBlob !== before) {
-          if (useInvoice) {
-            addLog(`  검색 결과 변경 확인: grid 데이터에 송장번호가 없어 첫 행으로 진행 (${rows.length}행)`);
-            return rows[0];
-          }
           if (!changedFallbackLogged) {
-            addLog('  검색 결과는 바뀌었지만 grid 데이터에서 검색값을 확인하지 못했습니다.');
+            addLog(`  검색 결과는 바뀌었지만 대상 주문번호를 확인하지 못했습니다: ${expectedOrdNo || target}`);
             changedFallbackLogged = true;
           }
         }
@@ -1091,10 +1095,16 @@
       if (!isLikelyInvoiceNo(invNo)) throw new Error(`송장번호가 없어 주문번호 검색으로 fallback하지 않습니다: ${task.ordNo || '-'}`);
       let detail = detailFromSingle;
       if (!detail) {
-        const hit = findOrderHitInGrid(invNo, task.ordNo) || await searchInvoice(invNo, task.ordNo);
+        const hit = await searchInvoice(invNo, task.ordNo);
         detail = await openOrderDetail(hit);
       }
+      if (task.ordNo && normal(detail.ordNo) !== normal(task.ordNo)) {
+        throw new Error(`상세 주문번호 불일치: 기대 ${task.ordNo} / 실제 ${detail.ordNo}`);
+      }
       const rows = detail.rows.length ? detail.rows : detailRows().filter(row => normal(row.ord_no) === detail.ordNo);
+      if (task.ordNo && rows.some(row => normal(row.ord_no) !== normal(task.ordNo))) {
+        throw new Error(`상세 상품 행 주문번호 불일치: ${task.ordNo}`);
+      }
       if (!rows.length) throw new Error('상세 상품 행이 없습니다.');
       if (task.skip) return task.reason || '스킵';
       const firstRow = rows[0];
