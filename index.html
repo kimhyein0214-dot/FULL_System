@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0629-gold-insp-pwa-v2">
+<link rel="stylesheet" href="picking-system_0519.css?v=0630-local-ui-hotfix-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1861,6 +1861,21 @@ function itemNameOnly(it){
 function itemOptionOnly(it){
   return String(it?.option||it?.p_option||it?.seller_option_name||'').trim();
 }
+function normalizeOptionCodeText(value){
+  return String(value||'').toUpperCase().replace(/[^A-Z0-9가-힣]/g,'');
+}
+function optionWithoutOwnCode(optionText,ownCodeText){
+  const option=String(optionText||'').trim();
+  const ownNorm=normalizeOptionCodeText(ownCodeText);
+  if(!option||!ownNorm) return option;
+  return option.replace(/\[([^\]]+)\]/g,(full,inner)=>{
+    const innerNorm=normalizeOptionCodeText(inner);
+    return innerNorm&&innerNorm.length>=4&&(ownNorm.includes(innerNorm)||innerNorm.includes(ownNorm)) ? '' : full;
+  }).replace(/\s{2,}/g,' ').replace(/\s+([/,])/g,'$1').replace(/([/,])\s+/g,'$1').trim();
+}
+function itemOptionForPickCard(it,displayOwnCode){
+  return optionWithoutOwnCode(itemOptionOnly(it),displayOwnCode||it?.prodCode||it?.resolvedOwnCode||'');
+}
 function displayInvoiceNo(no,order=null){
   return String(seqToReal[no]||order?.invNo||order?.inv_no||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
 }
@@ -3445,7 +3460,7 @@ function renderLeft(){
     const _anchorAttr=seenCodeAnchors.has(_codeId)?'':` id="code-${_codeId}"`;
     seenCodeAnchors.add(_codeId);
     const cellColor=done?'#00CC66':f.goldItem?'var(--gold)':isHold?'#E65100':isM?c.t:'var(--text)';
-    const optionText=itemOptionOnly(f);
+    const optionText=itemOptionForPickCard(f,_displayPcode);
       const statusCellHtml=isHold
           ?'<div class="pr-cell deck-status-cell"><span style="font-size:12px;color:#E65100;font-weight:900;">보류됨</span></div>'
         :`<div class="pr-cell short-cell${sh?' has-val':''}" onclick="event.stopPropagation()"><span class="pr-cell-lbl">부족</span><div class="short-ctrl-row${sh?'':' no-val'}"><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.stateCode)}',-1)">−</button><span class="sq-val">${shVal}</span><button class="sq-btn" onclick="adjSh(${f.no},'${esc(f.stateCode)}',1)">+</button></div></div>`;
@@ -3460,7 +3475,7 @@ function renderLeft(){
       </div>
       <div class="deck-content">
         <div class="deck-card-head">
-          <div class="deck-card-title"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${_displayPcode?(f.nal?'<span class="nal-badge">낱</span> ':'')+(f.goldItem?'🥇 ':'')+_displayPcode:''}</span>${optionText?`<span class="deck-card-option">${optionHtml(optionText)}</span>`:''}${_locBadge}${_pairBadge}</div>
+          <div class="deck-card-title"><div class="deck-card-code-line"><span class="csh-code" style="color:${isM?c.t:f.goldItem?'var(--gold)':'var(--text)'};">${_displayPcode?(f.nal?'<span class="nal-badge">낱</span> ':'')+(f.goldItem?'🥇 ':'')+_displayPcode:''}</span>${_locBadge}${_pairBadge}</div>${optionText?`<div class="deck-card-option" title="${htmlEsc(optionText)}">${optionHtml(optionText)}</div>`:''}</div>
           <div class="deck-card-name">${esc(itemNameOnly(f))}</div>
           <div class="deck-card-meta"><span>${buyerLabel(f.buyer,f.recv)}</span>${chBadge(f.no)}</div>
         </div>

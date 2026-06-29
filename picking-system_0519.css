@@ -5131,36 +5131,49 @@ body{
   opacity:1 !important;
 }
 .deck-card-title{
-  flex-wrap:wrap !important;
-  align-items:flex-start !important;
-  gap:3px 7px !important;
+  display:flex !important;
+  flex-direction:column !important;
+  flex-wrap:nowrap !important;
+  align-items:stretch !important;
+  gap:3px !important;
   min-width:0 !important;
+  overflow:hidden !important;
+}
+.deck-card-code-line{
+  display:flex !important;
+  align-items:center !important;
+  gap:6px !important;
+  min-width:0 !important;
+  max-width:100% !important;
+  overflow:hidden !important;
 }
 .deck-card-title .csh-code{
-  flex:0 0 auto !important;
-  max-width:42% !important;
+  flex:0 1 auto !important;
+  min-width:0 !important;
+  max-width:100% !important;
   font-size:13px !important;
   line-height:1.12 !important;
-  white-space:normal !important;
-  overflow-wrap:anywhere !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  overflow-wrap:normal !important;
+  word-break:normal !important;
 }
 .deck-card-option{
-  flex:1 1 52% !important;
-  min-width:180px !important;
+  display:block !important;
+  flex:none !important;
+  min-width:0 !important;
   max-width:none !important;
-  white-space:normal !important;
-  overflow:visible !important;
-  text-overflow:clip !important;
-  display:-webkit-box !important;
-  -webkit-box-orient:vertical !important;
-  -webkit-line-clamp:2 !important;
+  width:100% !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
   line-height:1.22 !important;
   font-size:13px !important;
   font-weight:950 !important;
   color:#111827 !important;
 }
 .deck-current .deck-card-option{
-  -webkit-line-clamp:3 !important;
   font-size:14px !important;
 }
 .deck-card-name,
@@ -5202,16 +5215,13 @@ body{
 }
 @media (max-width:1368px) and (orientation:landscape){
   .deck-card-title .csh-code{
-    max-width:36% !important;
+    max-width:100% !important;
     font-size:12px !important;
   }
   .deck-card-option{
-    min-width:160px !important;
     font-size:12px !important;
-    -webkit-line-clamp:2 !important;
   }
   .deck-current .deck-card-option{
-    -webkit-line-clamp:3 !important;
     font-size:13px !important;
   }
   .deck-content .deck-actions{
@@ -5234,7 +5244,6 @@ body{
 }
 @media (orientation:portrait) and (max-width:1100px), (max-width:900px){
   .deck-card-option{
-    flex-basis:100% !important;
     min-width:0 !important;
   }
   .deck-card-title .csh-code{
