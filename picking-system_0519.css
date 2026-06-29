@@ -219,7 +219,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .pick-row:last-child{border-bottom:none;}
 .pick-row.done{background:#F0FDF7;}
 .pick-row.has-short{background:#FFF2F0;border-left:4px solid var(--short);}
-.pick-row.is-gold{opacity:0.46;pointer-events:none;background:#FFFDF0;border-left:4px solid var(--gold);}
+.pick-row.is-gold{background:#FFFDF0;border-left:4px solid var(--gold);}
 
 .pick-row.is-hold {
   opacity: 0.45;
@@ -5113,5 +5113,147 @@ body{
   .deck-card-body .sq-val{
     min-width:22px !important;
     font-size:20px !important;
+  }
+}
+
+/* 0629 gold/insp/PWA pass: keep gold editable and prioritize option visibility. */
+.pick-row.is-gold,
+.deck-scroll .pick-row.is-gold,
+.deck-scroll .pick-row.is-gold.deck-near,
+.deck-scroll .pick-row.is-gold.deck-far{
+  pointer-events:auto !important;
+}
+.pick-row.is-gold{
+  opacity:1 !important;
+}
+.deck-scroll .pick-row.is-gold,
+.deck-scroll .pick-row.in-gold-inv{
+  opacity:1 !important;
+}
+.deck-card-title{
+  flex-wrap:wrap !important;
+  align-items:flex-start !important;
+  gap:3px 7px !important;
+  min-width:0 !important;
+}
+.deck-card-title .csh-code{
+  flex:0 0 auto !important;
+  max-width:42% !important;
+  font-size:13px !important;
+  line-height:1.12 !important;
+  white-space:normal !important;
+  overflow-wrap:anywhere !important;
+}
+.deck-card-option{
+  flex:1 1 52% !important;
+  min-width:180px !important;
+  max-width:none !important;
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  display:-webkit-box !important;
+  -webkit-box-orient:vertical !important;
+  -webkit-line-clamp:2 !important;
+  line-height:1.22 !important;
+  font-size:13px !important;
+  font-weight:950 !important;
+  color:#111827 !important;
+}
+.deck-current .deck-card-option{
+  -webkit-line-clamp:3 !important;
+  font-size:14px !important;
+}
+.deck-card-name,
+.deck-current .deck-card-name{
+  grid-column:1 / -1 !important;
+  font-size:10px !important;
+  line-height:1.18 !important;
+  font-weight:750 !important;
+  color:#6B7280 !important;
+  -webkit-line-clamp:1 !important;
+}
+.deck-content .deck-actions{
+  min-width:244px !important;
+}
+.deck-card-body .short-cell{
+  width:112px !important;
+  min-width:112px !important;
+  max-width:112px !important;
+}
+.deck-card-body .pr-drawer-cell{
+  width:126px !important;
+  min-width:126px !important;
+  max-width:126px !important;
+}
+.insp-jo-label{
+  display:inline-block;
+  margin-right:4px;
+  padding:1px 5px;
+  border-radius:4px;
+  background:#E8F3FF;
+  color:#1B64DA;
+  border:1px solid #B8D8FF;
+  font-size:11px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.jo-side-btn.insp-jo-nav.is-muted{
+  opacity:0.52;
+}
+@media (max-width:1368px) and (orientation:landscape){
+  .deck-card-title .csh-code{
+    max-width:36% !important;
+    font-size:12px !important;
+  }
+  .deck-card-option{
+    min-width:160px !important;
+    font-size:12px !important;
+    -webkit-line-clamp:2 !important;
+  }
+  .deck-current .deck-card-option{
+    -webkit-line-clamp:3 !important;
+    font-size:13px !important;
+  }
+  .deck-content .deck-actions{
+    grid-template-columns:108px 128px !important;
+    flex:0 0 241px !important;
+    width:241px !important;
+    max-width:241px !important;
+    min-width:241px !important;
+  }
+  .deck-card-body .short-cell{
+    width:108px !important;
+    min-width:108px !important;
+    max-width:108px !important;
+  }
+  .deck-card-body .pr-drawer-cell{
+    width:128px !important;
+    min-width:128px !important;
+    max-width:128px !important;
+  }
+}
+@media (orientation:portrait) and (max-width:1100px), (max-width:900px){
+  .deck-card-option{
+    flex-basis:100% !important;
+    min-width:0 !important;
+  }
+  .deck-card-title .csh-code{
+    max-width:100% !important;
+  }
+  .deck-content .deck-actions{
+    grid-template-columns:108px 126px !important;
+    flex:0 0 239px !important;
+    width:239px !important;
+    max-width:239px !important;
+  }
+  .deck-card-body .short-cell{
+    width:108px !important;
+    min-width:108px !important;
+    max-width:108px !important;
+  }
+  .deck-card-body .pr-drawer-cell{
+    width:126px !important;
+    min-width:126px !important;
+    max-width:126px !important;
   }
 }

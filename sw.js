@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0629-no-bulk-short-v23';
+const CACHE_NAME = 'picking-system-0629-gold-insp-pwa-v2';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0629-no-bulk-short-v23',
+  './picking-system_0519.css?v=0629-gold-insp-pwa-v2',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
