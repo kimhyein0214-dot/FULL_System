@@ -953,7 +953,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
     <button id="ampm-am"  class="abtn" onclick="setSession('AM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오전</button>
     <button id="ampm-pm"  class="abtn" onclick="setSession('PM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오후</button>
   </div>
-  <!-- 작업순서는 기본 고정입니다. 별도 보기 전환 버튼을 두지 않습니다. -->
+  <button id="work-sort-btn" class="abtn work-sort-btn active" onclick="toggleWorkSort()" title="화면 표시 순서를 작업순서/셀피아 원본순서로 전환합니다">🔀 작업순서</button>
   <button id="planned-print-export-btn" class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
   <button class="abtn postoffice-enrich-btn" onclick="showPostOfficeEnrichmentStatus()" title="토글 등록용 CSV에 필요한 수취인/주소/연락처 보강 현황을 확인합니다">📊 보강현황</button>
   <button id="postoffice-csv-export-btn" class="abtn work-export-btn" onclick="downloadPostOfficeCsv()" title="토글 등록용 CSV를 작업순서대로 만듭니다.">📮 토글CSV</button>
@@ -1782,7 +1782,7 @@ try{localStorage.removeItem('pickingManualJo');}catch(e){}
 
 // ── 구역순 정렬 ──────────────────────────────────────────────
 let zoneSortMode=false, zoneSortedOrders=null;
-let workSortMode=true;
+let workSortMode=localStorage.getItem('pickingWorkSortMode')!=='0';
 const WORK_SORT_POLICY={deferProblemOrders:true};
 function getOutputOrderValue(row, fallback){
   // 출력순서 컬럼이 생기면 우선 사용하고, 없으면 현재 수집 순서(sort_order) 기반으로 안전하게 유지합니다.
@@ -1982,24 +1982,52 @@ function buildOutputOrders(ordersData,itemsByOrd,pickingRows=[]){
   return sorted.map((row,i)=>({...row,planned_print_seq_no:i+1}));
 }
 function updateWorkSortUI(){
-  workSortMode=true;
-  localStorage.setItem('pickingWorkSortMode','1');
+  localStorage.setItem('pickingWorkSortMode',workSortMode?'1':'0');
   const btn=document.getElementById('work-sort-btn');
-  if(btn) btn.remove();
+  if(btn){
+    btn.classList.toggle('active',workSortMode);
+    btn.textContent=workSortMode?'🔀 작업순서':'↕ 셀피아순';
+    btn.title=workSortMode?'현재 화면은 작업순서입니다. 클릭하면 셀피아 원본순서로 봅니다.':'현재 화면은 셀피아 원본순서입니다. 클릭하면 작업순서로 봅니다.';
+  }
   const summary=document.getElementById('work-sort-summary');
   if(summary){
-    summary.textContent='정렬 기준: 상품종류 우선 / 4개조 동선 묶음 / 조간 이동 최소 / 총수량 보조 / 골드 뒤로';
+    summary.textContent=workSortMode
+      ? '정렬 기준: 상품종류 우선 / 4개조 동선 묶음 / 조간 이동 최소 / 총수량 보조 / 골드 뒤로'
+      : '정렬 기준: 셀피아 원본순서 보기';
   }
 }
 function toggleWorkSort(){
-  workSortMode=true;
-  localStorage.setItem('pickingWorkSortMode','1');
+  const keepNo=currentPopupNo?Number(currentPopupNo):null;
+  workSortMode=!workSortMode;
   updateWorkSortUI();
+  rebuildJos();
+  if(keepNo){
+    const idx=jos.findIndex(jo=>jo.some(o=>Number(o.no)===keepNo));
+    curJo=idx>=0?idx:0;
+  }else{
+    curJo=0;
+  }
+  renderAll();
 }
-function getPlannedPrintOrders(){
+function getWorkOrderedOrders(){
   // no는 재정렬 이후 화면/작업순서 기준으로 다시 붙는 번호입니다.
   // 토글CSV는 셀피아 원본 sort_order가 아니라 이 화면 작업번호를 따라야 합니다.
   return [...ORDERS_ALL].sort((a,b)=>(Number(a.no)||0)-(Number(b.no)||0));
+}
+function getSellpiaOrderedOrders(){
+  return [...ORDERS_ALL].sort((a,b)=>{
+    const av=Number(a.sellpiaSeqNo||a.originalSeqNo||0);
+    const bv=Number(b.sellpiaSeqNo||b.originalSeqNo||0);
+    const ar=Number.isFinite(av)&&av>0?av:Number(a.no)||0;
+    const br=Number.isFinite(bv)&&bv>0?bv:Number(b.no)||0;
+    return ar-br||((Number(a.no)||0)-(Number(b.no)||0));
+  });
+}
+function getDisplayOrders(){
+  return workSortMode?getWorkOrderedOrders():getSellpiaOrderedOrders();
+}
+function getPlannedPrintOrders(){
+  return getWorkOrderedOrders();
 }
 function getPostOfficePrintOrders(){
   return getPlannedPrintOrders();
@@ -2723,9 +2751,9 @@ function rebuildJos(){
     if(curJo>=jos.length) curJo=0;
     return;
   }
-  const src=getPlannedPrintOrders();
-  /* 조 그룹은 현재 선택된 전체 출력/작업순서 기준으로 먼저 정렬한 뒤 4개씩 묶습니다.
-     예전처럼 셀피아 원순서로 먼저 조를 나누면 같은 조 안에서만 재정렬되어 전체 작업순서가 깨집니다. */
+  const src=getDisplayOrders();
+  /* 기본은 출력/작업순서 기준으로 4개씩 묶고, 필요할 때만 화면 보기용으로 셀피아 원본순서를 사용합니다.
+     출력대상/토글CSV는 getPlannedPrintOrders()를 통해 항상 작업순서를 유지합니다. */
   const displayPos={};
   src.forEach((o,i)=>{displayPos[o.no]=i;});
   const sortByDisplay=(a,b)=>(displayPos[a.no]??0)-(displayPos[b.no]??0);
@@ -3778,21 +3806,6 @@ function adjSh(no,code,d){
   if(shortage[k]>0){ shortageStatus[k]='배송대기'; shortageMemo2[k]=String(shortage[k]); }
   else { delete shortageStatus[k]; delete shortageMemo2[k]; }
   syncMisongItem(no, code);
-  if(shortage[k]>0){
-    jos[curJo].forEach(o=>{
-      if(o.no!==no&&o.items.find(it=>it.code===code)){
-        const ok2=o.no+'-'+code;
-        if(!(shortage[ok2]>0)){
-          shortage[ok2]=o.items.find(it=>it.code===code).qty;
-          shortageStatus[ok2]='배송대기';
-          shortageMemo2[ok2]=String(shortage[ok2]);
-          const oPrev=shortage[ok2];
-          clearTimeout(_adjShTimer[ok2]);
-          _adjShTimer[ok2]=setTimeout(()=>saveToSheet(o.no,code,!!checked[ok2],shortage[ok2],drawer[o.no]||'',!!holded[ok2]).catch(()=>{shortage[ok2]=oPrev;scheduleRender();}),400);
-        }
-      }
-    });
-  }
   scheduleRender();
   // debounce: 연속 클릭은 마지막 값만 저장
   const snapPrev=prev;
@@ -3803,22 +3816,55 @@ function adjSh(no,code,d){
   },400);
 }
 
+function findOrderForSeq(no){
+  return (ORDERS_ALL||[]).find(o=>String(o.no)===String(no)||String(seqToReal[o.no]||o.invNo||'')===String(no));
+}
+function findOrderItemByDisplayCode(order, code){
+  if(!order||!Array.isArray(order.items)) return null;
+  return order.items.find(it=>String(it.code)===String(code)||String(it.prodCode||it.resolvedOwnCode||'')===String(code)||String(it.itemNo||it.item_no||'')===String(code))||null;
+}
+function itemIdentitySet(it){
+  const ids=new Set();
+  const own=String(it?.prodCode||it?.resolvedOwnCode||'').trim();
+  const sellpia=String(it?.sellpiaCode||it?.sellpiaProductCode||'').trim();
+  if(isValidOwnCode(own)) ids.add('own:'+own);
+  if(sellpia) ids.add('sellpia:'+sellpia);
+  if(!ids.size&&isValidOwnCode(it?.code)) ids.add('own:'+String(it.code).trim());
+  return ids;
+}
+function sameProductItem(a,b){
+  const aIds=itemIdentitySet(a);
+  const bIds=itemIdentitySet(b);
+  for(const id of aIds){ if(bIds.has(id)) return true; }
+  return false;
+}
+
 function bulkShortageAfter(invNo, code){
+  const srcOrder=findOrderForSeq(invNo);
+  const srcItem=findOrderItemByDisplayCode(srcOrder, code);
+  if(!srcItem){ toast('일괄 미송 기준 상품을 찾지 못했어요'); return; }
   const targets = ORDERS_ALL.filter(o=>{
     if(o.no===invNo) return false;
-    if(checked[o.no+'-'+code]) return false;
-    return o.items.some(it=>it.code===code);
+    return o.items.some(it=>{
+      const itemKey=o.no+'-'+it.code;
+      if(checked[itemKey]) return false;
+      return sameProductItem(srcItem,it);
+    });
   });
   if(!targets.length){ toast('이후 미피킹 주문이 없어요'); return; }
-  if(!confirm(code+' — 미피킹 주문 '+targets.length+'건을 일괄 미송 처리할까요?\n이미 피킹 완료된 주문은 제외됩니다.')) return;
+  const label=srcItem.prodCode||srcItem.resolvedOwnCode||srcItem.sellpiaCode||code;
+  if(!confirm(label+' — 미피킹 주문 '+targets.length+'건을 일괄 미송 처리할까요?\n이미 피킹 완료된 주문은 제외됩니다.')) return;
   targets.forEach(o=>{
-    const k=o.no+'-'+code;
-    const qty=o.items.find(it=>it.code===code)?.qty||1;
+    const item=o.items.find(it=>sameProductItem(srcItem,it));
+    if(!item) return;
+    const itemCode=item.code;
+    const k=o.no+'-'+itemCode;
+    const qty=item.qty||1;
     shortage[k]=qty;
     shortageStatus[k]='배송대기';
     shortageMemo2[k]=String(qty);
-    syncMisongItem(o.no, code);
-    saveToSheet(o.no,code,false,qty,drawer[o.no]||'',!!holded[k]).catch(()=>{});
+    syncMisongItem(o.no, itemCode);
+    saveToSheet(o.no,itemCode,false,qty,drawer[o.no]||'',!!holded[k]).catch(()=>{});
   });
   scheduleRender();
   toast('✅ '+targets.length+'건 이후 미송 처리됨');
@@ -7061,7 +7107,7 @@ function renderOrderList(){
   const q = (document.getElementById('ol-search')?.value||'').trim().toLowerCase();
 
   let rows = [];
-  ORDERS_ALL.forEach(o=>{
+  getDisplayOrders().forEach(o=>{
     o.items.forEach(it=>{
       const k = o.no+'-'+it.code;
       const isDone = !!checked[k];
