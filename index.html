@@ -613,7 +613,9 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .insp-detail-hdr{padding:10px 16px;background:#fff;border-bottom:1.5px solid #D9CBBA;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap;}
 .insp-dh-no{font-size:20px;font-weight:900;color:#000000;}
 .insp-dh-buyer{font-size:13px;color:#7C7D81;font-weight:600;}
-.insp-dh-invoice{margin-left:auto;font-size:18px;font-weight:900;color:#111827;letter-spacing:0;background:#F8FAFC;border:1.5px solid #D5DEE8;border-radius:6px;padding:4px 10px;line-height:1;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;}
+.insp-dh-invoice{margin-left:auto;font-size:16px;font-weight:900;color:#1D4ED8;letter-spacing:0;background:#EFF6FF;border:1.5px solid #93C5FD;border-radius:999px;padding:5px 12px;line-height:1;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;cursor:pointer;box-shadow:0 1px 0 rgba(29,78,216,0.08);}
+.insp-dh-invoice:hover{background:#DBEAFE;border-color:#60A5FA;color:#1E40AF;}
+.insp-dh-invoice:active{transform:translateY(1px);}
 .insp-dh-stat{font-size:12px;font-weight:700;color:#7C7D81;}
 .insp-dh-done-btn{padding:6px 14px;border-radius:7px;border:2px solid #D9CBBA;background:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#000000;transition:all 0.12s;}
 .insp-dh-done-btn:hover{border-color:#0E7A4A;color:#0E7A4A;}
@@ -2429,6 +2431,34 @@ function isGold(codeOrItem){
 }
 function goldInv(order){return GOLD_ORDERS.some(o=>o.no===order.no);}
 function toast(msg,d=2500){const el=document.getElementById('toast');el.textContent=msg;el.style.display='block';el.style.opacity='1';setTimeout(()=>{el.style.opacity='0';setTimeout(()=>el.style.display='none',300);},d);}
+function copyPlainText(text,successMsg='✅ 복사됨'){
+  const value=String(text||'').trim();
+  if(!value){toast('⚠ 복사할 내용이 없습니다');return;}
+  const fallback=()=>{
+    const ta=document.createElement('textarea');
+    ta.value=value;
+    ta.setAttribute('readonly','');
+    ta.style.position='fixed';
+    ta.style.left='-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try{
+      document.execCommand('copy');
+      toast(successMsg);
+    }catch(e){
+      toast('⚠ 복사 실패');
+    }
+    ta.remove();
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(value).then(()=>toast(successMsg)).catch(fallback);
+  }else fallback();
+}
+function copyInspectionInvoice(inv){
+  const value=String(inv||'').trim();
+  if(!/^\d{13}$/.test(value)){toast('⚠ 송장번호가 없습니다');return;}
+  copyPlainText(value,'✅ 송장번호 복사됨');
+}
 
 function saveMemo(invNo,code,val){
   const k=invNo+'-'+code;
@@ -5968,7 +5998,7 @@ function downloadLabelCsv(filename,rows){
     return /[",\r\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
   };
   const csv=(rows||[]).map(r=>r.map(esc).join(',')).join('\r\n');
-  const blob=new Blob([encodeUtf16LeWithBom(csv)],{type:'text/csv;charset=utf-16le;'});
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;
@@ -6333,7 +6363,7 @@ function inspInvoiceBadge(order){
     .map(v=>String(v||'').trim())
     .find(v=>/^\d{13}$/.test(v))||'';
   if(!inv) return '';
-  return '<div class="insp-dh-invoice" title="송장번호">'+htmlEsc(inv)+'번</div>';
+  return '<button type="button" class="insp-dh-invoice" title="클릭하면 송장번호가 복사됩니다" onclick="copyInspectionInvoice(\''+inv+'\')">'+htmlEsc(inv)+'</button>';
 }
 function orderItemMemoValue(order,it){
   return String(it?.orderMemo ?? order?.orderMemo ?? '').trim();
