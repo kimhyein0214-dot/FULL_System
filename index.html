@@ -5979,7 +5979,8 @@ async function insp_loadMisongOrders(){
     const invMap={};
     (shRows||[]).forEach(r=>{
       const sq=shortageRowQty(r);
-      const goldRow = r.is_gold===true || String(r.is_gold||'').toUpperCase()==='Y' || isGold(r.p_code) || isLabelTarget({privateCode:r.p_code});
+      const mappedOwn=shortageOwnMap[String(r.p_code||'').trim()]||'';
+      const goldRow = r.is_gold===true || String(r.is_gold||'').toUpperCase()==='Y' || isGold(r.p_code) || isLabelTarget({privateCode:r.p_code}) || isGold(mappedOwn) || isLabelTarget({privateCode:mappedOwn});
       if(!isInspectionMisongReadyStatus(r.status,sq) && !goldRow) return;
       if(!invMap[r.inv_no]) invMap[r.inv_no]=[];
       invMap[r.inv_no].push(r);
