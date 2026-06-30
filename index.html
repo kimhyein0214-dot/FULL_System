@@ -6749,6 +6749,88 @@ function inspMemoCell(order,it,memoId,memoVal){
   +'</td>';
 }
 
+function insp_shouldEnsureFullMisongOrder(order){
+  if(!order||!order._isMisong||order._fullInvoiceLoaded||order._fullInvoiceLoading||order._fullInvoiceLoadTried) return false;
+  const ordNo=String(order.ordNo||order.ord_no||'').trim();
+  const shortCount=(order.shortItems||[]).length;
+  return !!ordNo && shortCount>0 && (order.items||[]).length<=shortCount;
+}
+function insp_shortInfoForFullItem(order,it){
+  const stateCode=itemStateCode(it);
+  const rawItemNo=String(it.rawItemNo||it.item_no||it.itemNo||'').trim();
+  const sort=String(it.itemSortOrder??it.sort_order??'').trim();
+  return (order.shortItems||[]).find(s=>
+    String(s.code||'')===String(stateCode) ||
+    (!!rawItemNo&&String(s.itemNo||s.item_no||'')===rawItemNo) ||
+    (!!sort&&String(s.itemSortOrder??s.sort_order??'')===sort)
+  );
+}
+async function insp_ensureFullMisongOrder(order){
+  if(!insp_shouldEnsureFullMisongOrder(order)) return;
+  order._fullInvoiceLoading=true;
+  order._fullInvoiceLoadTried=true;
+  const ordNo=String(order.ordNo||order.ord_no||'').trim();
+  try{
+    const [orderRows,itemRows]=await Promise.all([
+      fetchAllRows(()=>db.from('orders').select('*').eq('ord_no',ordNo)),
+      fetchAllRows(()=>db.from('order_items').select('*').eq('ord_no',ordNo).order('sort_order',{ascending:true,nullsFirst:false}))
+    ]);
+    if((itemRows||[]).length>(order.items||[]).length){
+      const fullItems=(itemRows||[]).map((it,itemRowIndex)=>{
+        const sellpiaCode=String(it.p_code||'').trim();
+        const resolvedOwnCode=resolveOwnCodeText({
+          code:sellpiaCode,
+          prodCode:it.prod_code||'',
+          option:it.p_option||it.seller_option_name||'',
+          name:it.p_name||it.seller_product_name||''
+        });
+        const prodOwnCode=String(it.prod_code||'').trim();
+        const ownCode=(resolvedOwnCode&&!looksLikeSellpiaCode(resolvedOwnCode))
+          ? resolvedOwnCode
+          : ((prodOwnCode&&!looksLikeSellpiaCode(prodOwnCode)) ? prodOwnCode : missingOwnCodeKey({ord_no:ordNo,p_code:sellpiaCode}));
+        const rawItemNo=String(it.item_no||'').trim();
+        const itemKey=makeStateItemNo(rawItemNo,it.sort_order,itemRowIndex);
+        const item={
+          code:itemKey,itemNo:itemKey,rawItemNo,itemSortOrder:it.sort_order,
+          sellpiaCode,qty:it.qty||1,name:it.p_name||'',option:it.p_option||'',
+          prodCode:ownCode,resolvedOwnCode:ownCode,nal:!!sellpiaCode.startsWith('낱'),
+          location:it.p_location||'',o_shop_memo2:it.o_shop_memo2||'',orderMemo:it.order_memo||'',
+          item_no:it.item_no||'',
+          seller_product_name:it.seller_product_name||it.p_name||'',
+          seller_option_name:it.seller_option_name||it.p_option||'',
+          sellpiaItemSalesAmount:it.sellpia_item_sales_amount,
+          sellpiaItemSalesAmountRaw:it.sellpia_item_sales_amount_raw||''
+        };
+        const shortInfo=insp_shortInfoForFullItem(order,item);
+        if(shortInfo){
+          item.shortage=shortInfo.shortage||0;
+          item.shortageDate=shortInfo.shortageDate||order.ordDate||'';
+          item.arrival=shortInfo.arrival||'';
+          item.status=shortInfo.status||'';
+        }
+        return item;
+      });
+      const row=(orderRows||[])[0]||{};
+      order.items=fullItems;
+      order.buyer=order.buyer||row.buyer||'';
+      order.recv=order.recv||row.receiver||row.receiver_name||row.buyer||'';
+      order.ordDate=order.ordDate||row.ord_date||'';
+      order.invNo=order.invNo||row.inv_no||'';
+      order.orderMemo=order.orderMemo||row.order_memo||row.o_memo||'';
+      order.sellpiaOrderTotalAmount=order.sellpiaOrderTotalAmount||row.sellpia_order_total_amount;
+      order.sellpiaOrderTotalAmountRaw=order.sellpiaOrderTotalAmountRaw||row.sellpia_order_total_amount_raw||'';
+      order._fullInvoiceLoaded=true;
+      insp_renderList();
+      insp_renderDetail();
+      insp_updateStats();
+    }
+  }catch(e){
+    console.warn('미송 송장 전체 상품 보강 실패:', e);
+  }finally{
+    order._fullInvoiceLoading=false;
+  }
+}
+
 function insp_renderDetail(){
   const panel=document.getElementById('insp-detail-panel');
   if(!panel) return;
@@ -6760,6 +6842,7 @@ function insp_renderDetail(){
 
   // 미송 탭: 전체 주문 + 미송 표시
   if(order._isMisong){
+    if(insp_shouldEnsureFullMisongOrder(order)) insp_ensureFullMisongOrder(order);
     const shortSet = new Set((order.shortItems||[]).map(s=>s.code));
     const rows=order.items.map((it,i)=>{
       const stateCode=itemStateCode(it);
