@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0630-local-ui-hotfix-v1';
+const CACHE_NAME = 'picking-system-0630-gold-label-all-misong-v1';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0630-local-ui-hotfix-v1',
+  './picking-system_0519.css?v=0630-gold-label-all-misong-v1',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
