@@ -1746,6 +1746,38 @@ async function fetchOrderReceiptDateMapForShortageRows(rows){
   }
   return map;
 }
+async function fetchOrderContactMapForShortageRows(rows){
+  const ordNos=compactCodes((rows||[]).map(r=>r?.ord_no));
+  const map={};
+  for(const chunk of chunkArray(ordNos,200)){
+    if(!chunk.length) continue;
+    try{
+      const orderRows=await fetchAllRows(()=>db.from('orders')
+        .select('ord_no,inv_no,buyer,orderer,receiver,receiver_name,receiver_tel,receiver_mobile')
+        .in('ord_no',chunk));
+      (orderRows||[]).forEach(row=>{
+        const ord=String(row.ord_no||'').trim();
+        if(!ord||map[ord]) return;
+        const buyer=String(row.buyer||row.orderer||'').trim();
+        const receiver=String(row.receiver||row.receiver_name||buyer).trim();
+        const mobile=String(row.receiver_mobile||'').trim();
+        const tel=String(row.receiver_tel||'').trim();
+        map[ord]={
+          ordNo:ord,
+          invNo:String(row.inv_no||'').trim(),
+          buyer,
+          receiver,
+          receiverMobile:mobile,
+          receiverTel:tel,
+          phone:mobile||tel
+        };
+      });
+    }catch(e){
+      console.warn('orders 연락처 보강 실패:', e);
+    }
+  }
+  return map;
+}
 async function fetchInspectionMemoMapForInvNos(invNos){
   const map={};
   const compactInvs=compactCodes(invNos);
@@ -4780,9 +4812,11 @@ async function loadMisongData(showToast=false){
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
     const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
+    const orderContactMap=await fetchOrderContactMapForShortageRows(shRows||[]);
     misongData = (shRows||[]).map(r=>{
       const seqNo = realToSeq[r.inv_no]||'';
       const order = seqNo ? ORDERS_ALL.find(o=>String(o.no)===String(seqNo)) : null;
+      const contact=orderContactMap[String(r.ord_no||'').trim()]||{};
       const rowShortage=shortageRowQty(r);
       if(workflowStateFromShortageStatus(r.status,rowShortage)===WF_STATUS.INSPECTED) return null;
       const item = findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
@@ -4795,7 +4829,12 @@ async function loadMisongData(showToast=false){
         shortageMemo2[k]=String(r.memo2_val??'').trim();
       }
       const dateVal = getShortageBaseDate(r,seqNo,orderReceiptDateMap);
-      const buyerName = order?.buyer || r.orderer || '';
+      const buyerName = order?.buyer || contact.buyer || contact.receiver || r.orderer || '';
+      const receiverName = order?.recv || contact.receiver || buyerName;
+      const realInv = String(contact.invNo||r.inv_no||'').trim();
+      const phoneVal = order?.phone || order?.receiverMobile || order?.receiverTel || contact.phone || '';
+      const mobileVal = order?.receiverMobile || contact.receiverMobile || '';
+      const telVal = order?.receiverTel || contact.receiverTel || '';
       const fullName  = item?.name || r.p_name || '';
       let productPart = item ? itemNameOnly(item) : String(r.p_name||'').trim();
       let optionPart  = item ? itemOptionOnly(item) : String(r.p_option||r.seller_option_name||'').trim();
@@ -4807,7 +4846,7 @@ async function loadMisongData(showToast=false){
         productPart = productPart.slice(0,-(' / '+optionPart).length).trim();
       }
       return {
-        inv: r.inv_no,
+        inv: realInv || r.inv_no,
         ordNo: r.ord_no||'',
         code: codeKey,                          // 업무 상태 키 (자사코드 우선)
         itemNo: item?.itemNo||item?.item_no||r.item_no||codeKey,
@@ -4826,11 +4865,11 @@ async function loadMisongData(showToast=false){
         drawer: drawer[seqNo]||'',
         buyer: buyerName,
         orderer: buyerName,
-        name: buyerName,
-        phone: order?.phone||order?.receiverMobile||order?.receiverTel||'',
-        recPhone: order?.receiverMobile||order?.receiverTel||'',
-        receiverMobile: order?.receiverMobile||'',
-        receiverTel: order?.receiverTel||'',
+        name: receiverName,
+        phone: phoneVal,
+        recPhone: mobileVal||telVal,
+        receiverMobile: mobileVal,
+        receiverTel: telVal,
         elapsed: 0,
         done: (normalizeCSStatus(r.status)==='발송완료')?'✓':'',
         regDate: dateVal,
