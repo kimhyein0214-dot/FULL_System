@@ -814,7 +814,7 @@
       return normal(status) === '검품완료';
     }
     function isDrawerStatus(status) {
-      return normal(status) === '서랍입력';
+      return normal(status) === '서랍입력' || normal(status) === '보류';
     }
     function isPickedStatus(status) {
       return normal(status) === '피킹완료';

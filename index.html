@@ -617,9 +617,11 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .insp-dh-invoice:hover{background:#DBEAFE;border-color:#60A5FA;color:#1E40AF;}
 .insp-dh-invoice:active{transform:translateY(1px);}
 .insp-dh-stat{font-size:12px;font-weight:700;color:#7C7D81;}
-.insp-dh-done-btn{padding:6px 14px;border-radius:7px;border:2px solid #D9CBBA;background:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#000000;transition:all 0.12s;}
+.insp-dh-done-btn,.insp-dh-hold-btn{padding:6px 14px;border-radius:7px;border:2px solid #D9CBBA;background:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#000000;transition:all 0.12s;}
 .insp-dh-done-btn:hover{border-color:#0E7A4A;color:#0E7A4A;}
 .insp-dh-done-btn.done{background:#0E7A4A;border-color:#0E7A4A;color:#fff;}
+.insp-dh-hold-btn:hover{border-color:#D97706;color:#B45309;}
+.insp-dh-hold-btn.active{background:#D97706;border-color:#D97706;color:#fff;}
 
 /* 테이블 */
 .insp-table-wrap{flex:1;overflow:auto;padding:12px;}
@@ -4219,6 +4221,24 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
       },{inv_no,item_no:itemNo});
       shortageStatus[k]='서랍입력';
       shortageMemo2[k]='';
+    } else if(holdVal){
+      await upsertOrReplaceByItem('shortage',{
+        inv_no, ord_no,
+        item_no: itemNo,
+        item_sort_order: item?.itemSortOrder??null,
+        sellpia_p_code: item?.sellpiaCode||'',
+        orderer: order?.buyer||'',
+        p_code: storageCode,
+        p_name: item ? itemNameWithOption(item) : '',
+        short_qty: 0,
+        memo2_val: '',
+        drawer_no: '',
+        is_gold: isGold(item||code),
+        status: '보류',
+        updated_at: new Date().toISOString(),
+      },{inv_no,item_no:itemNo});
+      shortageStatus[k]='보류';
+      shortageMemo2[k]='';
     } else if(hadManagedShortage){
       await upsertOrReplaceByItem('shortage',{
         inv_no, ord_no,
@@ -4809,6 +4829,7 @@ function workflowStateFromShortageStatus(status, qty=0){
   if(st==='발송완료') return WF_STATUS.CS_DONE;
   if(st==='부분발송') return WF_STATUS.CS_PARTIAL;
   if(st==='발송대기') return WF_STATUS.CS_WAIT;
+  if(st==='보류') return WF_STATUS.HOLD;
   if(st==='서랍입력') return WF_STATUS.SHORT;
   if(st==='검품완료'||st==='메모정리완료') return WF_STATUS.INSPECTED;
   if(st==='피킹완료') return WF_STATUS.REPICKED_READY;
@@ -4838,7 +4859,7 @@ function getOrderWorkflowState(order){
 function isMisongPickingTargetStatus(status, qty){
   const st=normalizeShortageStatus(status);
   if(SHORTAGE_TERMINAL_STATUSES.has(st)) return false;
-  return Number(qty)>0 || st==='서랍입력' || st==='피킹완료';
+  return Number(qty)>0 || st==='서랍입력' || st==='보류' || st==='피킹완료';
 }
 function isInspectionMisongReadyStatus(status, qty){
   return workflowStateFromShortageStatus(status,qty)===WF_STATUS.REPICKED_READY;
@@ -5908,12 +5929,12 @@ function inspOrderHasAttention(order){
   if(!order) return false;
   if(order._isMisong) return true;
   if(inspOrderHasMemoSignal(order)) return true;
-  return (order.items||[]).some(it=>[WF_STATUS.SHORT,WF_STATUS.REPICKED_READY].includes(getItemWorkflowState(order.no,itemStateCode(it))));
+  return (order.items||[]).some(it=>[WF_STATUS.SHORT,WF_STATUS.REPICKED_READY,WF_STATUS.HOLD].includes(getItemWorkflowState(order.no,itemStateCode(it))));
 }
 function inspInspectionBlockers(order){
   if(!order) return [];
   const orderNo=String(order.no||realToSeq[order.invNo]||order.invNo||'').trim();
-  const blockedStatuses=new Set(['배송대기','서랍입력','발송대기','부분발송','메모','서랍메모','주문메모']);
+  const blockedStatuses=new Set(['배송대기','서랍입력','보류','발송대기','부분발송','메모','서랍메모','주문메모']);
   const blockers=[];
   const seen=new Set();
   const addBlocker=(code, qty, status, label)=>{
@@ -5932,6 +5953,7 @@ function inspInspectionBlockers(order){
     const stateCode=itemStateCode(it);
     const k=orderNo+'-'+stateCode;
     addBlocker(stateCode, shortage[k]||it.shortage||0, shortageStatus[k]||it.status||'', inspOwnCodeText(it)||it.sellpiaCode||stateCode);
+    if(getItemWorkflowState(orderNo,stateCode)===WF_STATUS.HOLD) addBlocker(stateCode,0,'보류',inspOwnCodeText(it)||it.sellpiaCode||stateCode);
     if(inspItemHasMemoSignal(order,it)) addBlocker(stateCode, 0, '메모', inspOwnCodeText(it)||it.sellpiaCode||stateCode);
   });
   if(String(drawer[order.no]||'').trim()){
@@ -6882,6 +6904,8 @@ function insp_renderDetail(){
       +'</tr>';
     }).join('');
     const shortCnt=(order.shortItems||[]).length;
+    const holdActive=inspOrderHasHold(order);
+    const safeOrderNo=String(order.no).replace(/'/g,"\\'");
     panel.innerHTML=
       '<div class="insp-detail-hdr">'
         +'<div class="insp-dh-no">'+workNoHtml(order.no,'sm')+'</div>'
@@ -6900,7 +6924,8 @@ function insp_renderDetail(){
             +' onblur="insp_saveDrawer(\''+String(order.no).replace(/'/g,"\\'")+'\',this.value)"'
           +'>'
         +'</div>'
-        +'<button class="insp-dh-done-btn'+(isInspectionDone(order)?' done':'')+'" onclick="insp_toggleDone(\''+String(order.no).replace(/'/g,"\\'")+'\')">'+(isInspectionDone(order)?'✅ 완료':'완료 처리')+'</button>'
+        +'<button class="insp-dh-hold-btn'+(holdActive?' active':'')+'" onclick="insp_toggleHold(\''+safeOrderNo+'\')">'+(holdActive?'보류 해제':'보류 처리')+'</button>'
+        +'<button class="insp-dh-done-btn'+(isInspectionDone(order)?' done':'')+'" onclick="insp_toggleDone(\''+safeOrderNo+'\')">'+(isInspectionDone(order)?'✅ 완료':'완료 처리')+'</button>'
       +'</div>'
       +'<div class="insp-table-wrap">'
         +'<table class="insp-table" id="insp-main-table">'
@@ -6922,7 +6947,7 @@ function insp_renderDetail(){
       +'<div class="insp-key-hint"><span class="insp-kh"><span class="insp-kbd">빨간 행</span> = 미송 항목 · 입고예정일/상태는 CS탭에서 수정</span></div>';
     return;
   }
-  const done=isInspectionDone(order), isGoldInv=insp_GOLD_NOS.has(order.no)||order.items.some(it=>isGold(it));
+  const done=isInspectionDone(order), holdActive=inspOrderHasHold(order), isGoldInv=insp_GOLD_NOS.has(order.no)||order.items.some(it=>isGold(it));
   const items=insp_tabMode==='golditem'?order.items.filter(it=>isGold(it)):order.items;
   const joLabel=inspOrderJoLabel(order);
   let label;
@@ -6939,7 +6964,7 @@ function insp_renderDetail(){
     const goldItem=isGold(it), rowFocused=i===insp_itemFocusIdx;
     const stateCode=itemStateCode(it);
     const itemState=getItemWorkflowState(order.no,stateCode);
-    const itemShort=itemState===WF_STATUS.SHORT || inspItemHasMemoSignal(order,it);
+    const itemShort=itemState===WF_STATUS.SHORT || itemState===WF_STATUS.HOLD || inspItemHasMemoSignal(order,it);
     const memoId='insp-memo-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal=insp_itemMemos[insp_memoKey(order.no,it.code)]||'';
     const imgUrl=productImageUrlForItem(it);
@@ -6991,7 +7016,8 @@ function insp_renderDetail(){
           +' onblur="insp_saveDrawer('+order.no+',this.value)"'
         +'>'
       +'</div>'
-      +'<button class="insp-dh-done-btn'+(done?' done':'')+'" onclick="insp_toggleDone('+order.no+')">'+(done?'✅ 완료':'완료 처리')+'</button>'
+      +'<button class="insp-dh-hold-btn'+(holdActive?' active':'')+'" onclick="insp_toggleHold(\''+String(order.no).replace(/'/g,"\\'")+'\')">'+(holdActive?'보류 해제':'보류 처리')+'</button>'
+      +'<button class="insp-dh-done-btn'+(done?' done':'')+'" onclick="insp_toggleDone(\''+String(order.no).replace(/'/g,"\\'")+'\')">'+(done?'✅ 완료':'완료 처리')+'</button>'
     +'</div>'
     +'<div class="insp-table-wrap">'
       +'<table class="insp-table'+((insp_tabMode==='golditem'||insp_tabMode==='gold')?' has-label-col':'')+'" id="insp-main-table">'
@@ -7068,6 +7094,58 @@ function insp_saveDrawer(invNo, val){
     const k=invNo+'-'+stateCode;
     saveToSheet(invNo,stateCode,!!checked[k],shortage[k]||0,val,!!holded[k]).catch(()=>{});
   });
+}
+
+function inspOrderHasHold(order){
+  if(!order) return false;
+  return (order.items||[]).some(it=>holded[String(order.no)+'-'+itemStateCode(it)] || getItemWorkflowState(order.no,itemStateCode(it))===WF_STATUS.HOLD);
+}
+async function insp_toggleHold(invNo){
+  const order=inspOrderByNo(invNo)||{no:invNo,invNo:seqToReal[invNo]||String(invNo),items:[]};
+  if(!order.items||!order.items.length){
+    toast('⚠ 보류 처리할 상품이 없습니다');
+    return;
+  }
+  const nextHold=!inspOrderHasHold(order);
+  const prevHolded={};
+  const prevStatuses={};
+  const prevMemo2={};
+  order.items.forEach(it=>{
+    const stateCode=itemStateCode(it);
+    const k=String(order.no)+'-'+stateCode;
+    prevHolded[k]=!!holded[k];
+    prevStatuses[k]=shortageStatus[k];
+    prevMemo2[k]=shortageMemo2[k];
+    if(nextHold){
+      holded[k]=true;
+      if(!Number(shortage[k]||0)&&!String(drawer[order.no]||'').trim()) shortageStatus[k]='보류';
+    }else{
+      delete holded[k];
+      if(shortageStatus[k]==='보류'){
+        shortageStatus[k]='검품완료';
+        shortageMemo2[k]='';
+      }
+    }
+  });
+  insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar();
+  try{
+    await Promise.all(order.items.map(it=>{
+      const stateCode=itemStateCode(it);
+      const k=String(order.no)+'-'+stateCode;
+      return saveToSheet(order.no,stateCode,!!checked[k],shortage[k]||0,drawer[order.no]||'',nextHold);
+    }));
+    toast(nextHold?'⏸ 배송보류 처리':'↩ 배송보류 해제');
+  }catch(e){
+    order.items.forEach(it=>{
+      const stateCode=itemStateCode(it);
+      const k=String(order.no)+'-'+stateCode;
+      if(prevHolded[k]) holded[k]=true; else delete holded[k];
+      if(prevStatuses[k]) shortageStatus[k]=prevStatuses[k]; else delete shortageStatus[k];
+      if(prevMemo2[k]) shortageMemo2[k]=prevMemo2[k]; else delete shortageMemo2[k];
+    });
+    insp_renderList(); insp_renderDetail(); insp_updateStats(); insp_renderSidebar();
+    toast('⚠ 보류 저장 실패: '+(e.message||e),5000);
+  }
 }
 
 async function insp_toggleDone(invNo){

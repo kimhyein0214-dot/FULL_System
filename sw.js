@@ -1,8 +1,8 @@
-const CACHE_NAME = 'picking-system-0630-inspection-full-invoice-v2';
+const CACHE_NAME = 'picking-system-0630-inspection-hold-v1';
 const APP_ASSETS = [
   './',
   './index.html',
-  './picking-system_0519.css?v=0630-inspection-full-invoice-v2',
+  './picking-system_0519.css?v=0630-inspection-hold-v1',
   './manifest.webmanifest',
   './pwa-icon.svg'
 ];
