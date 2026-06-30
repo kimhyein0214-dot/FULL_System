@@ -194,6 +194,19 @@
       const text = await res.text();
       return text ? JSON.parse(text) : [];
     }
+    async function dbPatch(path, body) {
+      const res = await fetch(CONFIG.supabaseUrl + '/rest/v1/' + path, {
+        method: 'PATCH',
+        headers: {
+          apikey: CONFIG.supabaseKey,
+          Authorization: 'Bearer ' + CONFIG.supabaseKey,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify(body || {})
+      });
+      if (!res.ok) throw new Error('DB 저장 오류: ' + await res.text());
+    }
     async function dbRowsByInvoiceOrOrder(table, invNo, ordNo, select) {
       const inv = encodeURIComponent(invNo || '');
       const ord = encodeURIComponent(ordNo || '');
@@ -1137,6 +1150,99 @@
       }
       return actions.join(' / ') || '변경 없음';
     }
+    function rowOrderMemo(row) {
+      return normal(
+        row && (
+          row.order_memo ||
+          row.o_memo ||
+          row.c_ord_memo ||
+          row.c_order_memo ||
+          row.ord_memo ||
+          row.orderMemo ||
+          row.memo
+        )
+      );
+    }
+    function extractOrderMemoFromRows(rows) {
+      rows = rows || [];
+      for (const row of rows) {
+        const memo = rowOrderMemo(row);
+        if (memo) return memo;
+      }
+      return '';
+    }
+    async function patchOrderMemo(ordNo, memo) {
+      const ord = normal(ordNo);
+      if (!ord) throw new Error('주문번호가 없어 주문메모를 저장할 수 없습니다.');
+      await dbPatch(`orders?ord_no=eq.${encodeURIComponent(ord)}`, {
+        order_memo: memo || '',
+        updated_at: new Date().toISOString()
+      });
+    }
+    async function collectOrderMemoTargets(date, filters = {}) {
+      const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
+      let rows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,inv_no,am_pm,order_memo`);
+      if (sessionFilter !== 'ALL') {
+        rows = rows.filter(row => normal(row.am_pm).toUpperCase() === sessionFilter);
+      }
+      return rows.map(row => ({
+        ordNo: normal(row.ord_no),
+        invNo: normal(row.inv_no),
+        currentMemo: normal(row.order_memo)
+      })).filter(row => row.ordNo);
+    }
+    async function updateOrderMemoTarget(target) {
+      const hit = await searchInvoice(target.invNo, target.ordNo);
+      const detail = await openOrderDetail(hit);
+      const memo = extractOrderMemoFromRows(detail.rows);
+      await patchOrderMemo(detail.ordNo || target.ordNo, memo);
+      return { ordNo: detail.ordNo || target.ordNo, memo };
+    }
+    async function runOrderMemoSyncOnce({ invNo = '', date = '', session = 'ALL' } = {}) {
+      if (invNo) {
+        const hit = await searchInvoice(invNo);
+        const detail = await openOrderDetail(hit);
+        const memo = extractOrderMemoFromRows(detail.rows);
+        await patchOrderMemo(detail.ordNo, memo);
+        addLog(`주문메모 저장: ${detail.ordNo} / ${memo ? memo.slice(0, 40) : '(빈값)'}`);
+        return { ok: 1, fail: 0 };
+      }
+      const targets = await collectOrderMemoTargets(date, { session });
+      if (!targets.length) {
+        addLog('주문메모 업데이트 대상이 없습니다.');
+        return { ok: 0, fail: 0 };
+      }
+      addLog(`주문메모 업데이트 대상 ${targets.length}건`);
+      let ok = 0;
+      let fail = 0;
+      for (let i = 0; i < targets.length; i++) {
+        if (stopped) break;
+        const target = targets[i];
+        setStatus(`[주문메모 ${i + 1}/${targets.length}]\n${target.invNo || target.ordNo}`);
+        try {
+          const result = await updateOrderMemoTarget(target);
+          addLog(`✓ ${result.ordNo} / ${result.memo ? result.memo.slice(0, 40) : '(빈값)'}`);
+          ok++;
+        } catch (err) {
+          addLog(`✗ ${target.invNo || target.ordNo}: ${err.message}`);
+          fail++;
+        }
+        setBar(i + 1, targets.length);
+        await sleep(180);
+      }
+      return { ok, fail };
+    }
+    async function runOrderMemoWatcher(opts) {
+      let cycle = 0;
+      while (!stopped) {
+        cycle++;
+        addLog(`── 주문메모 감시 ${cycle}회차 ──`);
+        const result = await runOrderMemoSyncOnce(opts);
+        setStatus(`주문메모 감시 중\n최근 결과: 성공 ${result.ok}건 / 실패 ${result.fail}건\n30초 후 다시 확인`);
+        for (let i = 0; i < 30 && !stopped; i++) await sleep(1000);
+      }
+      setStatus('주문메모 감시 중단됨');
+    }
     function buildOverlay() {
       const overlay = document.createElement('div');
       overlay.id = 'smu0608-overlay';
@@ -1174,6 +1280,10 @@
             <label style="display:block;margin:0 0 6px;color:#cbd5e1;font-size:12px;">발송대기 관리메모1 문구</label>
             <input id="smu0608-nextship-memo" value="!!" placeholder="예: !! / ?? / 내일출고" style="width:100%;box-sizing:border-box;height:38px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;margin-bottom:14px;">
             <button id="smu0608-start" style="width:100%;height:42px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:900;cursor:pointer;">시작</button>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+              <button id="smu0608-order-memo-once" style="height:38px;border:0;border-radius:8px;background:#0ea5e9;color:#fff;font-weight:900;cursor:pointer;">주문메모 업데이트</button>
+              <button id="smu0608-order-memo-watch" style="height:38px;border:0;border-radius:8px;background:#22c55e;color:#06210f;font-weight:900;cursor:pointer;">주문메모 감시 시작</button>
+            </div>
           </div>
           <div id="smu0608-work" style="display:none;">
             <div id="smu0608-status" style="white-space:pre-line;line-height:1.5;color:#e5e7eb;font-size:13px;min-height:42px;"></div>
@@ -1206,6 +1316,43 @@
       $id('smu0608-stop').textContent = '중단 중...';
       $id('smu0608-stop').disabled = true;
     };
+    function orderMemoOptsFromForm() {
+      return {
+        invNo: normal($id('smu0608-inv').value),
+        date: normal($id('smu0608-date').value),
+        session: normal($id('smu0608-session').value || 'ALL')
+      };
+    }
+    async function startOrderMemoMode(watch) {
+      const opts = orderMemoOptsFromForm();
+      if (!opts.invNo && !opts.date) {
+        alert('송장번호 또는 날짜를 입력해주세요.');
+        return;
+      }
+      if (!opts.invNo && !confirm(`${opts.date} 주문메모를 주문조회에서 읽어 DB에 반영합니다. 계속할까요?`)) return;
+      $id('smu0608-form').style.display = 'none';
+      $id('smu0608-work').style.display = 'block';
+      stopped = false;
+      $id('smu0608-stop').textContent = '중단';
+      $id('smu0608-stop').disabled = false;
+      try {
+        if (opts.date) {
+          setStatus(`${opts.date} 주문조회 검색조건 적용 중...`);
+          await applyOrderSearchDate(opts.date, true);
+        }
+        if (watch) {
+          await runOrderMemoWatcher(opts);
+        } else {
+          const result = await runOrderMemoSyncOnce(opts);
+          setStatus(`주문메모 업데이트 완료\n성공 ${result.ok}건 / 실패 ${result.fail}건`);
+        }
+      } catch (err) {
+        setStatus('오류\n' + err.message);
+        addLog(err.stack || err.message);
+      }
+    }
+    $id('smu0608-order-memo-once').onclick = () => startOrderMemoMode(false);
+    $id('smu0608-order-memo-watch').onclick = () => startOrderMemoMode(true);
     $id('smu0608-start').onclick = async () => {
       const invNo = normal($id('smu0608-inv').value);
       const date = normal($id('smu0608-date').value);

@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0630-gold-label-all-misong-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0630-order-memo-watch-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -948,7 +948,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
     onchange="selectedDate=this.value;reloadData()" title="조회 날짜 변경">
   <button class="abtn" onclick="selectedDate=new Date().toISOString().slice(0,10);document.getElementById('date-picker').value=selectedDate;reloadData()" style="background:#444;font-size:10px;" title="오늘로 초기화">오늘</button>
   <div style="display:flex;gap:3px;flex-shrink:0;">
-    <button id="ampm-all" class="abtn" onclick="setSession('ALL')" style="font-size:10px;background:rgba(255,255,255,0.85);color:#1a2a3a;font-weight:800;">전체</button>
+    <button id="ampm-all" class="abtn" onclick="setSession('ALL')" style="font-size:10px;background:#3B82F6;color:#fff;font-weight:900;border-color:#2563EB;">전체</button>
     <button id="ampm-am"  class="abtn" onclick="setSession('AM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오전</button>
     <button id="ampm-pm"  class="abtn" onclick="setSession('PM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오후</button>
   </div>
@@ -1723,6 +1723,69 @@ async function fetchOrderItemOwnMapForShortageRows(rows){
   }
   return map;
 }
+async function fetchOrderReceiptDateMapForShortageRows(rows){
+  const ordNos=compactCodes((rows||[]).map(r=>r?.ord_no));
+  const map={};
+  for(const chunk of chunkArray(ordNos,200)){
+    if(!chunk.length) continue;
+    try{
+      const orderRows=await fetchAllRows(()=>db.from('orders')
+        .select('ord_no,ord_date,scraped_at')
+        .in('ord_no',chunk));
+      (orderRows||[]).forEach(row=>{
+        const ord=String(row.ord_no||'').trim();
+        const receipt=String(row.ord_date||row.scraped_at||'').trim();
+        if(ord&&receipt&&!map[ord]) map[ord]=receipt;
+      });
+    }catch(e){
+      console.warn('orders 접수일 보강 실패:', e);
+    }
+  }
+  return map;
+}
+async function fetchInspectionMemoMapForInvNos(invNos){
+  const map={};
+  const compactInvs=compactCodes(invNos);
+  for(const chunk of chunkArray(compactInvs,200)){
+    if(!chunk.length) continue;
+    try{
+      const rows=await fetchAllRows(()=>db.from('inspection')
+        .select('inv_no,item_no,p_code,insp_memo')
+        .in('inv_no',chunk));
+      (rows||[]).forEach(row=>{
+        const inv=String(row.inv_no||'').trim();
+        const memo=String(row.insp_memo||'').trim();
+        if(!inv||!memo) return;
+        [row.p_code,row.item_no].forEach(code=>{
+          const key=String(code||'').trim();
+          if(key&&key!=='__done__'&&!map[inv+'|'+key]) map[inv+'|'+key]=memo;
+        });
+      });
+    }catch(e){
+      console.warn('inspection 메모 보강 실패:', e);
+    }
+  }
+  return map;
+}
+async function fetchOrderMemoMapForShortageRows(rows){
+  const ordNos=compactCodes((rows||[]).map(r=>r?.ord_no));
+  const map={};
+  for(const chunk of chunkArray(ordNos,200)){
+    if(!chunk.length) continue;
+    try{
+      const orderRows=await fetchAllRows(()=>db.from('orders')
+        .select('ord_no,order_memo')
+        .in('ord_no',chunk));
+      (orderRows||[]).forEach(row=>{
+        const ord=String(row.ord_no||'').trim();
+        if(ord) map[ord]=String(row.order_memo||'');
+      });
+    }catch(e){
+      console.warn('orders 주문메모 보강 실패:', e);
+    }
+  }
+  return map;
+}
 function shortageRowFallbackItem(row,orderItemOwnMap){
   if(!row||!orderItemOwnMap) return null;
   const ord=String(row.ord_no||'').trim();
@@ -1740,18 +1803,33 @@ function inspOwnCodeText(it){
 document.addEventListener('DOMContentLoaded',()=>{
   const dp=document.getElementById('date-picker');
   if(dp) dp.value=selectedDate;
+  paintSessionButtons();
   setInterval(()=>autoRefreshData(), 3*60*1000); // 3분마다 데이터만 자동 갱신 (미동기화 작업이 있으면 건너뜀)
 });
 let selectedDate = new Date().toISOString().slice(0,10); // 조회 날짜 (기본: 오늘)
 let selectedSession = 'ALL'; // 'ALL' | 'AM' | 'PM'
-function setSession(s){
-  selectedSession=s;
+function paintSessionButtons(){
   ['ALL','AM','PM'].forEach(v=>{
     const btn=document.getElementById('ampm-'+v.toLowerCase());
     if(!btn)return;
-    if(v===s){btn.style.background='rgba(255,255,255,0.85)';btn.style.color='#1a2a3a';btn.style.fontWeight='800';}
-    else{btn.style.background='rgba(255,255,255,0.15)';btn.style.color='rgba(255,255,255,0.6)';btn.style.fontWeight='700';}
+    if(v===selectedSession){
+      btn.style.background='#3B82F6';
+      btn.style.color='#fff';
+      btn.style.fontWeight='900';
+      btn.style.borderColor='#2563EB';
+      btn.style.boxShadow='0 0 0 1px rgba(37,99,235,.18)';
+    }else{
+      btn.style.background='rgba(255,255,255,0.15)';
+      btn.style.color='rgba(255,255,255,0.68)';
+      btn.style.fontWeight='700';
+      btn.style.borderColor='rgba(255,255,255,0.3)';
+      btn.style.boxShadow='none';
+    }
   });
+}
+function setSession(s){
+  selectedSession=s;
+  paintSessionButtons();
   reloadData();
 }
 let noMap={},invToNo={},_sbChannel=null;
@@ -4639,14 +4717,18 @@ function csRowShortageQty(row){
   if(Number(local)>0) return Number(local);
   return Number(row.shortage)||0;
 }
-function getShortageBaseDate(row,seqNo){
-  return dateFromOrdNo(row?.ord_no)
-    || (seqNo?(noMap[seqNo]?.scraped_at||noMap[seqNo]?.ord_date||''):'')
+function getShortageBaseDate(row,seqNo,receiptDateMap={}){
+  const ord=String(row?.ord_no||'').trim();
+  return row?.work_date
+    || (ord&&receiptDateMap[ord])
+    || row?.ord_date
+    || (seqNo?(noMap[seqNo]?.ord_date||noMap[seqNo]?.scraped_at||''):'')
     || row?.created_at
     || row?.created
     || row?.reg_date
     || row?.shortage_date
     || row?.updated_at
+    || dateFromOrdNo(row?.ord_no)
     || '';
 }
 // syncMisongDays 제거 (더미 액션 정리)
@@ -4659,6 +4741,7 @@ async function loadMisongData(showToast=false){
     if(error) throw error;
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
+    const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
     misongData = (shRows||[]).map(r=>{
       const seqNo = realToSeq[r.inv_no]||'';
       const order = seqNo ? ORDERS_ALL.find(o=>String(o.no)===String(seqNo)) : null;
@@ -4673,7 +4756,7 @@ async function loadMisongData(showToast=false){
         shortageStatus[k]=normalizeShortageStatus(r.status);
         shortageMemo2[k]=String(r.memo2_val??'').trim();
       }
-      const dateVal = getShortageBaseDate(r,seqNo);
+      const dateVal = getShortageBaseDate(r,seqNo,orderReceiptDateMap);
       const buyerName = order?.buyer || r.orderer || '';
       const fullName  = item?.name || r.p_name || '';
       let productPart = item ? itemNameOnly(item) : String(r.p_name||'').trim();
@@ -5648,13 +5731,22 @@ let insp_histItems = [];
 let insp_initialized = false;
 
 function insp_memoKey(invNo,code){ return invNo+'-'+code; }
+function memoDomSuffix(invNo,code){
+  return String(invNo)+'-'+String(code||'').replace(/[^a-zA-Z0-9]/g,'_');
+}
 
 function insp_saveMemo(invNo,code,val){
   const k=insp_memoKey(invNo,code);
   if(val) insp_itemMemos[k]=val; else delete insp_itemMemos[k];
   memoData[k]=val||'';
-  const ta=document.getElementById('insp-memo-'+invNo+'-'+code.replace(/[^a-zA-Z0-9]/g,'_'));
+  const suffix=memoDomSuffix(invNo,code);
+  const ta=document.getElementById('insp-memo-'+suffix);
   if(ta) ta.classList.toggle('insp-item-memo-filled',!!val);
+  const misongTa=document.getElementById('misong-memo-'+suffix);
+  if(misongTa){
+    if(misongTa.value!==(val||'')) misongTa.value=val||'';
+    misongTa.classList.toggle('insp-item-memo-filled',!!val);
+  }
   document.querySelectorAll('.pick-row[data-inv="'+invNo+'"] .pr-memo-cell .pr-field-input').forEach(inp=>{
     const row=inp.closest('.pick-row');
     if(!row) return;
@@ -5976,6 +6068,7 @@ async function insp_loadMisongOrders(){
     if(error) throw error;
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
+    const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
     const invMap={};
     (shRows||[]).forEach(r=>{
       const sq=shortageRowQty(r);
@@ -5988,7 +6081,7 @@ async function insp_loadMisongOrders(){
     _misongOrdersCache = Object.entries(invMap).map(([inv_no,rows])=>{
       const seqNo=realToSeq[inv_no]||'';
       const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
-      const baseDate=order?.ordDate||getShortageBaseDate(rows[0],seqNo)||'';
+      const baseDate=order?.ordDate||getShortageBaseDate(rows[0],seqNo,orderReceiptDateMap)||'';
       const fallbackItems=rows.map(r=>{
         const sq=shortageRowQty(r);
         const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
@@ -6010,7 +6103,7 @@ async function insp_loadMisongOrders(){
           option:item?.option||'',
           qty:Math.max(1,sq||1),
           shortage:sq,
-          shortageDate:getShortageBaseDate(r,seqNo)||baseDate,
+          shortageDate:getShortageBaseDate(r,seqNo,orderReceiptDateMap)||baseDate,
           arrival:r.arrival_date||'',
           status:r.status||''
         };
@@ -6031,14 +6124,14 @@ async function insp_loadMisongOrders(){
           });
           const sq=sr?shortageRowQty(sr):0;
           const ownCode=it.resolvedOwnCode||shortageDisplayCode(sr,it,shortageOwnMap);
-          return {...it, prodCode:it.prodCode||ownCode, resolvedOwnCode:ownCode, shortage:shortage[(seqNo||inv_no)+'-'+stateCode]||sq||0, shortageDate:getShortageBaseDate(sr,seqNo)||baseDate, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
+          return {...it, prodCode:it.prodCode||ownCode, resolvedOwnCode:ownCode, shortage:shortage[(seqNo||inv_no)+'-'+stateCode]||sq||0, shortageDate:getShortageBaseDate(sr,seqNo,orderReceiptDateMap)||baseDate, arrival:sr?.arrival_date||'', status:sr?.status||it.status||''};
         }),
         shortItems: rows.map(r=>{
           const item=findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
           const ownCode=shortageDisplayCode(r,item,shortageOwnMap);
           const stateCode=item ? itemStateCode(item) : makeStateItemNo(r.item_no,r.item_sort_order||r.sort_order,0);
           const sq=shortage[(seqNo||inv_no)+'-'+stateCode]||shortageRowQty(r);
-          return {code:stateCode,itemNo:item?.itemNo||item?.item_no||r.item_no||stateCode,itemSortOrder:item?.itemSortOrder??r.item_sort_order,prodCode:ownCode,sellpiaCode:item?.sellpiaCode||r.p_code,shortage:sq,shortageDate:getShortageBaseDate(r,seqNo)||baseDate,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
+          return {code:stateCode,itemNo:item?.itemNo||item?.item_no||r.item_no||stateCode,itemSortOrder:item?.itemSortOrder??r.item_sort_order,prodCode:ownCode,sellpiaCode:item?.sellpiaCode||r.p_code,shortage:sq,shortageDate:getShortageBaseDate(r,seqNo,orderReceiptDateMap)||baseDate,arrival:r.arrival_date||'',status:r.status||'',memo2:String(r.memo2_val??'').trim()};
         }).filter(it=>it.code),
         _isMisong: true
       };
@@ -6221,9 +6314,54 @@ function inspOrderAmountBadges(order){
 function inspSellpiaOrderMemoText(order){
   return String(order?.orderMemo||'').trim();
 }
+let sellpiaOrderMemoSaveTimer={};
+function orderMemoDomSuffix(ordNo){
+  return String(ordNo||'').replace(/[^a-zA-Z0-9]/g,'_');
+}
+function setOrderMemoDomValue(ordNo,val){
+  const key=String(ordNo||'');
+  document.querySelectorAll('.sellpia-order-memo-ta').forEach(el=>{
+    if(String(el.dataset.ord||'')!==key) return;
+    if(document.activeElement!==el && el.value!==String(val||'')) el.value=String(val||'');
+    const has=!!String(val||'').trim();
+    el.classList.toggle('has-val',has);
+    el.style.background=has?'#F3F8FF':'#F7F8FA';
+  });
+}
+function syncSellpiaOrderMemoLocal(ordNo,val){
+  const key=String(ordNo||'').trim();
+  if(!key) return;
+  (ORDERS_ALL||[]).forEach(o=>{
+    if(String(o.ordNo||noMap[o.no]?.ord_no||'').trim()===key) o.orderMemo=val||'';
+  });
+  (misongPickingData||[]).forEach(r=>{
+    if(String(r.ordNo||'').trim()===key) r.orderMemo=val||'';
+  });
+  setOrderMemoDomValue(key,val||'');
+}
+function saveSellpiaOrderMemo(ordNo,val){
+  const key=String(ordNo||'').trim();
+  if(!key) return;
+  syncSellpiaOrderMemoLocal(key,val||'');
+  clearTimeout(sellpiaOrderMemoSaveTimer[key]);
+  sellpiaOrderMemoSaveTimer[key]=setTimeout(async()=>{
+    try{
+      const {error}=await db.from('orders')
+        .update({order_memo:val||'',updated_at:new Date().toISOString()})
+        .eq('ord_no',key);
+      if(error) throw error;
+    }catch(e){
+      console.warn('셀피아 주문메모 저장 실패:', e);
+      toast('⚠ 주문메모 저장 실패: '+(e.message||e),4000);
+    }
+  },500);
+}
 function inspMemoCell(order,it,memoId,memoVal){
   const codeEsc=String(it?.code||'').replace(/'/g,"\\'");
   const sellpiaMemo=inspSellpiaOrderMemoText(order);
+  const ordNo=String(order?.ordNo||noMap[order?.no]?.ord_no||'').trim();
+  const ordEsc=ordNo.replace(/'/g,"\\'");
+  const orderMemoId='sellpia-order-memo-'+orderMemoDomSuffix(ordNo);
   return '<td class="insp-memo-cell" style="vertical-align:top;padding:5px 6px;width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;max-width:'+inspMemoColW+'px;">'
     +'<div style="display:flex;flex-direction:column;gap:4px;height:100%;">'
       +'<textarea id="'+memoId+'" class="insp-item-memo'+(memoVal?' insp-item-memo-filled':'')+'" placeholder="로컬 검품 메모..." rows="2"'
@@ -6231,10 +6369,14 @@ function inspMemoCell(order,it,memoId,memoVal){
         +' oninput="insp_saveMemo('+order.no+',\''+codeEsc+'\',(this.value))"'
         +' onkeydown="insp_handleMemoKey(event)"'
       +'>'+memoVal+'</textarea>'
-      +'<div class="insp-sellpia-order-memo'+(sellpiaMemo?' has-val':'')+'" title="'+htmlEsc(sellpiaMemo)+'"'
-        +' style="box-sizing:border-box;min-height:34px;max-height:58px;overflow:auto;border:1px solid #C9D6E2;border-radius:6px;background:'+(sellpiaMemo?'#F3F8FF':'#F7F8FA')+';padding:3px 6px;">'
-        +'<div style="font-size:9px;line-height:1.1;font-weight:900;color:#4E6C8A;margin-bottom:1px;">셀피아 주문메모</div>'
-        +'<div style="font-size:11px;line-height:1.25;font-weight:700;color:'+(sellpiaMemo?'#1A2840':'#A0AEC0')+';white-space:pre-wrap;word-break:break-word;">'+(sellpiaMemo?htmlEsc(sellpiaMemo):'—')+'</div>'
+      +'<div class="insp-sellpia-order-memo'+(sellpiaMemo?' has-val':'')+'" title="orders.order_memo"'
+        +' style="box-sizing:border-box;min-height:48px;max-height:72px;border:1px solid #C9D6E2;border-radius:6px;background:'+(sellpiaMemo?'#F3F8FF':'#F7F8FA')+';padding:3px 6px;">'
+        +'<div style="font-size:9px;line-height:1.1;font-weight:900;color:#4E6C8A;margin-bottom:2px;">셀피아 주문메모</div>'
+        +'<textarea id="'+orderMemoId+'" data-ord="'+htmlEsc(ordNo)+'" class="sellpia-order-memo-ta'+(sellpiaMemo?' has-val':'')+'" placeholder="셀피아 주문메모..." rows="2"'
+          +' style="width:100%;box-sizing:border-box;min-height:32px;max-height:54px;resize:vertical;border:0;outline:none;background:transparent;color:#1A2840;font-size:11px;line-height:1.25;font-weight:700;font-family:inherit;"'
+          +(ordNo?' oninput="saveSellpiaOrderMemo(\''+ordEsc+'\',this.value)"':' disabled')
+          +' onkeydown="insp_handleMemoKey(event)"'
+        +'>'+htmlEsc(sellpiaMemo)+'</textarea>'
       +'</div>'
     +'</div>'
   +'</td>';
@@ -6908,6 +7050,12 @@ function setupRealtime(){
       if(r.hold) holded[k]=true; else delete holded[k];
       scheduleRender();
     })
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders'},payload=>{
+      const r=payload.new||{};
+      const ordNo=String(r.ord_no||'').trim();
+      if(!ordNo) return;
+      syncSellpiaOrderMemoLocal(ordNo,String(r.order_memo||''));
+    })
     .subscribe();
 }
 
@@ -6946,7 +7094,7 @@ async function loadMisongPickingData(showToast=false){
         const stateCode=itemStateCode(it);
         const k=o.no+'-'+stateCode;
         const sh=shortage[k]||0;
-        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:stateCode,itemNo:it.itemNo||it.code,itemSortOrder:it.itemSortOrder,sellpiaCode:it.sellpiaCode||'',prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate});
+        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:stateCode,itemNo:it.itemNo||it.code,itemSortOrder:it.itemSortOrder,sellpiaCode:it.sellpiaCode||'',prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate,orderMemo:o.orderMemo||''});
       });
     });
   }
@@ -6955,6 +7103,9 @@ async function loadMisongPickingData(showToast=false){
     if(error) throw error;
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
+    const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
+    const inspectionMemoMap=await fetchInspectionMemoMapForInvNos((shRows||[]).map(r=>r.inv_no));
+    const orderMemoMap=await fetchOrderMemoMapForShortageRows(shRows||[]);
     (shRows||[]).forEach(r=>{
       const status=normalizeShortageStatus(r.status);
       const sh=shortageRowQty(r);
@@ -6969,6 +7120,12 @@ async function loadMisongPickingData(showToast=false){
       if(sh>0) shortage[k]=sh;
       shortageStatus[k]=status;
       shortageMemo2[k]=String(r.memo2_val??'').trim();
+      const invMemoKey=String(r.inv_no||'').trim();
+      const inspMemo=inspectionMemoMap[invMemoKey+'|'+codeKey]
+        || inspectionMemoMap[invMemoKey+'|'+String(r.item_no||'').trim()]
+        || inspectionMemoMap[invMemoKey+'|'+String(r.p_code||'').trim()]
+        || '';
+      if(inspMemo) insp_itemMemos[k]=inspMemo;
       if(r.drawer_no&&!drawer[seqNo]) drawer[seqNo]=r.drawer_no;
       addMisongPickingRow({
         seq: seqNo,
@@ -6983,7 +7140,8 @@ async function loadMisongPickingData(showToast=false){
         buyer: order?.buyer||r.orderer||'',
         shortage: sh,
         drawer: drawer[seqNo]||r.drawer_no||'',
-        shortageDate: getShortageBaseDate(r,realToSeq[r.inv_no]||'')||selectedDate,
+        shortageDate: getShortageBaseDate(r,realToSeq[r.inv_no]||'',orderReceiptDateMap)||selectedDate,
+        orderMemo: order?.orderMemo||orderMemoMap[String(r.ord_no||'').trim()]||'',
         status
       });
     });
@@ -7051,6 +7209,12 @@ function renderMisongItemRow(r,maps,extraClass=''){
   const imgUrl = productImageUrlForItem({...r,prodCode});
   const itemSeq = maps.invItemSeqMap[String(r.seq)+'-'+r.code]||'';
   const itemName = maps.itemNameMap[String(r.seq)+'-'+r.code]||r.name||'';
+  const memoKey=insp_memoKey(r.seq,r.code);
+  const memoVal=insp_itemMemos[memoKey]||memoData[memoKey]||'';
+  const memoSuffix=memoDomSuffix(r.seq,r.code);
+  const ordNo=String(r.ordNo||noMap[r.seq]?.ord_no||'').trim();
+  const orderMemoVal=String(r.orderMemo||'');
+  const orderMemoEsc=ordNo.replace(/'/g,"\\'");
   const imgHtml = imgUrl
     ? `<img src="${imgUrl}" class="misong-thumb-img" loading="lazy" onerror="this.style.display='none';this.parentNode.textContent='🖼'">`
     : '🖼';
@@ -7062,6 +7226,8 @@ function renderMisongItemRow(r,maps,extraClass=''){
     <div class="misong-main">
       <div class="misong-code-line"><span class="misong-code ${prodCode?'':'missing'}">${htmlEsc(displayCode)}</span>${renderMisongDateBadge(r)}</div>
       <div class="misong-name">${htmlEsc(itemName)}</div>
+      <textarea id="misong-memo-${memoSuffix}" class="insp-item-memo ${memoVal?'insp-item-memo-filled':''}" placeholder="검품 메모" rows="1" onclick="event.stopPropagation()" oninput="insp_saveMemo('${e2(r.seq)}','${e2(r.code)}',this.value)" onkeydown="insp_handleMemoKey(event)" style="margin-top:4px;width:100%;box-sizing:border-box;min-height:26px;max-height:56px;resize:vertical;font-size:11px;line-height:1.25;">${htmlEsc(memoVal)}</textarea>
+      <textarea data-ord="${htmlEsc(ordNo)}" class="sellpia-order-memo-ta ${orderMemoVal?'has-val':''}" placeholder="셀피아 주문메모" rows="1" onclick="event.stopPropagation()" ${ordNo?`oninput="saveSellpiaOrderMemo('${orderMemoEsc}',this.value)"`:'disabled'} onkeydown="insp_handleMemoKey(event)" style="margin-top:3px;width:100%;box-sizing:border-box;min-height:24px;max-height:48px;resize:vertical;border:1px solid #C9D6E2;border-radius:5px;background:${orderMemoVal?'#F3F8FF':'#F7F8FA'};color:#1A2840;font-size:10.5px;line-height:1.25;font-weight:700;font-family:inherit;padding:3px 5px;">${htmlEsc(orderMemoVal)}</textarea>
     </div>
     <div class="misong-short-ctrl">
       <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',-1)">−</button>
