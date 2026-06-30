@@ -5986,7 +5986,7 @@ function getGoldLabelOrders(){
     const key=labelOrderKey(o);
     if(key) merged.set(key,o);
   });
-  (_misongOrdersCache||[]).forEach(o=>{
+  (_goldLabelMisongOrdersCache||[]).forEach(o=>{
     if(!(o?.items||[]).some(it=>isGold(it))) return;
     const key=labelOrderKey(o);
     if(key&&!merged.has(key)) merged.set(key,o);
@@ -6047,6 +6047,7 @@ function insp_loadData(){
 async function insp_refreshMisongCache(renderAfter=false){
   await insp_loadMisongOrders();
   insp_misongCacheReady=true;
+  insp_goldLabelMap = computeGoldLabelMapFE();
   if(renderAfter){
     insp_renderAll();
     insp_renderSidebar();
@@ -6067,7 +6068,8 @@ function insp_setTab(t){
   insp_renderSidebar();
 }
 
-let _misongOrdersCache = [];  // getMisongOrders 캐시
+let _misongOrdersCache = [];  // 검품으로 넘길 미송 캐시: 피킹완료만 포함
+let _goldLabelMisongOrdersCache = [];  // 라벨 CSV용: 골드 미송 전체 포함
 
 async function insp_loadMisongOrders(){
   try{
@@ -6077,15 +6079,20 @@ async function insp_loadMisongOrders(){
     const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
     const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
     const invMap={};
+    const goldInvMap={};
     (shRows||[]).forEach(r=>{
       const sq=shortageRowQty(r);
       const mappedOwn=shortageOwnMap[String(r.p_code||'').trim()]||'';
       const goldRow = r.is_gold===true || String(r.is_gold||'').toUpperCase()==='Y' || isGold(r.p_code) || isLabelTarget({privateCode:r.p_code}) || isGold(mappedOwn) || isLabelTarget({privateCode:mappedOwn});
-      if(!isInspectionMisongReadyStatus(r.status,sq) && !goldRow) return;
+      if(goldRow){
+        if(!goldInvMap[r.inv_no]) goldInvMap[r.inv_no]=[];
+        goldInvMap[r.inv_no].push(r);
+      }
+      if(!isInspectionMisongReadyStatus(r.status,sq)) return;
       if(!invMap[r.inv_no]) invMap[r.inv_no]=[];
       invMap[r.inv_no].push(r);
     });
-    _misongOrdersCache = Object.entries(invMap).map(([inv_no,rows])=>{
+    const buildMisongOrdersFromMap = sourceMap => Object.entries(sourceMap).map(([inv_no,rows])=>{
       const seqNo=realToSeq[inv_no]||'';
       const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
       const baseDate=order?.ordDate||getShortageBaseDate(rows[0],seqNo,orderReceiptDateMap)||'';
@@ -6143,7 +6150,9 @@ async function insp_loadMisongOrders(){
         _isMisong: true
       };
     });
-  }catch(e){ console.warn('getMisongOrders 실패:', e); _misongOrdersCache = []; toast('⚠ 미송주문 로드 실패'); }
+    _misongOrdersCache = buildMisongOrdersFromMap(invMap);
+    _goldLabelMisongOrdersCache = buildMisongOrdersFromMap(goldInvMap);
+  }catch(e){ console.warn('getMisongOrders 실패:', e); _misongOrdersCache = []; _goldLabelMisongOrdersCache = []; toast('⚠ 미송주문 로드 실패'); }
 }
 
 function insp_buildMisongList(){
