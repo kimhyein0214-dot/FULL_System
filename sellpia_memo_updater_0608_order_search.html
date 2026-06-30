@@ -811,7 +811,10 @@
       await sleep(CONFIG.ajaxDelay);
     }
     function isDoneStatus(status) {
-      return ['검품완료', '메모정리완료'].includes(normal(status));
+      return normal(status) === '검품완료';
+    }
+    function isDrawerStatus(status) {
+      return normal(status) === '서랍입력';
     }
     function isPickedStatus(status) {
       return normal(status) === '피킹완료';
@@ -840,6 +843,7 @@
         if (!task.drawerNo && normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY') task.drawerNo = normal(row.drawer_no);
       }
       const activeRows = [];
+      const drawerRows = [];
       const pickedRows = [];
       const nextShipRows = [];
       const clearRows = [];
@@ -848,6 +852,7 @@
         const drawer = normal(row.drawer_no);
         if (!task.drawerNo && drawer && drawer !== 'EMPTY') task.drawerNo = drawer;
         if (isDoneStatus(status)) clearRows.push(row);
+        else if (isDrawerStatus(status)) drawerRows.push(row);
         else if (isNextShipStatus(status)) nextShipRows.push(row);
         else if (Number(row.short_qty || 0) > 0) activeRows.push(row);
         else if (isPickedStatus(status)) pickedRows.push(row);
@@ -904,6 +909,13 @@
           const itemNo = normal(row.item_no);
           addItemNoAliases(task.memo2Map, itemNo, ordNo, normal(row.memo2_val) || 'ㅁ');
         }
+        return task;
+      }
+      if (drawerRows.length && !activeRows.length && !pickedRows.length) {
+        task.writeMemo1 = !!task.drawerNo;
+        task.writeHold = true;
+        task.hold = true;
+        task.reason = '서랍입력: 서랍번호 + 배송보류';
         return task;
       }
       task.skip = true;
@@ -1175,6 +1187,17 @@
       if (options.doHold && task.writeHold) {
         await setInvoiceDeliveryHold(rows, !!task.hold);
         actions.push(task.hold ? '배송보류 설정' : '배송보류 해제');
+      }
+      if (task.clear) {
+        try {
+          await dbPatch(`shortage?inv_no=eq.${encodeURIComponent(invNo)}&status=eq.${encodeURIComponent('검품완료')}`, {
+            status: '메모정리완료',
+            updated_at: new Date().toISOString()
+          });
+          actions.push('DB 메모정리완료');
+        } catch (err) {
+          addLog(`  DB 메모정리완료 표시 실패: ${err.message.slice(0, 120)}`);
+        }
       }
       return actions.join(' / ') || '변경 없음';
     }
