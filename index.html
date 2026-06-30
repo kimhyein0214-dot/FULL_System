@@ -1747,7 +1747,7 @@ async function fetchOrderReceiptDateMapForShortageRows(rows){
   return map;
 }
 async function fetchOrderContactMapForShortageRows(rows){
-  const ordNos=compactCodes((rows||[]).map(r=>r?.ord_no));
+  const ordNos=compactCodes((rows||[]).map(r=>r?.ord_no||r?.ordNo));
   const map={};
   for(const chunk of chunkArray(ordNos,200)){
     if(!chunk.length) continue;
@@ -1777,6 +1777,32 @@ async function fetchOrderContactMapForShortageRows(rows){
     }
   }
   return map;
+}
+async function hydrateCSContactRows(rows){
+  const targets=(rows||[]).filter(row=>{
+    const hasPhone=String(row?.phone||row?.recPhone||row?.receiverMobile||row?.receiverTel||'').trim();
+    return !hasPhone && String(row?.ordNo||row?.ord_no||'').trim();
+  });
+  if(!targets.length) return 0;
+  const contactMap=await fetchOrderContactMapForShortageRows(targets);
+  let filled=0;
+  targets.forEach(row=>{
+    const ord=String(row.ordNo||row.ord_no||'').trim();
+    const contact=contactMap[ord];
+    if(!contact) return;
+    const phone=String(contact.phone||contact.receiverMobile||contact.receiverTel||'').trim();
+    if(!phone) return;
+    row.buyer=row.buyer||contact.buyer||contact.receiver||'';
+    row.orderer=row.orderer||contact.buyer||contact.receiver||'';
+    row.name=row.name||contact.receiver||contact.buyer||'';
+    row.phone=phone;
+    row.recPhone=contact.receiverMobile||contact.receiverTel||phone;
+    row.receiverMobile=contact.receiverMobile||'';
+    row.receiverTel=contact.receiverTel||'';
+    if(contact.invNo&&!String(row.inv||'').trim()) row.inv=contact.invNo;
+    filled++;
+  });
+  return filled;
 }
 async function fetchInspectionMemoMapForInvNos(invNos){
   const map={};
@@ -5448,7 +5474,7 @@ function showInvTmplPreview(inv){
 }
 
 // ── 알림톡 템플릿 엑셀 다운로드 (일반/내일출고 시트 분리) ──
-function downloadCSCurrent(){
+async function downloadCSCurrent(){
   // 현재 3단계 필터 상태에 맞는 rows 가져오기
   let items;
   const filtered = csFilterRows();
@@ -5462,6 +5488,16 @@ function downloadCSCurrent(){
   if(typeof XLSX==='undefined'){
     toast('⚠ 엑셀 생성 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.');
     return;
+  }
+  try{
+    const filled=await hydrateCSContactRows(items);
+    if(filled>0){
+      renderCSList();
+      renderCSSidebar();
+    }
+  }catch(e){
+    console.warn('알림톡 연락처 즉시 보강 실패:', e);
+    toast('⚠ 연락처 보강 확인 중 오류가 있어 현재 화면 데이터로 다운로드합니다.');
   }
 
   const invMap = new Map();
