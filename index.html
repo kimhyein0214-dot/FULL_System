@@ -1186,7 +1186,7 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
         <button class="insp-tab"       id="insp-tab-misong"    onclick="insp_setTab('misong')">📦 미송</button>
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:7px;">
-        <button class="abtn" onclick="insp_exportLabelCSV()" style="font-size:11px;background:#1A4A1A;">📋 라벨 CSV</button>
+        <button class="abtn" onclick="insp_exportLabelCSV()" style="font-size:11px;background:#1A4A1A;">📋 라벨 XLSX</button>
         <button class="abtn" id="insp-link-btn" onclick="insp_linkImages()" style="font-size:11px;">🖼 사진 연동</button>
         <span style="font-size:11px;color:rgba(255,255,255,0.4);">Q:</span>
         <input class="insp-search-input" id="insp-search" type="text" placeholder="송장번호/순서/주문자" style="width:140px;"
@@ -2034,6 +2034,21 @@ function itemOptionForPickCard(it,displayOwnCode){
 }
 function displayInvoiceNo(no,order=null){
   return String(seqToReal[no]||order?.invNo||order?.inv_no||noMap[no]?.inv_no||noMap[no]?.invNo||'').trim();
+}
+function isRealInvoiceNoValue(value){
+  return /^\d{13}$/.test(String(value||'').trim());
+}
+function canonicalInvoiceNo(value,order=null){
+  const raw=String(value||'').trim();
+  if(isRealInvoiceNoValue(raw)) return raw;
+  const candidates=[
+    seqToReal[raw],
+    order?.invNo,
+    order?.inv_no,
+    noMap[raw]?.inv_no,
+    noMap[raw]?.invNo
+  ];
+  return String(candidates.find(isRealInvoiceNoValue)||raw).trim();
 }
 function renderLocationBadge(val,typeHint=''){
   const clean=String(val||'').replace(/^\[|\]$/g,'').trim();
@@ -4177,9 +4192,10 @@ async function saveToSheet(invNo,code,isChecked,shortageVal,drawerVal,holdVal){
     const normalizedShortage=Number(shortageVal||0)||0;
     const prevManagedStatus=normalizeShortageStatus(shortageStatus[k]);
     const hadManagedShortage=!!prevManagedStatus || String(shortageMemo2[k]??'').trim()!=='' || !!shortageDate[k];
-    const inv_no=seqToReal[invNo]||String(invNo);
-    const order=(ORDERS_ALL||[]).find(o=>String(o.no)===String(invNo)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no))
-      || (_misongOrdersCache||[]).find(o=>String(o.no)===String(invNo)||String(o.invNo||'')===String(inv_no));
+    const initialInvNo=seqToReal[invNo]||String(invNo);
+    const order=(ORDERS_ALL||[]).find(o=>String(o.no)===String(invNo)||String(seqToReal[o.no]||o.invNo||'')===String(initialInvNo))
+      || (_misongOrdersCache||[]).find(o=>String(o.no)===String(invNo)||String(o.invNo||'')===String(initialInvNo));
+    const inv_no=canonicalInvoiceNo(initialInvNo,order);
     const item=findOrderItemByStateCode(order,code);
     const itemNo=String(item?.itemNo||item?.item_no||item?.code||'').trim();
     if(!itemNo) throw new Error('상품 순서번호(item_no)가 없어 저장할 수 없습니다.');
@@ -5310,7 +5326,7 @@ function toggleCSSelect(inv, ev){
 }
 async function persistMisongStatus(row,status){
   if(!row) return;
-  const inv=row.inv, code=row.code;
+  const inv=canonicalInvoiceNo(row.inv,row), code=row.code;
   const seqNo=realToSeq[inv]||inv;
   const prod=misongOwnCodeFor(row);
   if(!row.itemNo&&!code) throw new Error('상품 순서번호가 없습니다.');
@@ -5460,18 +5476,19 @@ async function updateCSShortage(inv, code, val, inputEl){
   }
   updateAllCSCounts(); renderCSSidebar();
   try{
-    const _seq=realToSeq[inv]||inv;
-    const _ord=noMap[_seq]?.ord_no||inv;
     const row=misongRowFor(inv,code);
+    const realInv=canonicalInvoiceNo(inv,row);
+    const _seq=realToSeq[realInv]||realInv;
+    const _ord=noMap[_seq]?.ord_no||row?.ordNo||realInv;
     const prod=misongOwnCodeFor(row);
     if(!prod) throw new Error('자사코드 매핑이 없습니다.');
     await upsertOrReplaceByItem('picking',
-      {inv_no:inv,ord_no:_ord,item_no:row?.itemNo||code,item_sort_order:row?.itemSortOrder??null,sellpia_p_code:row?.sellpiaCode||'',p_code:prod,shortage_qty:qty},
-      {inv_no:inv,item_no:row?.itemNo||code}
+      {inv_no:realInv,ord_no:_ord,item_no:row?.itemNo||code,item_sort_order:row?.itemSortOrder??null,sellpia_p_code:row?.sellpiaCode||'',p_code:prod,shortage_qty:qty},
+      {inv_no:realInv,item_no:row?.itemNo||code}
     );
     for(const legacyCode of legacyMisongCodes(inv,code)){
-      await db.from('picking').delete().eq('inv_no',inv).eq('p_code',legacyCode);
-      await db.from('shortage').delete().eq('inv_no',inv).eq('p_code',legacyCode);
+      await db.from('picking').delete().eq('inv_no',realInv).eq('p_code',legacyCode);
+      await db.from('shortage').delete().eq('inv_no',realInv).eq('p_code',legacyCode);
     }
     toast('✅ 부족수량 저장됨');
   }catch(e){ toast('⚠ '+e.message); }
@@ -6157,6 +6174,7 @@ function expandRowsByQty(row,stats){
 function buildLabelCsvRows(rows,options={}){
   const stats=createLabelExportStats();
   const csvRows=[LABEL_CSV_HEADER];
+  const xlsxMode=options.format==='xlsx';
   const weekdaySeq={};
   const emittedKeys=new Set();
   const printedKeys=options.printedKeys||getPrintedLabelKeys();
@@ -6184,7 +6202,7 @@ function buildLabelCsvRows(rows,options={}){
       expandedRow.label_key=labelKey;
       csvRows.push([
         labelNo,
-        formatLabelProductCode(expandedRow.productCode||''),
+        xlsxMode ? String(expandedRow.productCode||'').trim() : formatLabelProductCode(expandedRow.productCode||''),
         target.code,
         productName,
         optionName,
@@ -6201,6 +6219,11 @@ function formatLabelCsvFilename(){
   const now=new Date();
   const pad=n=>String(n).padStart(2,'0');
   return 'label_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.csv';
+}
+function formatLabelXlsxFilename(){
+  const now=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  return 'label_'+now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes())+'.xlsx';
 }
 function downloadCsv(filename,rows){
   const esc=v=>{
@@ -6243,6 +6266,34 @@ function downloadLabelCsv(filename,rows){
   a.click();
   a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function downloadLabelXlsx(filename,rows){
+  if(!window.XLSX){
+    toast('⚠ XLSX 라이브러리 로드 실패: CSV로 저장합니다');
+    downloadLabelCsv(filename.replace(/\.xlsx$/i,'.csv'),rows);
+    return;
+  }
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows||[]);
+  ws['!cols']=[
+    {wch:10}, // 라벨번호
+    {wch:14}, // 상품코드
+    {wch:16}, // 자사코드
+    {wch:42}, // 판매처 상품명
+    {wch:36}, // 판매처 옵션명
+    {wch:8},  // 수량
+    {wch:12}, // 접수일자
+    {wch:12}  // 수취인
+  ];
+  const range=XLSX.utils.decode_range(ws['!ref']||'A1:A1');
+  for(let r=0;r<=range.e.r;r++){
+    ['B','C','G'].forEach(col=>{
+      const addr=col+(r+1);
+      if(ws[addr]){ ws[addr].t='s'; ws[addr].z='@'; }
+    });
+  }
+  XLSX.utils.book_append_sheet(wb,ws,'라벨');
+  XLSX.writeFile(wb,filename,{bookType:'xlsx'});
 }
 function labelOrderKey(order){
   return String(order?.invNo||seqToReal[order?.no]||order?.no||'').trim();
@@ -6347,6 +6398,7 @@ async function insp_loadMisongOrders(){
     const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
     const shortageOrdNos=compactCodes((shRows||[]).map(r=>r?.ord_no));
     const externalOrderMap={};
+    const externalOrderByOrdNo={};
     if(shortageOrdNos.length){
       const externalOrderRows=[];
       const externalItemRows=[];
@@ -6391,8 +6443,8 @@ async function insp_loadMisongOrders(){
       (externalOrderRows||[]).forEach(row=>{
         const inv=String(row.inv_no||'').trim();
         const ord=String(row.ord_no||'').trim();
-        if(!inv||externalOrderMap[inv]) return;
-        externalOrderMap[inv]={
+        if(!inv) return;
+        const externalOrder={
           no: realToSeq[inv]||inv,
           printSeqNo:row.print_seq_no||'',
           plannedPrintSeqNo:row.planned_print_seq_no||'',
@@ -6418,21 +6470,40 @@ async function insp_loadMisongOrders(){
           sellpiaOrderTotalAmount:row.sellpia_order_total_amount,
           sellpiaOrderTotalAmountRaw:row.sellpia_order_total_amount_raw||''
         };
+        if(!externalOrderMap[inv]) externalOrderMap[inv]=externalOrder;
+        if(ord&&!externalOrderByOrdNo[ord]) externalOrderByOrdNo[ord]=externalOrder;
       });
     }
+    const resolveShortageInvNo=r=>{
+      const raw=String(r?.inv_no||'').trim();
+      if(isRealInvoiceNoValue(raw)) return raw;
+      const ord=String(r?.ord_no||'').trim();
+      return externalOrderByOrdNo[ord]?.invNo||raw;
+    };
+    const addShortageMapRow=(map,inv,row)=>{
+      if(!inv) return;
+      if(!map[inv]) map[inv]=[];
+      const itemNo=String(row?.item_no||'').trim();
+      const idx=itemNo ? map[inv].findIndex(x=>String(x?.item_no||'').trim()===itemNo) : -1;
+      if(idx<0){ map[inv].push(row); return; }
+      const cur=map[inv][idx];
+      const curLegacy=String(cur?.legacy_inv_no||'').trim();
+      const rowLegacy=String(row?.legacy_inv_no||'').trim();
+      if(curLegacy&&!rowLegacy) map[inv][idx]=row;
+    };
     const invMap={};
     const goldInvMap={};
     (shRows||[]).forEach(r=>{
+      const normalizedInv=resolveShortageInvNo(r);
+      const row=normalizedInv&&normalizedInv!==String(r.inv_no||'').trim() ? {...r, inv_no:normalizedInv, legacy_inv_no:r.inv_no} : r;
       const sq=shortageRowQty(r);
       const mappedOwn=shortageOwnMap[String(r.p_code||'').trim()]||'';
       const goldRow = r.is_gold===true || String(r.is_gold||'').toUpperCase()==='Y' || isGold(r.p_code) || isLabelTarget({privateCode:r.p_code}) || isGold(mappedOwn) || isLabelTarget({privateCode:mappedOwn});
       if(goldRow){
-        if(!goldInvMap[r.inv_no]) goldInvMap[r.inv_no]=[];
-        goldInvMap[r.inv_no].push(r);
+        addShortageMapRow(goldInvMap,normalizedInv,row);
       }
       if(!isInspectionMisongReadyStatus(r.status,sq)) return;
-      if(!invMap[r.inv_no]) invMap[r.inv_no]=[];
-      invMap[r.inv_no].push(r);
+      addShortageMapRow(invMap,normalizedInv,row);
     });
     const buildMisongOrdersFromMap = sourceMap => Object.entries(sourceMap).map(([inv_no,rows])=>{
       const seqNo=realToSeq[inv_no]||'';
@@ -6472,6 +6543,8 @@ async function insp_loadMisongOrders(){
         recv: order?.recv||rows[0]?.orderer||'',
         invNo: inv_no,
         ordDate: baseDate,
+        sellpiaOrderTotalAmount: order?.sellpiaOrderTotalAmount,
+        sellpiaOrderTotalAmountRaw: order?.sellpiaOrderTotalAmountRaw||'',
         items: orderItems.map(it=>{
           const stateCode=itemStateCode(it);
           const sr=rows.find(r=>{
@@ -6888,6 +6961,8 @@ function insp_renderDetail(){
       const sid='insp-sh-'+String(order.no).replace(/[^a-zA-Z0-9]/g,'_')+'-'+stateCode.replace(/[^a-zA-Z0-9]/g,'_');
       const eNo=String(order.no).replace(/'/g,"\\'");
       const ec=stateCode.replace(/'/g,"\\'");
+      const memoId='insp-memo-'+memoDomSuffix(order.no,stateCode);
+      const memoVal=insp_itemMemos[insp_memoKey(order.no,stateCode)]||'';
       return '<tr class="'+(is14k?'gold-row':'')+(isShort?' misong-row':'')+'">'
         +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
         +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.sellpiaCode,it.prodCode,it.resolvedOwnCode])+'</td>'
@@ -6910,6 +6985,7 @@ function insp_renderDetail(){
               +( shortInfo&&shortInfo.arrival?'<br><span style="font-size:10px;color:#888;">📅 '+shortInfo.arrival+'</span>':'' )
             :'')
         +'</td>'
+        +inspMemoCell(order,{...it,code:stateCode},memoId,memoVal)
       +'</tr>';
     }).join('');
     const shortCnt=(order.shortItems||[]).length;
@@ -6949,6 +7025,7 @@ function insp_renderDetail(){
             +'<th style="width:92px;color:#666;">셀피아코드</th>'
             +'<th style="width:64px;text-align:center;color:#C0392B;font-size:10px;">부족수량</th>'
             +'<th style="width:64px;">미송정보</th>'
+            +'<th class="insp-memo-th" style="width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;position:relative;user-select:none;">메모<div class="insp-col-resize-handle" onmousedown="insp_startColResize(event)"></div></th>'
           +'</tr></thead>'
           +'<tbody>'+rows+'</tbody>'
         +'</table>'
@@ -7419,20 +7496,20 @@ async function insp_exportLabelCSV(){
     });
   });
 
-  const result=buildLabelCsvRows(sourceRows);
+  const result=buildLabelCsvRows(sourceRows,{format:'xlsx'});
   const rows=result.rows, stats=result.stats;
   if(rows.length<=1){
-    console.warn('[label csv] 생성할 라벨 행 없음', stats);
-    toast('⚠ 라벨 CSV 대상 없음');
+    console.warn('[label xlsx] 생성할 라벨 행 없음', stats);
+    toast('⚠ 라벨 XLSX 대상 없음');
     return;
   }
 
-  downloadLabelCsv(formatLabelCsvFilename(),rows);
+  downloadLabelXlsx(formatLabelXlsxFilename(),rows);
   savePrintedLabelHistory(result.labelKeys);
-  console.log('[label csv] 결과', {
+  console.log('[label xlsx] 결과', {
     원본행수:stats.originalRows,
     라벨대상행수:stats.targetRows,
-    최종CSV라벨줄수:stats.finalRows,
+    최종XLSX라벨줄수:stats.finalRows,
     제외된행수:stats.originalRows-stats.targetRows,
     제외사유별개수:{
       자사코드없음:stats.skipped.noPrivateCode,
@@ -7445,7 +7522,7 @@ async function insp_exportLabelCSV(){
     },
     숫자아닌수량기본1처리:stats.invalidQtyDefaulted
   });
-  toast('✅ 라벨 CSV 다운로드 ('+stats.finalRows+'장 / 제외 '+(stats.originalRows-stats.targetRows)+'행)');
+  toast('✅ 라벨 XLSX 다운로드 ('+stats.finalRows+'장 / 제외 '+(stats.originalRows-stats.targetRows)+'행)');
 }
 
 async function insp_linkImages(){
@@ -8004,7 +8081,8 @@ function completeMisong(seq, code){
 async function saveMisongShortage(seq, code, newShortage, prevShortage){
   try{
     const row=misongPickingData.find(r=>String(r.seq)===String(seq)&&r.code===code);
-    const inv_no=row?.invNo||seqToReal[seq]||String(seq);
+    const rawInvNo=row?.invNo||seqToReal[seq]||String(seq);
+    const inv_no=canonicalInvoiceNo(rawInvNo,row);
     const _ord2=row?.ordNo||noMap[seq]?.ord_no||inv_no;
     const order=ORDERS_ALL.find(o=>String(o.no)===String(seq)||String(seqToReal[o.no]||o.invNo||'')===String(inv_no));
     const item=findOrderItemByStateCode(order,code);
