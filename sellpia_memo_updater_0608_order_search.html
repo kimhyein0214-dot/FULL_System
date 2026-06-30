@@ -587,6 +587,22 @@
     function rowSellerId(row) {
       return normal(row.__smuSellerId || row.p_provider_uid || row.provider_uid || row.seller_id);
     }
+    function currentMemo1(row) {
+      return normal(row && (row.o_shop_memo || row.shop_memo));
+    }
+    function isDrawerMemoText(value) {
+      const v = normal(value);
+      return !!v && /^ㅁ[ㅁㅅㅇㅋㅈㅐ]?\d{1,6}$/.test(v);
+    }
+    function mergeDrawerMemo(drawerNo, existingMemo) {
+      const drawer = normal(drawerNo);
+      const memo = normal(existingMemo);
+      if (!drawer) return memo;
+      if (!memo || memo === 'EMPTY') return drawer;
+      if (memo === drawer || isDrawerMemoText(memo)) return drawer;
+      if (memo.startsWith(drawer + ' / ') || memo.includes(' / ' + drawer)) return memo;
+      return drawer + ' / ' + memo;
+    }
     function rowProductCode(row) {
       return normal(row.p_code || row.product_code || row.c_p_code || row.c_pcode || row.p_product_code || row.goods_code);
     }
@@ -1163,9 +1179,9 @@
       const firstRow = rows[0];
       const actions = [];
       if (options.doMemo1 && task.writeMemo1) {
-        const memo1Value = task.clear ? '' : task.nextShip ? options.nextShipMemo : task.drawerNo;
+        const memo1Value = task.clear ? '' : task.nextShip ? options.nextShipMemo : mergeDrawerMemo(task.drawerNo, currentMemo1(firstRow));
         await updateMemo('o_shop_memo', firstRow, memo1Value, true);
-        actions.push(task.clear ? '관리메모 삭제' : task.nextShip ? `관리메모=${memo1Value}` : `관리메모=${task.drawerNo || '-'}`);
+        actions.push(task.clear ? '관리메모 삭제' : `관리메모=${memo1Value || '-'}`);
       }
       if (options.doMemo2) {
         if (task.clear) {

@@ -1,6 +1,6 @@
 (async function FinalSellpiaV1(){
   const BASE_URL = 'https://kimhyein0214-dot.github.io/FULL_System/';
-  const VERSION = '0630-item-order-memo-v1';
+  const VERSION = '0630-drawer-memo-merge-v1';
   const isOrderSearch = /\/order_search\.html/i.test(location.pathname);
   const isSellpia = /(^|\.)sellpia\.com$/i.test(location.hostname) || /(^|\.)curiouswiz\.sellpia\.com$/i.test(location.hostname);
 
