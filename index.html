@@ -6315,6 +6315,81 @@ async function insp_loadMisongOrders(){
     const shortageOwnMap=await fetchOwnCodeMapForPcodes((shRows||[]).map(r=>r.p_code));
     const orderItemOwnMap=await fetchOrderItemOwnMapForShortageRows(shRows||[]);
     const orderReceiptDateMap=await fetchOrderReceiptDateMapForShortageRows(shRows||[]);
+    const shortageOrdNos=compactCodes((shRows||[]).map(r=>r?.ord_no));
+    const externalOrderMap={};
+    if(shortageOrdNos.length){
+      const externalOrderRows=[];
+      const externalItemRows=[];
+      for(const chunk of chunkArray(shortageOrdNos,200)){
+        if(!chunk.length) continue;
+        const orderRows=await fetchAllRows(()=>db.from('orders').select('*').in('ord_no',chunk));
+        const itemRows=await fetchAllRows(()=>db.from('order_items').select('*').in('ord_no',chunk).order('sort_order',{ascending:true,nullsFirst:false}));
+        externalOrderRows.push(...(orderRows||[]));
+        externalItemRows.push(...(itemRows||[]));
+      }
+      const itemsByOrd={};
+      (externalItemRows||[]).forEach(it=>{
+        const ord=String(it.ord_no||'').trim();
+        if(!ord) return;
+        if(!itemsByOrd[ord]) itemsByOrd[ord]=[];
+        const itemRowIndex=itemsByOrd[ord].length;
+        const sellpiaCode=String(it.p_code||'').trim();
+        const resolvedOwnCode=resolveOwnCodeText({
+          code:sellpiaCode,
+          prodCode:it.prod_code||'',
+          option:it.p_option||it.seller_option_name||'',
+          name:it.p_name||it.seller_product_name||''
+        });
+        const prodOwnCode=String(it.prod_code||'').trim();
+        const ownCode=(resolvedOwnCode&&!looksLikeSellpiaCode(resolvedOwnCode))
+          ? resolvedOwnCode
+          : ((prodOwnCode&&!looksLikeSellpiaCode(prodOwnCode)) ? prodOwnCode : missingOwnCodeKey({ord_no:ord,p_code:sellpiaCode}));
+        const rawItemNo=String(it.item_no||'').trim();
+        const itemKey=makeStateItemNo(rawItemNo,it.sort_order,itemRowIndex);
+        itemsByOrd[ord].push({
+          code:itemKey,itemNo:itemKey,rawItemNo,itemSortOrder:it.sort_order,
+          sellpiaCode,qty:it.qty||1,name:it.p_name||'',option:it.p_option||'',
+          prodCode:ownCode,resolvedOwnCode:ownCode,nal:!!sellpiaCode.startsWith('낱'),
+          location:it.p_location||'',o_shop_memo2:it.o_shop_memo2||'',orderMemo:it.order_memo||'',
+          item_no:it.item_no||'',
+          seller_product_name:it.seller_product_name||it.p_name||'',
+          seller_option_name:it.seller_option_name||it.p_option||'',
+          sellpiaItemSalesAmount:it.sellpia_item_sales_amount,
+          sellpiaItemSalesAmountRaw:it.sellpia_item_sales_amount_raw||''
+        });
+      });
+      (externalOrderRows||[]).forEach(row=>{
+        const inv=String(row.inv_no||'').trim();
+        const ord=String(row.ord_no||'').trim();
+        if(!inv||externalOrderMap[inv]) return;
+        externalOrderMap[inv]={
+          no: realToSeq[inv]||inv,
+          printSeqNo:row.print_seq_no||'',
+          plannedPrintSeqNo:row.planned_print_seq_no||'',
+          workSeqNo:row.work_seq_no||'',
+          originalSeqNo:getSellpiaSeqValue(row,''),
+          sellpiaSeqNo:getSellpiaSeqValue(row,''),
+          buyer:row.buyer||'',
+          recv:row.receiver||row.receiver_name||row.buyer||'',
+          ordDate:row.ord_date||'',
+          invNo:inv,
+          seller:row.seller||'',
+          seller_id:row.seller_id||'',
+          items:itemsByOrd[ord]||[],
+          ordNo:ord,
+          ord_no:ord,
+          receiverName:row.receiver_name||row.receiver||row.buyer||'',
+          receiverTel:row.receiver_tel||'',
+          receiverMobile:row.receiver_mobile||'',
+          zipcode:row.zipcode||'',
+          receiverAddress:row.receiver_address||'',
+          orderMemo:row.order_memo||row.o_memo||'',
+          enrichedAt:row.enriched_at||'',
+          sellpiaOrderTotalAmount:row.sellpia_order_total_amount,
+          sellpiaOrderTotalAmountRaw:row.sellpia_order_total_amount_raw||''
+        };
+      });
+    }
     const invMap={};
     const goldInvMap={};
     (shRows||[]).forEach(r=>{
@@ -6331,11 +6406,10 @@ async function insp_loadMisongOrders(){
     });
     const buildMisongOrdersFromMap = sourceMap => Object.entries(sourceMap).map(([inv_no,rows])=>{
       const seqNo=realToSeq[inv_no]||'';
-      const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
+      const order=(seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null)||externalOrderMap[inv_no]||null;
       const baseDate=order?.ordDate||getShortageBaseDate(rows[0],seqNo,orderReceiptDateMap)||'';
       const fallbackItems=rows.map(r=>{
         const sq=shortageRowQty(r);
-        const order=seqNo?ORDERS_ALL.find(o=>String(o.no)===String(seqNo)):null;
         const item=findItemByShortageRow(order,r,shortageOwnMap)||shortageRowFallbackItem(r,orderItemOwnMap);
         const ownCode=shortageDisplayCode(r,item,shortageOwnMap);
         const stateCode=item ? itemStateCode(item) : makeStateItemNo(r.item_no,r.item_sort_order||r.sort_order,0);
@@ -6361,9 +6435,9 @@ async function insp_loadMisongOrders(){
       });
       const orderItems=order?.items?.length?order.items:fallbackItems;
       return {
-        no: seqNo||inv_no,
-        ordNo: rows[0]?.ord_no||'',
-        ord_no: rows[0]?.ord_no||'',
+        no: seqNo||order?.no||inv_no,
+        ordNo: order?.ordNo||rows[0]?.ord_no||'',
+        ord_no: order?.ord_no||rows[0]?.ord_no||'',
         buyer: order?.buyer||rows[0]?.orderer||'',
         recv: order?.recv||rows[0]?.orderer||'',
         invNo: inv_no,
