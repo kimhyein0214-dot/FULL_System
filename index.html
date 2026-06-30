@@ -613,7 +613,8 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .insp-detail-hdr{padding:10px 16px;background:#fff;border-bottom:1.5px solid #D9CBBA;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap;}
 .insp-dh-no{font-size:20px;font-weight:900;color:#000000;}
 .insp-dh-buyer{font-size:13px;color:#7C7D81;font-weight:600;}
-.insp-dh-stat{margin-left:auto;font-size:12px;font-weight:700;color:#7C7D81;}
+.insp-dh-invoice{margin-left:auto;font-size:18px;font-weight:900;color:#111827;letter-spacing:0;background:#F8FAFC;border:1.5px solid #D5DEE8;border-radius:6px;padding:4px 10px;line-height:1;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;}
+.insp-dh-stat{font-size:12px;font-weight:700;color:#7C7D81;}
 .insp-dh-done-btn{padding:6px 14px;border-radius:7px;border:2px solid #D9CBBA;background:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#000000;transition:all 0.12s;}
 .insp-dh-done-btn:hover{border-color:#0E7A4A;color:#0E7A4A;}
 .insp-dh-done-btn.done{background:#0E7A4A;border-color:#0E7A4A;color:#fff;}
@@ -6327,6 +6328,13 @@ function inspGiftCheckBadge(order){
 function inspOrderAmountBadges(order){
   return inspOrderTotalBadge(order)+inspGiftCheckBadge(order);
 }
+function inspInvoiceBadge(order){
+  const inv=[order?.invNo,seqToReal[order?.no],order?.no]
+    .map(v=>String(v||'').trim())
+    .find(v=>/^\d{13}$/.test(v))||'';
+  if(!inv) return '';
+  return '<div class="insp-dh-invoice" title="송장번호">'+htmlEsc(inv)+'번</div>';
+}
 function orderItemMemoValue(order,it){
   return String(it?.orderMemo ?? order?.orderMemo ?? '').trim();
 }
@@ -6487,6 +6495,7 @@ function insp_renderDetail(){
         +'</div>'
         +(chBadge(order.no)||'')
         +inspOrderAmountBadges(order)
+        +inspInvoiceBadge(order)
         +'<div class="insp-dh-stat">전체 '+order.items.length+'종</div>'
         +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
           +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
@@ -6576,6 +6585,7 @@ function insp_renderDetail(){
       +'<div class="insp-dh-buyer">'+buyerLabel(order.buyer,order.recv||'')+(isGoldInv?' <span class="insp-gold-badge">🥇 골드</span>':'')+(hasMisong?' <span style="background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:800;">미송</span>':'')+'</div>'
       +(chBadge(order.no)||'')
       +inspOrderAmountBadges(order)
+      +inspInvoiceBadge(order)
       +'<div class="insp-dh-stat">'+items.length+'종</div>'
       +'<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">'
         +'<label style="font-size:10px;color:#C0392B;font-weight:700;white-space:nowrap;">📦 서랍</label>'
