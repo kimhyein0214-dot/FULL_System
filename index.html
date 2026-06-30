@@ -5867,9 +5867,8 @@ function formatCsvTextCell(value){
   return '="'+text.replace(/"/g,'""')+'"';
 }
 function formatLabelProductCode(value){
-  // 라벨 프로그램은 Excel 수식형(="...")을 원문으로 읽지 못하는 경우가 있어
-  // 라벨 CSV에서는 상품코드를 그대로 내보냅니다.
-  return String(value??'').trim();
+  // Excel이 6778-11 같은 상품코드를 날짜로 바꾸지 않도록 텍스트 수식으로 내보냅니다.
+  return formatCsvTextCell(value);
 }
 function normalizeOptionName(optionName){
   let value=String(optionName||'').trim();
