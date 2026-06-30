@@ -2921,17 +2921,18 @@ async function loadData(silent=false,preserveView=false){
       o.hasShortage=o.hasShortage||o.items.some(it=>(shortage[o.no+'-'+itemStateCode(it)]||0)>0);
       o.hasHold=o.hasHold||o.items.some(it=>holded[o.no+'-'+itemStateCode(it)]);
     });
-    // 셀피아 관리메모 시딩값 → picking/shortage 테이블에 없는 주문만 자동 저장
-    // (북마클릿이 picking/shortage 기준으로 읽으므로 반드시 필요)
+    // 셀피아 관리메모 시딩값 → picking/shortage 테이블 자동 저장
+    // picking 행이 이미 있어도 관리메모2 부족수량이 새로 들어온 경우는 미송으로 복구해야 합니다.
     ORDERS_ALL.forEach(o=>{
-      if(_pickedOrdNos.has(String(noMap[o.no]?.ord_no||''))) return; // 이미 picking 데이터 있음
+      const hasPicking=_pickedOrdNos.has(String(noMap[o.no]?.ord_no||''));
       const dr=drawer[o.no]||'';
       const hasShortage=o.items.some(it=>(shortage[o.no+'-'+itemStateCode(it)]||0)>0);
+      if(hasPicking&&!hasShortage) return;
       if(!dr&&!hasShortage) return;
       o.items.forEach(it=>{
         const stateCode=itemStateCode(it);
         const sh=shortage[o.no+'-'+stateCode]||0;
-        if(dr||sh>0) saveToSheet(o.no,stateCode,false,sh,dr,false).catch(()=>{});
+        if(sh>0||(!hasPicking&&dr)) saveToSheet(o.no,stateCode,false,sh,dr,false).catch(()=>{});
       });
     });
 
@@ -4933,6 +4934,36 @@ function csFilterRows(){
     return true;
   });
 }
+function csSortText(value){
+  return String(value||'').trim();
+}
+function csSortNumber(value){
+  const n=Number(String(value||'').replace(/[^\d.-]/g,''));
+  return Number.isFinite(n) ? n : 999999999999999;
+}
+function csInvoiceSortValue(row){
+  return csSortText(realToSeq[row?.inv]||row?.inv||row?.ordNo||row?.ord_no);
+}
+function compareCSRows(a,b){
+  const nameA=csSortText(a?.name||a?.buyer||a?.orderer);
+  const nameB=csSortText(b?.name||b?.buyer||b?.orderer);
+  const nameCmp=nameA.localeCompare(nameB,'ko-KR',{numeric:true,sensitivity:'base'});
+  if(nameCmp) return nameCmp;
+  const invA=csInvoiceSortValue(a);
+  const invB=csInvoiceSortValue(b);
+  const invNumA=csSortNumber(invA);
+  const invNumB=csSortNumber(invB);
+  if(invNumA!==invNumB) return invNumA-invNumB;
+  const invCmp=invA.localeCompare(invB,'ko-KR',{numeric:true,sensitivity:'base'});
+  if(invCmp) return invCmp;
+  const sortA=csSortNumber(a?.itemSortOrder);
+  const sortB=csSortNumber(b?.itemSortOrder);
+  if(sortA!==sortB) return sortA-sortB;
+  return csSortText(a?.code||a?.dispCode||a?.rawCode).localeCompare(csSortText(b?.code||b?.dispCode||b?.rawCode),'ko-KR',{numeric:true,sensitivity:'base'});
+}
+function sortCSRows(rows){
+  return [...(rows||[])].sort(compareCSRows);
+}
 
 function classifyByDay(rows){
   const r = {'내일출고':[],'1일차':[],'3일차 메이크샵':[],'3일차 플랫폼':[],'5일차 부분출고':[],'5일차 취소출고':[],'10일차':[],'14K 1일차':[],'14K 5일차':[]};
@@ -5027,6 +5058,7 @@ function renderCSList(){
       return inv.includes(searchVal)||seq.includes(searchVal)||name.includes(searchVal)||code.includes(searchVal)||phone.includes(searchVal);
     });
   }
+  rows = sortCSRows(rows);
 
   const typeLabel   = currentCSType==='gold'?'골드':currentCSType==='all'?'전체':'일반';
   const statusLabel = currentCSStatus==='전체'?'전체상태':currentCSStatus||'처리X';
@@ -5483,6 +5515,7 @@ async function downloadCSCurrent(){
   } else {
     items = (classifyByDay(filtered)[currentCSDay])||[];
   }
+  items = sortCSRows(items);
   if(!items.length){ toast('대상 없음'); return; }
 
   if(typeof XLSX==='undefined'){
@@ -5499,6 +5532,7 @@ async function downloadCSCurrent(){
     console.warn('알림톡 연락처 즉시 보강 실패:', e);
     toast('⚠ 연락처 보강 확인 중 오류가 있어 현재 화면 데이터로 다운로드합니다.');
   }
+  items = sortCSRows(items);
 
   const invMap = new Map();
   items.forEach(row=>{
@@ -6230,6 +6264,8 @@ async function insp_loadMisongOrders(){
       const orderItems=order?.items?.length?order.items:fallbackItems;
       return {
         no: seqNo||inv_no,
+        ordNo: rows[0]?.ord_no||'',
+        ord_no: rows[0]?.ord_no||'',
         buyer: order?.buyer||rows[0]?.orderer||'',
         recv: order?.recv||rows[0]?.orderer||'',
         invNo: inv_no,
@@ -6609,6 +6645,7 @@ function insp_renderDetail(){
             +' onblur="insp_saveDrawer(\''+String(order.no).replace(/'/g,"\\'")+'\',this.value)"'
           +'>'
         +'</div>'
+        +'<button class="insp-dh-done-btn'+(isInspectionDone(order)?' done':'')+'" onclick="insp_toggleDone(\''+String(order.no).replace(/'/g,"\\'")+'\')">'+(isInspectionDone(order)?'✅ 완료':'완료 처리')+'</button>'
       +'</div>'
       +'<div class="insp-table-wrap">'
         +'<table class="insp-table" id="insp-main-table">'
@@ -6779,7 +6816,6 @@ function insp_saveDrawer(invNo, val){
 }
 
 async function insp_toggleDone(invNo){
-  if(insp_tabMode==='misong') return;
   const order=inspOrderByNo(invNo)||{no:invNo,invNo:seqToReal[invNo]||String(invNo)};
   const invKey=inspDoneKeyFor(order);
   if(insp_savingDone.has(invKey)) return;

@@ -897,8 +897,13 @@
         return task;
       }
       if (pickedRows.length && !activeRows.length) {
-        task.skip = true;
-        task.reason = '미송 전량 피킹완료: 검품 전이므로 셀피아 무반영';
+        task.writeMemo1 = false;
+        task.writeHold = false;
+        task.reason = '미송 전량 피킹완료: 상품별 관리메모2 ㅁ';
+        for (const row of pickedRows) {
+          const itemNo = normal(row.item_no);
+          addItemNoAliases(task.memo2Map, itemNo, ordNo, normal(row.memo2_val) || 'ㅁ');
+        }
         return task;
       }
       task.skip = true;
@@ -964,14 +969,37 @@
           });
         }
         const ordNos = uniq(orderRows.map(row => row.ord_no));
-        if (!ordNos.length) return [];
-
-        let shortageRows;
+        let shortageRows = [];
+        if (ordNos.length) {
+          try {
+            shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold,updated_at');
+          } catch (err) {
+            addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
+            shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at');
+          }
+        }
         try {
-          shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold');
+          const changedSince = new Date(date + 'T00:00:00').toISOString();
+          let changedRows = [];
+          try {
+            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold,updated_at`);
+          } catch (err) {
+            addLog(`  DB fallback(changed shortage): ${err.message.slice(0, 80)}`);
+            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at`);
+          }
+          const seen = new Set(shortageRows.map(row => [normal(row.ord_no), normal(row.item_no), normal(row.inv_no)].join('|')));
+          const extras = (changedRows || []).filter(row => {
+            const key = [normal(row.ord_no), normal(row.item_no), normal(row.inv_no)].join('|');
+            if (!normal(row.ord_no) || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          if (extras.length) {
+            shortageRows.push(...extras);
+            addLog(`  오늘 변경된 과거 미송 ${extras.length}행 추가 포함`);
+          }
         } catch (err) {
-          addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
-          shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val');
+          addLog(`  오늘 변경 미송 조회 건너뜀: ${err.message.slice(0, 80)}`);
         }
         if (!shortageRows.length) return [];
 
@@ -1163,22 +1191,6 @@
         )
       );
     }
-    function extractOrderMemoFromRows(rows) {
-      rows = rows || [];
-      for (const row of rows) {
-        const memo = rowOrderMemo(row);
-        if (memo) return memo;
-      }
-      return '';
-    }
-    async function patchOrderMemo(ordNo, memo) {
-      const ord = normal(ordNo);
-      if (!ord) throw new Error('주문번호가 없어 주문메모를 저장할 수 없습니다.');
-      await dbPatch(`orders?ord_no=eq.${encodeURIComponent(ord)}`, {
-        order_memo: memo || '',
-        updated_at: new Date().toISOString()
-      });
-    }
     function rowSortOrder(row) {
       return normal(row && (
         row.item_sort_order ||
@@ -1207,24 +1219,25 @@
     async function patchDetailOrderItemMemos(detail) {
       let count = 0;
       let firstMemo = '';
+      let memoCount = 0;
       for (const row of detail.rows || []) {
         const memo = rowOrderMemo(row);
         if (!firstMemo && memo) firstMemo = memo;
+        if (memo) memoCount++;
         await patchOrderItemMemo(detail.ordNo, row, memo);
         count++;
       }
-      return { ordNo: detail.ordNo, count, memo: firstMemo };
+      return { ordNo: detail.ordNo, count, memoCount, memo: firstMemo };
     }
     async function collectOrderMemoTargets(date, filters = {}) {
       const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
-      let rows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,inv_no,am_pm,order_memo`);
+      let rows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,inv_no,am_pm`);
       if (sessionFilter !== 'ALL') {
         rows = rows.filter(row => normal(row.am_pm).toUpperCase() === sessionFilter);
       }
       return rows.map(row => ({
         ordNo: normal(row.ord_no),
-        invNo: normal(row.inv_no),
-        currentMemo: normal(row.order_memo)
+        invNo: normal(row.inv_no)
       })).filter(row => row.ordNo);
     }
     async function updateOrderMemoTarget(target) {
@@ -1237,15 +1250,7 @@
         const hit = await searchInvoice(invNo);
         const detail = await openOrderDetail(hit);
         const result = await patchDetailOrderItemMemos(detail);
-        addLog(`상품별 주문메모 저장: ${result.ordNo} / ${result.count}개 상품`);
-        return { ok: 1, fail: 0 };
-      }
-      if (invNo) {
-        const hit = await searchInvoice(invNo);
-        const detail = await openOrderDetail(hit);
-        const memo = extractOrderMemoFromRows(detail.rows);
-        await patchOrderMemo(detail.ordNo, memo);
-        addLog(`주문메모 저장: ${detail.ordNo} / ${memo ? memo.slice(0, 40) : '(빈값)'}`);
+        addLog(`상품별 주문메모 저장: ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
         return { ok: 1, fail: 0 };
       }
       const targets = await collectOrderMemoTargets(date, { session });
@@ -1253,16 +1258,16 @@
         addLog('주문메모 업데이트 대상이 없습니다.');
         return { ok: 0, fail: 0 };
       }
-      addLog(`주문메모 업데이트 대상 ${targets.length}건`);
+      addLog(`상품별 주문메모 업데이트 대상 주문 ${targets.length}건`);
       let ok = 0;
       let fail = 0;
       for (let i = 0; i < targets.length; i++) {
         if (stopped) break;
         const target = targets[i];
-        setStatus(`[주문메모 ${i + 1}/${targets.length}]\n${target.invNo || target.ordNo}`);
+        setStatus(`[상품별 주문메모 ${i + 1}/${targets.length}]\n${target.invNo || target.ordNo}`);
         try {
           const result = await updateOrderMemoTarget(target);
-          addLog(`✓ ${result.ordNo} / ${result.memo ? result.memo.slice(0, 40) : '(빈값)'}`);
+          addLog(`✓ ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
           ok++;
         } catch (err) {
           addLog(`✗ ${target.invNo || target.ordNo}: ${err.message}`);
@@ -1279,10 +1284,10 @@
         cycle++;
         addLog(`── 주문메모 감시 ${cycle}회차 ──`);
         const result = await runOrderMemoSyncOnce(opts);
-        setStatus(`주문메모 감시 중\n최근 결과: 성공 ${result.ok}건 / 실패 ${result.fail}건\n30초 후 다시 확인`);
+        setStatus(`상품별 주문메모 감시 중\n최근 결과: 성공 ${result.ok}건 / 실패 ${result.fail}건\n30초 후 다시 확인`);
         for (let i = 0; i < 30 && !stopped; i++) await sleep(1000);
       }
-      setStatus('주문메모 감시 중단됨');
+      setStatus('상품별 주문메모 감시 중단됨');
     }
     function buildOverlay() {
       const overlay = document.createElement('div');
@@ -1385,7 +1390,7 @@
           await runOrderMemoWatcher(opts);
         } else {
           const result = await runOrderMemoSyncOnce(opts);
-          setStatus(`주문메모 업데이트 완료\n성공 ${result.ok}건 / 실패 ${result.fail}건`);
+          setStatus(`상품별 주문메모 업데이트 완료\n성공 ${result.ok}건 / 실패 ${result.fail}건`);
         }
       } catch (err) {
         setStatus('오류\n' + err.message);
