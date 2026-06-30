@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0630-item-order-memo-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0630-inspection-hold-ui-v3">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -55,6 +55,9 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .sb-upload-drop.ready{border-color:#00CC66;background:rgba(0,204,102,0.15);color:#4DFFB0;font-weight:700;}
 .sb-upload-btn{margin:0 4px;padding:5px 8px;border-radius:6px;border:none;background:rgba(255,255,255,0.85);color:var(--navy);font-weight:800;font-size:11px;cursor:pointer;font-family:inherit;width:calc(100% - 8px);}
 .sb-upload-btn:disabled{opacity:0.35;cursor:default;}
+.session-filter{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:4px;flex:0 0 auto;min-width:176px;}
+.session-filter .session-btn{font-size:11px;background:#F8FAFC;color:#1F2937;border:1.5px solid #CBD5E1;box-shadow:0 1px 0 rgba(15,23,42,0.04);}
+.session-filter .session-btn.active{background:#2563EB !important;color:#fff !important;border-color:#1D4ED8 !important;font-weight:900;box-shadow:0 0 0 2px rgba(37,99,235,.18),0 2px 6px rgba(37,99,235,.18);}
 .jo-side-btn{width:100%;min-height:34px;border-radius:8px;border:none;background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);font-size:13px;font-weight:800;cursor:pointer;display:flex;flex-direction:row;align-items:center;justify-content:space-between;transition:all 0.12s;padding:5px 10px;gap:4px;font-family:inherit;}
 .jo-side-btn:hover{background:rgba(255,255,255,0.12);color:#fff;}
 .jo-side-btn.active{background:rgba(255,255,255,0.92);color:var(--navy);font-weight:900;box-shadow:0 2px 8px rgba(0,0,0,0.15);}
@@ -124,6 +127,9 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .hs-g{background:#00CC66;color:#fff;}
 .hs-r{background:#A93228;color:#fff;}
 .abtn{padding:4px 10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-weight:700;font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap;transition:background 0.12s;}.abtn:hover{background:rgba(255,255,255,0.25);}
+.session-filter .abtn.session-btn{width:54px;height:32px;padding:0;border-radius:8px;border:1.5px solid #CBD5E1;background:#F8FAFC;color:#334155;font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 0 rgba(15,23,42,0.04);}
+.session-filter .abtn.session-btn.active{background:#2563EB !important;color:#fff !important;border-color:#1D4ED8 !important;box-shadow:0 0 0 2px rgba(37,99,235,.2),0 2px 8px rgba(37,99,235,.22);}
+.session-filter .abtn.session-btn:hover{background:#EAF2FF;color:#1D4ED8;border-color:#93C5FD;}
 
 /* ── 조 내비 — 캐러셀 스타일 ─────────────────────────────── */
 .jo-nav{background:rgba(0,0,0,0.2);border-radius:12px;padding:0 12px;display:flex;align-items:center;height:48px;flex-shrink:0;gap:8px;backdrop-filter:blur(8px);}
@@ -605,23 +611,29 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .insp-ii-stat{font-size:10px;font-weight:700;color:#7C7D81;margin-top:2px;}
 .insp-ii-gold{font-size:10px;background:#FFF8E1;color:#B8860B;border:1px solid #E8D080;border-radius:3px;padding:0 4px;flex-shrink:0;}
 .insp-ii-misong{font-size:10px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;flex-shrink:0;font-weight:800;}
+.insp-ii-hold{font-size:10px;background:#F3E8FF;color:#6D28D9;border:1px solid #C4B5FD;border-radius:999px;padding:1px 6px;flex-shrink:0;font-weight:900;}
 .insp-inv-item.has-misong{border-left:3px solid #C0392B;}
 .insp-inv-item.focused.has-misong{border-left:3px solid #FF6B6B;}
+.insp-inv-item.has-hold{border-left:3px solid #7C3AED;background:#F3E8FF;}
+.insp-inv-item.focused.has-hold{border-left:3px solid #A78BFA;}
 
 /* 우측 상세 */
 .insp-detail-panel-inner{display:flex;flex-direction:column;overflow:hidden;background:#F2E3D0;}
 .insp-detail-hdr{padding:10px 16px;background:#fff;border-bottom:1.5px solid #D9CBBA;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap;}
 .insp-dh-no{font-size:20px;font-weight:900;color:#000000;}
 .insp-dh-buyer{font-size:13px;color:#7C7D81;font-weight:600;}
-.insp-dh-invoice{margin-left:auto;font-size:16px;font-weight:900;color:#1D4ED8;letter-spacing:0;background:#EFF6FF;border:1.5px solid #93C5FD;border-radius:999px;padding:5px 12px;line-height:1;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;cursor:pointer;box-shadow:0 1px 0 rgba(29,78,216,0.08);}
+.insp-dh-invoice{margin-left:auto;font-size:13px;font-weight:900;color:#1D4ED8;letter-spacing:0;background:#EFF6FF;border:1.5px solid #93C5FD;border-radius:999px;padding:6px 12px;line-height:1;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;cursor:pointer;box-shadow:0 1px 0 rgba(29,78,216,0.08);}
 .insp-dh-invoice:hover{background:#DBEAFE;border-color:#60A5FA;color:#1E40AF;}
 .insp-dh-invoice:active{transform:translateY(1px);}
 .insp-dh-stat{font-size:12px;font-weight:700;color:#7C7D81;}
-.insp-dh-done-btn,.insp-dh-hold-btn{padding:6px 14px;border-radius:7px;border:2px solid #D9CBBA;background:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#000000;transition:all 0.12s;}
+.insp-dh-done-btn,.insp-dh-hold-btn{padding:6px 14px;border-radius:999px;border:1.5px solid #D9CBBA;background:#fff;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;color:#000000;transition:all 0.12s;line-height:1;white-space:nowrap;}
 .insp-dh-done-btn:hover{border-color:#0E7A4A;color:#0E7A4A;}
 .insp-dh-done-btn.done{background:#0E7A4A;border-color:#0E7A4A;color:#fff;}
-.insp-dh-hold-btn:hover{border-color:#D97706;color:#B45309;}
-.insp-dh-hold-btn.active{background:#D97706;border-color:#D97706;color:#fff;}
+.insp-dh-hold-btn{background:#FAF5FF;border-color:#C4B5FD;color:#6D28D9;}
+.insp-dh-hold-btn:hover{border-color:#8B5CF6;color:#5B21B6;background:#F3E8FF;}
+.insp-dh-hold-btn.active{background:#7C3AED;border-color:#7C3AED;color:#fff;box-shadow:0 0 0 2px rgba(124,58,237,.16);}
+.insp-detail-hdr .insp-dh-hold-btn{min-height:30px;padding:6px 13px;border-radius:999px;border:1.5px solid #C4B5FD;background:#FAF5FF;color:#6D28D9;font-size:13px;font-weight:900;line-height:1;box-shadow:0 1px 0 rgba(109,40,217,.08);}
+.insp-detail-hdr .insp-dh-hold-btn.active{background:#7C3AED !important;border-color:#6D28D9 !important;color:#fff !important;box-shadow:0 0 0 2px rgba(124,58,237,.18),0 2px 8px rgba(124,58,237,.22);}
 
 /* 테이블 */
 .insp-table-wrap{flex:1;overflow:auto;padding:12px;}
@@ -634,6 +646,8 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
 .insp-table tr.gold-row td{background:#FFFDF0;}
 .insp-table tr.misong-row td{background:#FFF5F5;}
 .insp-table tr.misong-row:hover td{background:#FFEAEA;}
+.insp-table tr.hold-row td{background:#EDE2FF;}
+.insp-table tr.hold-row:hover td{background:#E3D3FF;}
 .insp-table tr:hover td{background:#FFF8F0;}
 .insp-table tr.gold-row:hover td{background:#FFF8E0;}
 .insp-table tr.item-focused td{background:#F2E3D0 !important;}
@@ -952,10 +966,10 @@ body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:var(
     style="padding:4px 8px;border-radius:7px;border:1.5px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.12);color:#fff;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer;outline:none;"
     onchange="selectedDate=this.value;reloadData()" title="조회 날짜 변경">
   <button class="abtn" onclick="selectedDate=new Date().toISOString().slice(0,10);document.getElementById('date-picker').value=selectedDate;reloadData()" style="background:#444;font-size:10px;" title="오늘로 초기화">오늘</button>
-  <div style="display:flex;gap:3px;flex-shrink:0;">
-    <button id="ampm-all" class="abtn" onclick="setSession('ALL')" style="font-size:10px;background:#3B82F6;color:#fff;font-weight:900;border-color:#2563EB;">전체</button>
-    <button id="ampm-am"  class="abtn" onclick="setSession('AM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오전</button>
-    <button id="ampm-pm"  class="abtn" onclick="setSession('PM')"  style="font-size:10px;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);">오후</button>
+  <div class="session-filter">
+    <button id="ampm-all" class="abtn session-btn" onclick="setSession('ALL')">전체</button>
+    <button id="ampm-am"  class="abtn session-btn" onclick="setSession('AM')">오전</button>
+    <button id="ampm-pm"  class="abtn session-btn" onclick="setSession('PM')">오후</button>
   </div>
   <button id="work-sort-btn" class="abtn work-sort-btn active" onclick="toggleWorkSort()" title="화면 표시 순서를 작업순서/셀피아 원본순서로 전환합니다">🔀 작업순서</button>
   <button id="planned-print-export-btn" class="abtn work-export-btn" onclick="downloadPlannedPrintList()" title="현재 화면의 작업순서대로 송장 출력 대상 CSV를 만듭니다">📤 출력대상</button>
@@ -1882,19 +1896,13 @@ function paintSessionButtons(){
   ['ALL','AM','PM'].forEach(v=>{
     const btn=document.getElementById('ampm-'+v.toLowerCase());
     if(!btn)return;
-    if(v===selectedSession){
-      btn.style.background='#3B82F6';
-      btn.style.color='#fff';
-      btn.style.fontWeight='900';
-      btn.style.borderColor='#2563EB';
-      btn.style.boxShadow='0 0 0 1px rgba(37,99,235,.18)';
-    }else{
-      btn.style.background='rgba(255,255,255,0.15)';
-      btn.style.color='rgba(255,255,255,0.68)';
-      btn.style.fontWeight='700';
-      btn.style.borderColor='rgba(255,255,255,0.3)';
-      btn.style.boxShadow='none';
-    }
+    const active=v===selectedSession;
+    btn.classList.toggle('active',active);
+    btn.style.background=active?'#2563EB':'#F8FAFC';
+    btn.style.color=active?'#fff':'#334155';
+    btn.style.borderColor=active?'#1D4ED8':'#CBD5E1';
+    btn.style.fontWeight=active?'900':'800';
+    btn.style.boxShadow=active?'0 0 0 2px rgba(37,99,235,.2),0 2px 8px rgba(37,99,235,.22)':'0 1px 0 rgba(15,23,42,0.04)';
   });
 }
 function setSession(s){
@@ -6560,7 +6568,8 @@ function insp_renderList(){
   }
   wrap.innerHTML=insp_filteredList.map((o,i)=>{
     const done=isInspectionDone(o), isGoldInv=insp_GOLD_NOS.has(o.no)||o.items.some(it=>isGold(it)), focused=i===insp_focusIdx;
-    const hasMisong=inspOrderHasAttention(o);
+    const hasHold=inspOrderHasHold(o);
+    const hasMisong=inspOrderHasAttention(o)&&!hasHold;
     const joLabel=inspOrderJoLabel(o);
     const safeNo=String(o.no).replace(/'/g,"\\'");
     let label;
@@ -6570,15 +6579,15 @@ function insp_renderList(){
       gItems.forEach(it=>{const inf=insp_goldLabelMap[o.no+'-'+it.code];if(inf&&Array.isArray(inf.labels)) allNums.push(...inf.labels);});
       label=allNums.length?allNums.join(', '):(i+1)+'번';
     } else { label=(joLabel?'<span class="insp-jo-label">'+joLabel+'</span> ':'')+workNoHtml(o.no,'sm'); }
-    return '<div class="insp-inv-item'+(focused?' focused':'')+(done?' done':'')+(hasMisong?' has-misong':'')+'" id="insp-ii-'+i+'" onclick="insp_clickItem('+i+')">'
+    return '<div class="insp-inv-item'+(focused?' focused':'')+(done?' done':'')+(hasMisong?' has-misong':'')+(hasHold?' has-hold':'')+'" id="insp-ii-'+i+'" onclick="insp_clickItem('+i+')">'
       +'<span class="insp-ii-idx">'+(i+1)+'</span>'
       +'<div class="insp-ii-check" onclick="event.stopPropagation();insp_toggleDone(\''+safeNo+'\')" style="cursor:pointer;">'+(done?'✓':'')+'</div>'
       +'<div class="insp-ii-info">'
         +'<div class="insp-ii-no">'+label+(insp_tabMode==='golditem'?' <span style="font-size:10px;opacity:0.6;">'+(joLabel?joLabel+' · ':'')+workNoText(o.no)+'</span>':'')+'</div>'
         +'<div class="insp-ii-buyer">'+buyerLabel(o.buyer,o.recv||'')+(chBadge(o.no)?'&nbsp;'+chBadge(o.no):'')+'</div>'
-        +'<div class="insp-ii-stat">상품 '+o.items.length+'종'+(hasMisong?' · <span style="color:#C0392B;font-weight:800;">미송</span>':'')+'</div>'
+        +'<div class="insp-ii-stat">상품 '+o.items.length+'종'+(hasHold?' · <span style="color:#6D28D9;font-weight:900;">보류</span>':hasMisong?' · <span style="color:#C0392B;font-weight:800;">미송</span>':'')+'</div>'
       +'</div>'
-      +(hasMisong?'<span class="insp-ii-misong">미송</span>':'')
+      +(hasHold?'<span class="insp-ii-hold">보류</span>':hasMisong?'<span class="insp-ii-misong">미송</span>':'')
       +(isGoldInv?'<span class="insp-ii-gold">🥇</span>':'')
     +'</div>';
   }).join('');
@@ -6964,7 +6973,9 @@ function insp_renderDetail(){
     const goldItem=isGold(it), rowFocused=i===insp_itemFocusIdx;
     const stateCode=itemStateCode(it);
     const itemState=getItemWorkflowState(order.no,stateCode);
-    const itemShort=itemState===WF_STATUS.SHORT || itemState===WF_STATUS.HOLD || inspItemHasMemoSignal(order,it);
+    const itemHold=itemState===WF_STATUS.HOLD;
+    const itemShort=itemState===WF_STATUS.SHORT || inspItemHasMemoSignal(order,it);
+    const itemAttention=itemShort||itemHold;
     const memoId='insp-memo-'+order.no+'-'+it.code.replace(/[^a-zA-Z0-9]/g,'_');
     const memoVal=insp_itemMemos[insp_memoKey(order.no,it.code)]||'';
     const imgUrl=productImageUrlForItem(it);
@@ -6974,7 +6985,10 @@ function insp_renderDetail(){
     const optionText=optName||'<span style="color:#CCC;font-weight:400;font-size:11px;">—</span>';
     const ownCodeText=inspOwnCodeText(it);
     const ownCodeHtml=ownCodeText?htmlEsc(ownCodeText):'<span style="color:#C0392B;font-weight:900;">자사코드 없음</span>';
-    return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemShort?' misong-row':'')+'" id="insp-irow-'+i+'">'
+    const stateBadge=itemHold
+      ? '<span class="insp-ii-hold" style="margin-left:4px;">보류</span>'
+      : (itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'');
+    return '<tr class="'+(goldItem?'gold-row':'')+(rowFocused?' item-focused':'')+(itemHold?' hold-row':itemAttention?' misong-row':'')+'" id="insp-irow-'+i+'">'
       +'<td style="text-align:center;width:28px;font-size:13px;font-weight:900;color:#7C7D81;">'+(i+1)+'</td>'
       +(_isLabelTab&&goldItem?'<td style="text-align:center;width:70px;font-size:12px;font-weight:800;color:#B8860B;background:#FFFBF0;">'+(labelDisp&&labelDisp!=='—'?labelDisp:'미출력')+'</td>':_isLabelTab?'<td style="width:70px;background:#FFFBF0;"></td>':'')
       +'<td style="text-align:center;width:132px;">'+renderPhotoBox(it.code,imgUrl,'insp',it.sellpiaCode||it.code,[it.sellpiaCode,it.prodCode,it.resolvedOwnCode])+'</td>'
@@ -6982,7 +6996,7 @@ function insp_renderDetail(){
       +'<td class="insp-td-qty">'+it.qty+'</td>'
       +inspProductCell(prodName)
       +inspAmountCell(it)
-      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(goldItem?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+(itemShort?'<span style="display:inline-block;font-size:9px;background:#FDECEA;color:#C0392B;border:1px solid #E8A0A0;border-radius:3px;padding:0 4px;margin-left:4px;font-weight:800;">미송</span>':'')+'</td>'
+      +'<td class="insp-td-code '+(goldItem?'insp-td-gold':'')+'" style="width:148px;min-width:148px;max-width:148px;color:'+(goldItem?'#B8860B':'#111827')+';font-weight:900;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;line-height:1.2;">'+ownCodeHtml+(goldItem?'<span class="insp-gold-badge">🥇</span>':'')+(it.nal?'<span class="nal-badge" style="margin-left:4px;">낱</span>':'')+stateBadge+'</td>'
       +'<td style="width:92px;min-width:92px;max-width:92px;color:#666;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(it.sellpiaCode||it.code||'<span style="color:#CCC;">—</span>')+'</td>'
       +(()=>{
           const shV=shortage[order.no+'-'+stateCode]||0;
