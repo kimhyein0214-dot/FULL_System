@@ -2,7 +2,7 @@
 
 셀피아 주문 데이터를 수집해서 내부 피킹/검품/부족수량/배송보류 작업을 관리하고, 필요한 결과를 다시 셀피아 또는 우체국 양식으로 내보내기 위한 회사 내부 작업 시스템입니다.
 
-현재는 GitHub Pages로 테스트 링크를 공유할 수 있도록 구성되어 있으며, 메인 시스템은 `index.html`과 `picking-system_0511.css`를 기준으로 동작합니다.
+현재는 GitHub Pages로 테스트 링크를 공유할 수 있도록 구성되어 있으며, 메인 시스템은 `index.html`과 `picking-system_0519.css`를 기준으로 동작합니다.
 
 ## 1. 주요 파일
 
@@ -25,7 +25,7 @@
 - 키패드 입력
 - 서랍번호 입력
 
-### `picking-system_0511.css`
+### `picking-system_0519.css`
 
 메인 피킹 시스템 스타일 파일입니다.
 
@@ -39,7 +39,7 @@
 - 검품/CS/모달/키패드 UI 스타일
 - 완료/부족/보류/골드상품 색상 구분
 
-### `sellpia_bookmarklet_v3.html`
+### `sellpia_bookmarklet_0519_v1.html`
 
 셀피아에서 주문 데이터를 수집하기 위한 북마클릿 파일입니다.
 
@@ -50,7 +50,7 @@
 - Supabase DB 저장 또는 업데이트
 - 향후 우체국 양식에 필요한 수취인 정보 보강 기능 추가 예정
 
-### `sellpia_memo_updater_v4_bookmarklet.html`
+### `sellpia_memo_updater_0608_order_search.html`
 
 셀피아에 관리메모/관리메모2/배송보류 상태를 반영하기 위한 북마클릿 파일입니다.
 
@@ -214,9 +214,11 @@
 
 ```text
 index.html
-picking-system_0511.css
-sellpia_bookmarklet_v3.html
-sellpia_memo_updater_v4_bookmarklet.html
+picking-system_0519.css
+Final_Sellpia_V1.html
+Final_Sellpia_V1.js
+sellpia_bookmarklet_0519_v1.html
+sellpia_memo_updater_0608_order_search.html
 README.md
 TODO.md
 ```
