@@ -1179,6 +1179,42 @@
         updated_at: new Date().toISOString()
       });
     }
+    function rowSortOrder(row) {
+      return normal(row && (
+        row.item_sort_order ||
+        row.sort_order ||
+        row.itemSortOrder ||
+        row.o_item_sort_order ||
+        row.order_item_sort_order ||
+        row.num ||
+        row.no
+      ));
+    }
+    async function patchOrderItemMemo(ordNo, row, memo) {
+      const ord = normal(ordNo);
+      const itemNo = rowItemNo(row);
+      const sort = rowSortOrder(row);
+      if (!ord) throw new Error('주문번호가 없어 상품별 주문메모를 저장할 수 없습니다.');
+      if (!itemNo && !sort) throw new Error('상품행 item_no/sort_order가 없어 상품별 주문메모를 저장할 수 없습니다.');
+      const filter = itemNo
+        ? `order_items?ord_no=eq.${encodeURIComponent(ord)}&item_no=eq.${encodeURIComponent(itemNo)}`
+        : `order_items?ord_no=eq.${encodeURIComponent(ord)}&sort_order=eq.${encodeURIComponent(sort)}`;
+      await dbPatch(filter, {
+        order_memo: memo || '',
+        order_memo_updated_at: new Date().toISOString()
+      });
+    }
+    async function patchDetailOrderItemMemos(detail) {
+      let count = 0;
+      let firstMemo = '';
+      for (const row of detail.rows || []) {
+        const memo = rowOrderMemo(row);
+        if (!firstMemo && memo) firstMemo = memo;
+        await patchOrderItemMemo(detail.ordNo, row, memo);
+        count++;
+      }
+      return { ordNo: detail.ordNo, count, memo: firstMemo };
+    }
     async function collectOrderMemoTargets(date, filters = {}) {
       const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
       let rows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,inv_no,am_pm,order_memo`);
@@ -1194,11 +1230,16 @@
     async function updateOrderMemoTarget(target) {
       const hit = await searchInvoice(target.invNo, target.ordNo);
       const detail = await openOrderDetail(hit);
-      const memo = extractOrderMemoFromRows(detail.rows);
-      await patchOrderMemo(detail.ordNo || target.ordNo, memo);
-      return { ordNo: detail.ordNo || target.ordNo, memo };
+      return await patchDetailOrderItemMemos(detail);
     }
     async function runOrderMemoSyncOnce({ invNo = '', date = '', session = 'ALL' } = {}) {
+      if (invNo) {
+        const hit = await searchInvoice(invNo);
+        const detail = await openOrderDetail(hit);
+        const result = await patchDetailOrderItemMemos(detail);
+        addLog(`상품별 주문메모 저장: ${result.ordNo} / ${result.count}개 상품`);
+        return { ok: 1, fail: 0 };
+      }
       if (invNo) {
         const hit = await searchInvoice(invNo);
         const detail = await openOrderDetail(hit);

@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="pwa-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="pwa-icon.svg">
-<link rel="stylesheet" href="picking-system_0519.css?v=0630-order-memo-watch-v1">
+<link rel="stylesheet" href="picking-system_0519.css?v=0630-item-order-memo-v1">
 <!-- CSS moved to picking-system.css
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -1773,15 +1773,22 @@ async function fetchOrderMemoMapForShortageRows(rows){
   for(const chunk of chunkArray(ordNos,200)){
     if(!chunk.length) continue;
     try{
-      const orderRows=await fetchAllRows(()=>db.from('orders')
-        .select('ord_no,order_memo')
+      const itemRows=await fetchAllRows(()=>db.from('order_items')
+        .select('ord_no,item_no,sort_order,p_code,order_memo')
         .in('ord_no',chunk));
-      (orderRows||[]).forEach(row=>{
+      (itemRows||[]).forEach(row=>{
         const ord=String(row.ord_no||'').trim();
-        if(ord) map[ord]=String(row.order_memo||'');
+        const memo=String(row.order_memo||'');
+        if(!ord) return;
+        const itemNo=String(row.item_no||'').trim();
+        const sort=String(row.sort_order||'').trim();
+        const pCode=String(row.p_code||'').trim();
+        if(itemNo) map[ord+'|'+itemNo]=memo;
+        if(sort) map[ord+'|__sort_'+sort]=memo;
+        if(pCode) map[ord+'|'+pCode]=memo;
       });
     }catch(e){
-      console.warn('orders 주문메모 보강 실패:', e);
+      console.warn('order_items 주문메모 보강 실패:', e);
     }
   }
   return map;
@@ -2229,7 +2236,7 @@ function getPostOfficeOrderValues(o,it){
     receiver_mobile:o.receiverMobile||'',
     zipcode:o.zipcode||'',
     receiver_address:o.receiverAddress||'',
-    order_memo:o.orderMemo||''
+    order_memo:(it&&it.orderMemo)||o.orderMemo||''
   };
 }
 function buildPostOfficeCsvRows(){
@@ -2684,7 +2691,7 @@ async function loadData(silent=false,preserveView=false){
         code:itemKey,itemNo:itemKey,rawItemNo,itemSortOrder:it.sort_order,
         sellpiaCode,qty:it.qty||1,name:it.p_name||'',option:it.p_option||'',
         prodCode:ownCode,resolvedOwnCode:ownCode,nal:!!sellpiaCode.startsWith('낱'),hold:false,
-        location:it.p_location||'',o_shop_memo2:it.o_shop_memo2||'',
+        location:it.p_location||'',o_shop_memo2:it.o_shop_memo2||'',orderMemo:it.order_memo||'',
         /* postoffice CSV fields */
         item_no:it.item_no||'',
         seller_product_name:it.seller_product_name||it.p_name||'',
@@ -6296,7 +6303,7 @@ function inspOrderHasGiftText(order){
   const texts=[
     order?.orderMemo,order?.seller,order?.buyer,order?.recv,
     ...(order?.items||[]).flatMap(it=>[
-      it?.name,it?.option,it?.seller_product_name,it?.seller_option_name,
+      it?.name,it?.option,it?.seller_product_name,it?.seller_option_name,it?.orderMemo,
       it?.prodCode,it?.resolvedOwnCode,it?.sellpiaCode
     ])
   ];
@@ -6311,44 +6318,75 @@ function inspGiftCheckBadge(order){
 function inspOrderAmountBadges(order){
   return inspOrderTotalBadge(order)+inspGiftCheckBadge(order);
 }
-function inspSellpiaOrderMemoText(order){
-  return String(order?.orderMemo||'').trim();
+function orderItemMemoValue(order,it){
+  return String(it?.orderMemo ?? order?.orderMemo ?? '').trim();
 }
 let sellpiaOrderMemoSaveTimer={};
-function orderMemoDomSuffix(ordNo){
-  return String(ordNo||'').replace(/[^a-zA-Z0-9]/g,'_');
+function orderMemoKeyForParts(parts){
+  const ord=String(parts?.ordNo||'').trim();
+  const rowKey=String(parts?.itemNo||'').trim()
+    || (String(parts?.sort||'').trim() ? '__sort_'+String(parts.sort).trim() : '')
+    || String(parts?.state||'').trim();
+  return [ord,rowKey].join('|');
 }
-function setOrderMemoDomValue(ordNo,val){
-  const key=String(ordNo||'');
+function orderItemMemoParts(order,it){
+  const ordNo=String(order?.ordNo||noMap[order?.no]?.ord_no||it?.ordNo||'').trim();
+  const itemNo=String(it?.rawItemNo||it?.item_no||it?.itemNo||'').trim();
+  const sort=String(it?.itemSortOrder??it?.sort_order??'').trim();
+  const state=String(it?.code||'').trim();
+  const parts={ordNo,itemNo,sort,state};
+  parts.key=orderMemoKeyForParts(parts);
+  return parts;
+}
+function orderMemoDomSuffix(parts){
+  return String(parts?.key||'').replace(/[^a-zA-Z0-9]/g,'_');
+}
+function setOrderMemoDomValue(memoKey,val){
+  const key=String(memoKey||'');
   document.querySelectorAll('.sellpia-order-memo-ta').forEach(el=>{
-    if(String(el.dataset.ord||'')!==key) return;
+    if(String(el.dataset.memoKey||'')!==key) return;
     if(document.activeElement!==el && el.value!==String(val||'')) el.value=String(val||'');
     const has=!!String(val||'').trim();
     el.classList.toggle('has-val',has);
     el.style.background=has?'#F3F8FF':'#F7F8FA';
   });
 }
-function syncSellpiaOrderMemoLocal(ordNo,val){
-  const key=String(ordNo||'').trim();
-  if(!key) return;
+function itemMemoMatches(parts,it){
+  if(!parts||!it) return false;
+  const itemNo=String(it.rawItemNo||it.item_no||it.itemNo||'').trim();
+  const sort=String(it.itemSortOrder??it.sort_order??'').trim();
+  const state=String(it.code||'').trim();
+  return (!!parts.itemNo&&itemNo===parts.itemNo)
+    || (!!parts.sort&&sort===parts.sort)
+    || (!!parts.state&&state===parts.state);
+}
+function syncSellpiaOrderMemoLocal(parts,val){
+  const ordNo=String(parts?.ordNo||'').trim();
+  if(!ordNo) return;
   (ORDERS_ALL||[]).forEach(o=>{
-    if(String(o.ordNo||noMap[o.no]?.ord_no||'').trim()===key) o.orderMemo=val||'';
+    if(String(o.ordNo||noMap[o.no]?.ord_no||'').trim()!==ordNo) return;
+    (o.items||[]).forEach(it=>{ if(itemMemoMatches(parts,it)) it.orderMemo=val||''; });
   });
   (misongPickingData||[]).forEach(r=>{
-    if(String(r.ordNo||'').trim()===key) r.orderMemo=val||'';
+    if(String(r.ordNo||'').trim()!==ordNo) return;
+    if(itemMemoMatches(parts,{rawItemNo:r.rawItemNo,itemNo:r.itemNo,itemSortOrder:r.itemSortOrder,code:r.code})) r.orderMemo=val||'';
   });
-  setOrderMemoDomValue(key,val||'');
+  setOrderMemoDomValue(parts.key,val||'');
 }
-function saveSellpiaOrderMemo(ordNo,val){
-  const key=String(ordNo||'').trim();
-  if(!key) return;
-  syncSellpiaOrderMemoLocal(key,val||'');
-  clearTimeout(sellpiaOrderMemoSaveTimer[key]);
-  sellpiaOrderMemoSaveTimer[key]=setTimeout(async()=>{
+function saveSellpiaOrderMemo(ordNo,itemNo,sort,state,val){
+  const parts={ordNo:String(ordNo||'').trim(),itemNo:String(itemNo||'').trim(),sort:String(sort||'').trim(),state:String(state||'').trim()};
+  parts.key=orderMemoKeyForParts(parts);
+  if(!parts.ordNo||(!parts.itemNo&&!parts.sort)) return;
+  syncSellpiaOrderMemoLocal(parts,val||'');
+  clearTimeout(sellpiaOrderMemoSaveTimer[parts.key]);
+  sellpiaOrderMemoSaveTimer[parts.key]=setTimeout(async()=>{
     try{
-      const {error}=await db.from('orders')
-        .update({order_memo:val||'',updated_at:new Date().toISOString()})
-        .eq('ord_no',key);
+      let q=db.from('order_items')
+        .update({order_memo:val||'',order_memo_updated_at:new Date().toISOString()})
+        .eq('ord_no',parts.ordNo);
+      if(parts.itemNo) q=q.eq('item_no',parts.itemNo);
+      else q=q.eq('sort_order',Number(parts.sort));
+      const {error}=await q;
       if(error) throw error;
     }catch(e){
       console.warn('셀피아 주문메모 저장 실패:', e);
@@ -6358,10 +6396,10 @@ function saveSellpiaOrderMemo(ordNo,val){
 }
 function inspMemoCell(order,it,memoId,memoVal){
   const codeEsc=String(it?.code||'').replace(/'/g,"\\'");
-  const sellpiaMemo=inspSellpiaOrderMemoText(order);
-  const ordNo=String(order?.ordNo||noMap[order?.no]?.ord_no||'').trim();
-  const ordEsc=ordNo.replace(/'/g,"\\'");
-  const orderMemoId='sellpia-order-memo-'+orderMemoDomSuffix(ordNo);
+  const sellpiaMemo=orderItemMemoValue(order,it);
+  const parts=orderItemMemoParts(order,it);
+  const escAttr=s=>String(s||'').replace(/'/g,"\\'");
+  const orderMemoId='sellpia-order-memo-'+orderMemoDomSuffix(parts);
   return '<td class="insp-memo-cell" style="vertical-align:top;padding:5px 6px;width:'+inspMemoColW+'px;min-width:'+inspMemoColW+'px;max-width:'+inspMemoColW+'px;">'
     +'<div style="display:flex;flex-direction:column;gap:4px;height:100%;">'
       +'<textarea id="'+memoId+'" class="insp-item-memo'+(memoVal?' insp-item-memo-filled':'')+'" placeholder="로컬 검품 메모..." rows="2"'
@@ -6369,12 +6407,12 @@ function inspMemoCell(order,it,memoId,memoVal){
         +' oninput="insp_saveMemo('+order.no+',\''+codeEsc+'\',(this.value))"'
         +' onkeydown="insp_handleMemoKey(event)"'
       +'>'+memoVal+'</textarea>'
-      +'<div class="insp-sellpia-order-memo'+(sellpiaMemo?' has-val':'')+'" title="orders.order_memo"'
+      +'<div class="insp-sellpia-order-memo'+(sellpiaMemo?' has-val':'')+'" title="order_items.order_memo"'
         +' style="box-sizing:border-box;min-height:48px;max-height:72px;border:1px solid #C9D6E2;border-radius:6px;background:'+(sellpiaMemo?'#F3F8FF':'#F7F8FA')+';padding:3px 6px;">'
         +'<div style="font-size:9px;line-height:1.1;font-weight:900;color:#4E6C8A;margin-bottom:2px;">셀피아 주문메모</div>'
-        +'<textarea id="'+orderMemoId+'" data-ord="'+htmlEsc(ordNo)+'" class="sellpia-order-memo-ta'+(sellpiaMemo?' has-val':'')+'" placeholder="셀피아 주문메모..." rows="2"'
+        +'<textarea id="'+orderMemoId+'" data-memo-key="'+htmlEsc(parts.key)+'" class="sellpia-order-memo-ta'+(sellpiaMemo?' has-val':'')+'" placeholder="셀피아 주문메모..." rows="2"'
           +' style="width:100%;box-sizing:border-box;min-height:32px;max-height:54px;resize:vertical;border:0;outline:none;background:transparent;color:#1A2840;font-size:11px;line-height:1.25;font-weight:700;font-family:inherit;"'
-          +(ordNo?' oninput="saveSellpiaOrderMemo(\''+ordEsc+'\',this.value)"':' disabled')
+          +(parts.ordNo&&(parts.itemNo||parts.sort)?' oninput="saveSellpiaOrderMemo(\''+escAttr(parts.ordNo)+'\',\''+escAttr(parts.itemNo)+'\',\''+escAttr(parts.sort)+'\',\''+escAttr(parts.state)+'\',this.value)"':' disabled')
           +' onkeydown="insp_handleMemoKey(event)"'
         +'>'+htmlEsc(sellpiaMemo)+'</textarea>'
       +'</div>'
@@ -7054,7 +7092,22 @@ function setupRealtime(){
       const r=payload.new||{};
       const ordNo=String(r.ord_no||'').trim();
       if(!ordNo) return;
-      syncSellpiaOrderMemoLocal(ordNo,String(r.order_memo||''));
+      (ORDERS_ALL||[]).forEach(o=>{
+        if(String(o.ordNo||noMap[o.no]?.ord_no||'').trim()===ordNo) o.orderMemo=String(r.order_memo||'');
+      });
+    })
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'order_items'},payload=>{
+      const r=payload.new||{};
+      const parts={
+        ordNo:String(r.ord_no||'').trim(),
+        itemNo:String(r.item_no||'').trim(),
+        sort:String(r.sort_order||'').trim(),
+        state:'',
+        key:''
+      };
+      parts.key=orderMemoKeyForParts(parts);
+      if(!parts.ordNo||(!parts.itemNo&&!parts.sort)) return;
+      syncSellpiaOrderMemoLocal(parts,String(r.order_memo||''));
     })
     .subscribe();
 }
@@ -7094,7 +7147,7 @@ async function loadMisongPickingData(showToast=false){
         const stateCode=itemStateCode(it);
         const k=o.no+'-'+stateCode;
         const sh=shortage[k]||0;
-        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:stateCode,itemNo:it.itemNo||it.code,itemSortOrder:it.itemSortOrder,sellpiaCode:it.sellpiaCode||'',prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate,orderMemo:o.orderMemo||''});
+        if(sh>0) addMisongPickingRow({seq:o.no,invNo:seqToReal[o.no]||o.invNo||'',ordNo:noMap[o.no]?.ord_no||o.ordNo||'',code:stateCode,itemNo:it.itemNo||it.code,rawItemNo:it.rawItemNo||it.item_no||'',itemSortOrder:it.itemSortOrder,sellpiaCode:it.sellpiaCode||'',prodCode:it.prodCode||it.resolvedOwnCode||'',name:it.name||'',buyer:o.buyer||'',shortage:sh,drawer:drawer[o.no]||'',shortageDate:shortageDate[k]||o.ordDate||selectedDate,orderMemo:it.orderMemo||o.orderMemo||''});
       });
     });
   }
@@ -7127,12 +7180,20 @@ async function loadMisongPickingData(showToast=false){
         || '';
       if(inspMemo) insp_itemMemos[k]=inspMemo;
       if(r.drawer_no&&!drawer[seqNo]) drawer[seqNo]=r.drawer_no;
+      const memoOrd=String(r.ord_no||'').trim();
+      const memoItem=String(item?.rawItemNo||item?.item_no||r.item_no||'').trim();
+      const memoSort=String(item?.itemSortOrder??r.item_sort_order??r.sort_order??'').trim();
+      const itemOrderMemo=(memoItem&&orderMemoMap[memoOrd+'|'+memoItem])
+        || (memoSort&&orderMemoMap[memoOrd+'|__sort_'+memoSort])
+        || orderMemoMap[memoOrd+'|'+String(r.p_code||'').trim()]
+        || '';
       addMisongPickingRow({
         seq: seqNo,
         invNo: r.inv_no||'',
         ordNo: r.ord_no||'',
         code: codeKey,
         itemNo: item?.itemNo||item?.item_no||r.item_no||codeKey,
+        rawItemNo: item?.rawItemNo||item?.item_no||r.item_no||'',
         itemSortOrder: item?.itemSortOrder??r.item_sort_order,
         sellpiaCode: item?.sellpiaCode||r.p_code,
         prodCode: ownCode,
@@ -7141,7 +7202,7 @@ async function loadMisongPickingData(showToast=false){
         shortage: sh,
         drawer: drawer[seqNo]||r.drawer_no||'',
         shortageDate: getShortageBaseDate(r,realToSeq[r.inv_no]||'',orderReceiptDateMap)||selectedDate,
-        orderMemo: order?.orderMemo||orderMemoMap[String(r.ord_no||'').trim()]||'',
+        orderMemo: item?.orderMemo||itemOrderMemo||order?.orderMemo||'',
         status
       });
     });
@@ -7214,7 +7275,9 @@ function renderMisongItemRow(r,maps,extraClass=''){
   const memoSuffix=memoDomSuffix(r.seq,r.code);
   const ordNo=String(r.ordNo||noMap[r.seq]?.ord_no||'').trim();
   const orderMemoVal=String(r.orderMemo||'');
-  const orderMemoEsc=ordNo.replace(/'/g,"\\'");
+  const memoParts={ordNo,itemNo:String(r.rawItemNo||r.itemNo||'').trim(),sort:String(r.itemSortOrder??'').trim(),state:String(r.code||'').trim()};
+  memoParts.key=orderMemoKeyForParts(memoParts);
+  const escAttr=s=>String(s||'').replace(/'/g,"\\'");
   const imgHtml = imgUrl
     ? `<img src="${imgUrl}" class="misong-thumb-img" loading="lazy" onerror="this.style.display='none';this.parentNode.textContent='🖼'">`
     : '🖼';
@@ -7227,7 +7290,7 @@ function renderMisongItemRow(r,maps,extraClass=''){
       <div class="misong-code-line"><span class="misong-code ${prodCode?'':'missing'}">${htmlEsc(displayCode)}</span>${renderMisongDateBadge(r)}</div>
       <div class="misong-name">${htmlEsc(itemName)}</div>
       <textarea id="misong-memo-${memoSuffix}" class="insp-item-memo ${memoVal?'insp-item-memo-filled':''}" placeholder="검품 메모" rows="1" onclick="event.stopPropagation()" oninput="insp_saveMemo('${e2(r.seq)}','${e2(r.code)}',this.value)" onkeydown="insp_handleMemoKey(event)" style="margin-top:4px;width:100%;box-sizing:border-box;min-height:26px;max-height:56px;resize:vertical;font-size:11px;line-height:1.25;">${htmlEsc(memoVal)}</textarea>
-      <textarea data-ord="${htmlEsc(ordNo)}" class="sellpia-order-memo-ta ${orderMemoVal?'has-val':''}" placeholder="셀피아 주문메모" rows="1" onclick="event.stopPropagation()" ${ordNo?`oninput="saveSellpiaOrderMemo('${orderMemoEsc}',this.value)"`:'disabled'} onkeydown="insp_handleMemoKey(event)" style="margin-top:3px;width:100%;box-sizing:border-box;min-height:24px;max-height:48px;resize:vertical;border:1px solid #C9D6E2;border-radius:5px;background:${orderMemoVal?'#F3F8FF':'#F7F8FA'};color:#1A2840;font-size:10.5px;line-height:1.25;font-weight:700;font-family:inherit;padding:3px 5px;">${htmlEsc(orderMemoVal)}</textarea>
+      <textarea data-memo-key="${htmlEsc(memoParts.key)}" class="sellpia-order-memo-ta ${orderMemoVal?'has-val':''}" placeholder="셀피아 주문메모" rows="1" onclick="event.stopPropagation()" ${memoParts.ordNo&&(memoParts.itemNo||memoParts.sort)?`oninput="saveSellpiaOrderMemo('${escAttr(memoParts.ordNo)}','${escAttr(memoParts.itemNo)}','${escAttr(memoParts.sort)}','${escAttr(memoParts.state)}',this.value)"`:'disabled'} onkeydown="insp_handleMemoKey(event)" style="margin-top:3px;width:100%;box-sizing:border-box;min-height:24px;max-height:48px;resize:vertical;border:1px solid #C9D6E2;border-radius:5px;background:${orderMemoVal?'#F3F8FF':'#F7F8FA'};color:#1A2840;font-size:10.5px;line-height:1.25;font-weight:700;font-family:inherit;padding:3px 5px;">${htmlEsc(orderMemoVal)}</textarea>
     </div>
     <div class="misong-short-ctrl">
       <button onclick="adjMisongShortage('${e2(r.seq)}','${e2(r.code)}',-1)">−</button>
