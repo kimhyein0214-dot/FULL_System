@@ -194,6 +194,38 @@
       const text = await res.text();
       return text ? JSON.parse(text) : [];
     }
+    async function dbOrdersByDateField(field, date, selects) {
+      const encodedDate = encodeURIComponent(date);
+      const selectList = uniq(selects || []).filter(Boolean);
+      let lastError = null;
+      for (const select of selectList) {
+        try {
+          return {
+            ok: true,
+            rows: await dbRequest(`orders?${field}=eq.${encodedDate}&select=${select}`)
+          };
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      if (lastError) addLog(`  DB fallback(orders ${field}): ${lastError.message.slice(0, 80)}`);
+      return { ok: false, rows: [] };
+    }
+    async function dbOrdersByWorkDate(date, selects) {
+      const dedupe = rows => {
+        const byOrd = new Map();
+        for (const row of rows || []) {
+          const ord = normal(row.ord_no);
+          if (ord && !byOrd.has(ord)) byOrd.set(ord, row);
+        }
+        return [...byOrd.values()];
+      };
+      const receipt = await dbOrdersByDateField('receipt_date', date, selects);
+      if (receipt.ok && receipt.rows.length) return dedupe(receipt.rows);
+      if (receipt.ok) addLog('  receipt_date 대상 없음: legacy ord_date fallback');
+      const legacy = await dbOrdersByDateField('ord_date', date, selects);
+      return dedupe(legacy.rows);
+    }
     async function dbPatch(path, body) {
       const res = await fetch(CONFIG.supabaseUrl + '/rest/v1/' + path, {
         method: 'PATCH',
@@ -976,13 +1008,11 @@
       {
         const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
         const typeFilter = normal(filters.itemType || 'ALL').toUpperCase();
-        let orderRows = [];
-        try {
-          orderRows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,inv_no,am_pm,seller`);
-        } catch (err) {
-          addLog(`  DB fallback(orders date): ${err.message.slice(0, 80)}`);
-          orderRows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,am_pm`);
-        }
+        let orderRows = await dbOrdersByWorkDate(date, [
+          'ord_no,inv_no,am_pm,seller',
+          'ord_no,inv_no,am_pm',
+          'ord_no,am_pm'
+        ]);
         if (sessionFilter !== 'ALL') {
           orderRows = orderRows.filter(row => normal(row.am_pm).toUpperCase() === sessionFilter);
         }
@@ -1270,7 +1300,10 @@
     }
     async function collectOrderMemoTargets(date, filters = {}) {
       const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
-      let rows = await dbRequest(`orders?ord_date=eq.${encodeURIComponent(date)}&select=ord_no,inv_no,am_pm`);
+      let rows = await dbOrdersByWorkDate(date, [
+        'ord_no,inv_no,am_pm',
+        'ord_no,am_pm'
+      ]);
       if (sessionFilter !== 'ALL') {
         rows = rows.filter(row => normal(row.am_pm).toUpperCase() === sessionFilter);
       }
