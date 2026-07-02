@@ -94,7 +94,7 @@
     <h1>Sellpia Memo Updater 0608</h1>
     <p>
       셀피아 <code>주문조회(order_search.html)</code> 탭에서 실행하는 메모 업데이터입니다.
-      재고매칭 팝업을 열지 않고 주문조회 AJAX로만 관리메모, 관리메모2, 배송보류를 반영합니다.
+      재고매칭 팝업을 열지 않고 주문조회 AJAX로 관리메모, 관리메모2, 배송보류를 반영하고 주문메모를 확인합니다.
     </p>
     <a id="bookmarklet" class="bookmarklet" href="#">Sellpia Memo Updater 0608</a>
     <div>
@@ -105,7 +105,8 @@
       <li>관리메모는 송장 내 전체 상품에 반영합니다.</li>
       <li>관리메모2는 해당 송장 안의 해당 상품 행에만 반영합니다.</li>
       <li>배송보류 설정/해제는 해당 송장 상세 행 전체를 대상으로 처리합니다.</li>
-      <li>DB는 조회만 하고, 셀피아 반영은 <code>order_search.ajax.html</code>로 처리합니다.</li>
+      <li>주문메모는 주문조회 상세에서 읽어 시스템 주문메모에 저장합니다.</li>
+      <li>셀피아 반영은 <code>order_search.ajax.html</code>로 처리합니다.</li>
     </ul>
     <p class="note">
       사용법: 위 파란 버튼을 북마크바로 끌어다 놓은 뒤, 셀피아 주문조회 탭에서 클릭하세요.
@@ -225,6 +226,51 @@
       if (receipt.ok) addLog('  receipt_date 대상 없음: legacy ord_date fallback');
       const legacy = await dbOrdersByDateField('ord_date', date, selects);
       return dedupe(legacy.rows);
+    }
+    function normalizeDateRange(startDate, endDate) {
+      const formatLocalDate = dateObj => {
+        const yyyy = dateObj.getFullYear();
+        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(dateObj.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      };
+      const start = normal(startDate);
+      const end = normal(endDate || startDate);
+      if (!start && !end) return { startDate: '', endDate: '', dates: [] };
+      const first = start || end;
+      const last = end || first;
+      const startObj = new Date(first + 'T00:00:00');
+      const endObj = new Date(last + 'T00:00:00');
+      if (Number.isNaN(startObj.getTime()) || Number.isNaN(endObj.getTime())) {
+        throw new Error('날짜 형식이 올바르지 않습니다.');
+      }
+      const from = startObj <= endObj ? startObj : endObj;
+      const to = startObj <= endObj ? endObj : startObj;
+      const dates = [];
+      for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+        dates.push(formatLocalDate(d));
+      }
+      if (dates.length > 62) throw new Error('기간은 최대 62일까지만 선택할 수 있습니다.');
+      return {
+        startDate: dates[0],
+        endDate: dates[dates.length - 1],
+        dates
+      };
+    }
+    function dateRangeLabel(startDate, endDate) {
+      return startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
+    }
+    async function dbOrdersByWorkDateRange(startDate, endDate, selects) {
+      const range = normalizeDateRange(startDate, endDate);
+      const byOrd = new Map();
+      for (const date of range.dates) {
+        const rows = await dbOrdersByWorkDate(date, selects);
+        for (const row of rows || []) {
+          const ord = normal(row.ord_no);
+          if (ord && !byOrd.has(ord)) byOrd.set(ord, row);
+        }
+      }
+      return [...byOrd.values()];
     }
     async function dbPatch(path, body) {
       const res = await fetch(CONFIG.supabaseUrl + '/rest/v1/' + path, {
@@ -451,7 +497,11 @@
       }
     }
     async function applyOrderSearchDate(date, runSearch) {
-      if (!date) return;
+      return await applyOrderSearchRange(date, date, runSearch);
+    }
+    async function applyOrderSearchRange(startDate, endDate, runSearch) {
+      const range = normalizeDateRange(startDate, endDate);
+      if (!range.dates.length) return;
       const dateType = document.querySelector('#date_type, select[name="date_type"]');
       if (dateType) {
         dateType.value = 'collect_date';
@@ -463,9 +513,9 @@
         addLog('  날짜 검색 필드 없음: DB 날짜 기준으로만 대상 선정');
         return;
       }
-      triggerValue(start, date);
-      triggerValue(end, date);
-      addLog(`  주문조회 검색일자 적용: ${date} ~ ${date}`);
+      triggerValue(start, range.startDate);
+      triggerValue(end, range.endDate);
+      addLog(`  주문조회 검색일자 적용: ${dateRangeLabel(range.startDate, range.endDate)}`);
       if (!runSearch) return;
       await runOrderSearch();
       await sleep(900);
@@ -1011,7 +1061,8 @@
       {
         const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
         const typeFilter = normal(filters.itemType || 'ALL').toUpperCase();
-        let orderRows = await dbOrdersByWorkDate(date, [
+        const range = normalizeDateRange(date, filters.endDate || date);
+        let orderRows = await dbOrdersByWorkDateRange(range.startDate, range.endDate, [
           'ord_no,inv_no,am_pm,seller',
           'ord_no,inv_no,am_pm',
           'ord_no,am_pm'
@@ -1040,13 +1091,16 @@
           }
         }
         try {
-          const changedSince = new Date(date + 'T00:00:00').toISOString();
+          const changedSince = new Date(range.startDate + 'T00:00:00').toISOString();
+          const changedUntilDate = new Date(range.endDate + 'T00:00:00');
+          changedUntilDate.setDate(changedUntilDate.getDate() + 1);
+          const changedUntil = changedUntilDate.toISOString();
           let changedRows = [];
           try {
-            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold,updated_at`);
+            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&updated_at=lt.${encodeURIComponent(changedUntil)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold,updated_at`);
           } catch (err) {
             addLog(`  DB fallback(changed shortage): ${err.message.slice(0, 80)}`);
-            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at`);
+            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&updated_at=lt.${encodeURIComponent(changedUntil)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at`);
           }
           const seen = new Set(shortageRows.map(row => [normal(row.ord_no), normal(row.item_no), normal(row.inv_no)].join('|')));
           const extras = (changedRows || []).filter(row => {
@@ -1057,10 +1111,10 @@
           });
           if (extras.length) {
             shortageRows.push(...extras);
-            addLog(`  오늘 변경된 과거 미송 ${extras.length}행 추가 포함`);
+            addLog(`  기간 내 변경된 과거 미송 ${extras.length}행 추가 포함`);
           }
         } catch (err) {
-          addLog(`  오늘 변경 미송 조회 건너뜀: ${err.message.slice(0, 80)}`);
+          addLog(`  기간 변경 미송 조회 건너뜀: ${err.message.slice(0, 80)}`);
         }
         if (!shortageRows.length) return [];
 
@@ -1243,6 +1297,10 @@
         await setInvoiceDeliveryHold(rows, !!task.hold);
         actions.push(task.hold ? '배송보류 설정' : '배송보류 해제');
       }
+      if (options.doOrderMemo) {
+        const result = await patchDetailOrderItemMemos(detail);
+        actions.push(`주문메모 ${result.memoCount}/${result.count}개`);
+      }
       if (task.clear) {
         try {
           await dbPatch(`shortage?inv_no=eq.${encodeURIComponent(invNo)}&status=eq.${encodeURIComponent('검품완료')}`, {
@@ -1309,7 +1367,8 @@
     }
     async function collectOrderMemoTargets(date, filters = {}) {
       const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
-      let rows = await dbOrdersByWorkDate(date, [
+      const range = normalizeDateRange(date, filters.endDate || date);
+      let rows = await dbOrdersByWorkDateRange(range.startDate, range.endDate, [
         'ord_no,inv_no,am_pm',
         'ord_no,am_pm'
       ]);
@@ -1326,7 +1385,7 @@
       const detail = await openOrderDetail(hit);
       return await patchDetailOrderItemMemos(detail);
     }
-    async function runOrderMemoSyncOnce({ invNo = '', date = '', session = 'ALL' } = {}) {
+    async function runOrderMemoSyncOnce({ invNo = '', date = '', endDate = '', session = 'ALL' } = {}) {
       if (invNo) {
         const hit = await searchInvoice(invNo);
         const detail = await openOrderDetail(hit);
@@ -1334,12 +1393,13 @@
         addLog(`상품별 주문메모 저장: ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
         return { ok: 1, fail: 0 };
       }
-      const targets = await collectOrderMemoTargets(date, { session });
+      const targets = await collectOrderMemoTargets(date, { endDate, session });
       if (!targets.length) {
         addLog('주문메모 업데이트 대상이 없습니다.');
         return { ok: 0, fail: 0 };
       }
-      addLog(`상품별 주문메모 업데이트 대상 주문 ${targets.length}건`);
+      const range = normalizeDateRange(date, endDate || date);
+      addLog(`상품별 주문메모 업데이트 대상 주문 ${targets.length}건 / ${dateRangeLabel(range.startDate, range.endDate)}`);
       let ok = 0;
       let fail = 0;
       for (let i = 0; i < targets.length; i++) {
@@ -1377,12 +1437,18 @@
       overlay.innerHTML = `
         <section style="width:min(520px,92vw);background:#172033;border:1px solid #334155;border-radius:14px;padding:24px;box-shadow:0 26px 90px rgba(0,0,0,.45);">
           <h2 style="margin:0 0 6px;font-size:18px;letter-spacing:0;">Sellpia Memo Updater 0608</h2>
-          <div style="margin:0 0 16px;color:#94a3b8;font-size:12px;">주문조회 AJAX 방식 · DB 읽기 전용</div>
+          <div style="margin:0 0 16px;color:#94a3b8;font-size:12px;">주문조회 AJAX 방식 · 체크한 항목만 처리</div>
           <div id="smu0608-form">
             <label style="display:block;margin:0 0 6px;color:#cbd5e1;font-size:12px;">운송장번호</label>
             <input id="smu0608-inv" placeholder="1건만 처리할 때 입력" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
-            <label style="display:block;margin:14px 0 6px;color:#cbd5e1;font-size:12px;">날짜</label>
-            <input id="smu0608-date" type="date" value="${today()}" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;">
+              <label style="display:block;color:#cbd5e1;font-size:12px;">시작일
+                <input id="smu0608-date-start" type="date" value="${today()}" style="margin-top:6px;width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
+              </label>
+              <label style="display:block;color:#cbd5e1;font-size:12px;">종료일
+                <input id="smu0608-date-end" type="date" value="${today()}" style="margin-top:6px;width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
+              </label>
+            </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;">
               <label style="display:block;color:#cbd5e1;font-size:12px;">AM/PM
                 <select id="smu0608-session" style="margin-top:6px;width:100%;box-sizing:border-box;height:38px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 10px;font-size:13px;">
@@ -1403,14 +1469,11 @@
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo1" type="checkbox" checked> 관리메모</label>
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-memo2" type="checkbox" checked> 관리메모2</label>
               <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-hold" type="checkbox" checked> 배송보류</label>
+              <label style="display:flex;gap:6px;align-items:center;color:#cbd5e1;font-size:13px;"><input id="smu0608-order-memo" type="checkbox"> 주문메모</label>
             </div>
             <label style="display:block;margin:0 0 6px;color:#cbd5e1;font-size:12px;">발송대기 관리메모1 문구</label>
             <input id="smu0608-nextship-memo" value="!!" placeholder="예: !! / ?? / 내일출고" style="width:100%;box-sizing:border-box;height:38px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;margin-bottom:14px;">
             <button id="smu0608-start" style="width:100%;height:42px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:900;cursor:pointer;">시작</button>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
-              <button id="smu0608-order-memo-once" style="height:38px;border:0;border-radius:8px;background:#0ea5e9;color:#fff;font-weight:900;cursor:pointer;">주문메모 업데이트</button>
-              <button id="smu0608-order-memo-watch" style="height:38px;border:0;border-radius:8px;background:#22c55e;color:#06210f;font-weight:900;cursor:pointer;">주문메모 감시 시작</button>
-            </div>
           </div>
           <div id="smu0608-work" style="display:none;">
             <div id="smu0608-status" style="white-space:pre-line;line-height:1.5;color:#e5e7eb;font-size:13px;min-height:42px;"></div>
@@ -1446,7 +1509,8 @@
     function orderMemoOptsFromForm() {
       return {
         invNo: normal($id('smu0608-inv').value),
-        date: normal($id('smu0608-date').value),
+        date: normal($id('smu0608-date-start').value),
+        endDate: normal($id('smu0608-date-end').value),
         session: normal($id('smu0608-session').value || 'ALL')
       };
     }
@@ -1456,7 +1520,9 @@
         alert('송장번호 또는 날짜를 입력해주세요.');
         return;
       }
-      if (!opts.invNo && !confirm(`${opts.date} 주문메모를 주문조회에서 읽어 DB에 반영합니다. 계속할까요?`)) return;
+      const optsRange = opts.date ? normalizeDateRange(opts.date, opts.endDate || opts.date) : null;
+      const optsRangeLabel = optsRange ? dateRangeLabel(optsRange.startDate, optsRange.endDate) : '';
+      if (!opts.invNo && !confirm(`${optsRangeLabel} 주문메모를 주문조회에서 읽어 DB에 반영합니다. 계속할까요?`)) return;
       $id('smu0608-form').style.display = 'none';
       $id('smu0608-work').style.display = 'block';
       stopped = false;
@@ -1464,8 +1530,8 @@
       $id('smu0608-stop').disabled = false;
       try {
         if (opts.date) {
-          setStatus(`${opts.date} 주문조회 검색조건 적용 중...`);
-          await applyOrderSearchDate(opts.date, true);
+          setStatus(`${optsRangeLabel} 주문조회 검색조건 적용 중...`);
+          await applyOrderSearchRange(optsRange.startDate, optsRange.endDate, true);
         }
         if (watch) {
           await runOrderMemoWatcher(opts);
@@ -1478,33 +1544,35 @@
         addLog(err.stack || err.message);
       }
     }
-    $id('smu0608-order-memo-once').onclick = () => startOrderMemoMode(false);
-    $id('smu0608-order-memo-watch').onclick = () => startOrderMemoMode(true);
     $id('smu0608-start').onclick = async () => {
       const invNo = normal($id('smu0608-inv').value);
-      const date = normal($id('smu0608-date').value);
+      const date = normal($id('smu0608-date-start').value);
+      const endDate = normal($id('smu0608-date-end').value);
       const session = normal($id('smu0608-session').value || 'ALL');
       const itemType = normal($id('smu0608-item-type').value || 'ALL');
       const sessionLabel = session === 'AM' ? '오전' : session === 'PM' ? '오후' : '전체';
       const itemTypeLabel = itemType === 'GOLD' ? '14K만' : itemType === 'NORMAL' ? '일반만' : '전체';
+      const range = date ? normalizeDateRange(date, endDate || date) : null;
+      const rangeLabel = range ? dateRangeLabel(range.startDate, range.endDate) : '';
       const options = {
         doMemo1: $id('smu0608-memo1').checked,
         doMemo2: $id('smu0608-memo2').checked,
         doHold: $id('smu0608-hold').checked,
+        doOrderMemo: $id('smu0608-order-memo').checked,
         nextShipMemo: normal($id('smu0608-nextship-memo').value) || '!!'
       };
       if (!invNo && !date) {
-        alert('운송장번호 또는 날짜를 입력해주세요.');
+        alert('운송장번호 또는 시작일을 입력해주세요.');
         return;
       }
-      if (!invNo && !confirm(`${date} / ${sessionLabel} / ${itemTypeLabel} 미송 데이터를 주문조회에서 순차 반영합니다. 계속할까요?`)) return;
+      if (!invNo && !confirm(`${rangeLabel} / ${sessionLabel} / ${itemTypeLabel} 미송 데이터를 주문조회에서 순차 반영합니다. 계속할까요?`)) return;
       $id('smu0608-form').style.display = 'none';
       $id('smu0608-work').style.display = 'block';
       stopped = false;
       try {
         if (date) {
-          setStatus(`${date} 주문조회 검색조건 적용 중`);
-          await applyOrderSearchDate(date, true);
+          setStatus(`${rangeLabel} 주문조회 검색조건 적용 중`);
+          await applyOrderSearchRange(range.startDate, range.endDate, true);
         }
         if (invNo) {
           setStatus(`1건 처리 준비\n${invNo}`);
@@ -1516,16 +1584,21 @@
           addLog(`완료: ${invNo} / ${result}`);
           return;
         }
-        setStatus(`${date} ${sessionLabel} ${itemTypeLabel} 데이터 조회 중`);
-        const tasks = await collectDateTasks(date, { session, itemType });
-        if (!tasks.length) {
+        const runSellpiaUpdates = options.doMemo1 || options.doMemo2 || options.doHold;
+        const processedOrdNos = new Set();
+        let tasks = [];
+        let ok = 0;
+        let fail = 0;
+        if (runSellpiaUpdates) {
+          setStatus(`${rangeLabel} ${sessionLabel} ${itemTypeLabel} 데이터 조회 중`);
+          tasks = await collectDateTasks(range.startDate, { endDate: range.endDate, session, itemType });
+        }
+        if (!tasks.length && !options.doOrderMemo) {
           setStatus('처리할 데이터가 없습니다.');
           return;
         }
-        addLog(`필터: ${date} / ${sessionLabel} / ${itemTypeLabel}`);
-        addLog(`처리 대상 ${tasks.length}건`);
-        let ok = 0;
-        let fail = 0;
+        addLog(`필터: ${rangeLabel} / ${sessionLabel} / ${itemTypeLabel}`);
+        if (tasks.length) addLog(`셀피아 반영 대상 ${tasks.length}건`);
         for (let i = 0; i < tasks.length; i++) {
           if (stopped) break;
           const item = tasks[i];
@@ -1533,6 +1606,7 @@
           try {
             const result = await applyTask(item.task, options);
             addLog(`✓ ${item.invNo} / ${result}`);
+            processedOrdNos.add(normal(item.ordNo));
             ok++;
           } catch (err) {
             addLog(`✗ ${item.invNo || item.ordNo}: ${err.message}`);
@@ -1540,6 +1614,27 @@
           }
           setBar(i + 1, tasks.length);
           await sleep(150);
+        }
+        if (options.doOrderMemo && !stopped) {
+          const memoTargets = await collectOrderMemoTargets(range.startDate, { endDate: range.endDate, session });
+          const remainingMemoTargets = memoTargets.filter(target => !processedOrdNos.has(normal(target.ordNo)));
+          addLog(`주문메모 추가 대상 ${remainingMemoTargets.length}건${processedOrdNos.size ? ` / 셀피아 반영 중 처리 ${processedOrdNos.size}건 제외` : ''}`);
+          for (let i = 0; i < remainingMemoTargets.length; i++) {
+            if (stopped) break;
+            const target = remainingMemoTargets[i];
+            setStatus(`[주문메모 ${i + 1}/${remainingMemoTargets.length}]\n${target.invNo || target.ordNo}`);
+            try {
+              const result = await updateOrderMemoTarget(target);
+              addLog(`✓ 주문메모 ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
+              ok++;
+            } catch (err) {
+              addLog(`✗ 주문메모 ${target.invNo || target.ordNo}: ${err.message}`);
+              fail++;
+            }
+            const totalProgress = tasks.length + remainingMemoTargets.length;
+            setBar(tasks.length + i + 1, totalProgress);
+            await sleep(180);
+          }
         }
         setStatus(`완료\n성공 ${ok}건 / 실패 ${fail}건${stopped ? ' / 중단됨' : ''}`);
       } catch (err) {

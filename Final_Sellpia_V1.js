@@ -1,6 +1,6 @@
 (async function FinalSellpiaV1(){
   const BASE_URL = 'https://kimhyein0214-dot.github.io/FULL_System/';
-  const VERSION = '20260702-memo-skip-empty-v1';
+  const VERSION = '20260703-memo-range-checkbox-v1';
   const isOrderSearch = /\/order_search\.html/i.test(location.pathname);
   const isSellpia = /(^|\.)sellpia\.com$/i.test(location.hostname) || /(^|\.)curiouswiz\.sellpia\.com$/i.test(location.hostname);
 
