@@ -696,6 +696,9 @@
       }
       await sleep(CONFIG.ajaxDelay);
     }
+    function hasSystemMemoValue(memo) {
+      return normal(memo) !== '';
+    }
     function invoiceDetailRowIndices(ordNo) {
       return getGridRows('grid8')
         .filter(({ item }) => normal(item && item.ord_no) === normal(ordNo))
@@ -1210,8 +1213,12 @@
       const actions = [];
       if (options.doMemo1 && task.writeMemo1) {
         const memo1Value = task.clear ? '' : task.nextShip ? options.nextShipMemo : mergeDrawerMemo(task.drawerNo, currentMemo1(firstRow));
-        await updateMemo('o_shop_memo', firstRow, memo1Value, true);
-        actions.push(task.clear ? '관리메모 삭제' : `관리메모=${memo1Value || '-'}`);
+        if (task.clear || hasSystemMemoValue(memo1Value)) {
+          await updateMemo('o_shop_memo', firstRow, memo1Value, true);
+          actions.push(task.clear ? '관리메모 삭제' : `관리메모=${memo1Value || '-'}`);
+        } else {
+          actions.push('관리메모 빈값 스킵');
+        }
       }
       if (options.doMemo2) {
         if (task.clear) {
@@ -1220,8 +1227,10 @@
           actions.push(`관리메모2 삭제 ${targets.length}건`);
         } else {
           const matched = matchMemo2Rows(rows, task.memo2Map);
-          for (const item of matched) await updateMemo('o_shop_memo2', item.row, item.memo, false);
-          actions.push(`관리메모2 ${matched.length}건`);
+          const writable = matched.filter(item => hasSystemMemoValue(item.memo));
+          const skippedBlank = matched.length - writable.length;
+          for (const item of writable) await updateMemo('o_shop_memo2', item.row, item.memo, false);
+          actions.push(`관리메모2 ${writable.length}건${skippedBlank ? ` / 빈값 스킵 ${skippedBlank}건` : ''}`);
           const matchedCodes = new Set(matched.flatMap(item => item.aliases || [item.code]));
           const unmatchedCodes = [...task.memo2Map.keys()].filter(code => !matchedCodes.has(code));
           if (unmatchedCodes.length) addLog(`  상품순서번호 미매칭: ${unmatchedCodes.join(', ')}`);
