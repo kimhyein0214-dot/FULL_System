@@ -212,6 +212,24 @@
       if (lastError) addLog(`  DB fallback(orders ${field}): ${lastError.message.slice(0, 80)}`);
       return { ok: false, rows: [] };
     }
+    async function dbOrdersByDateRangeField(field, startDate, endDate, selects) {
+      const from = encodeURIComponent(startDate);
+      const to = encodeURIComponent(endDate || startDate);
+      const selectList = uniq(selects || []).filter(Boolean);
+      let lastError = null;
+      for (const select of selectList) {
+        try {
+          return {
+            ok: true,
+            rows: await dbRequest(`orders?${field}=gte.${from}&${field}=lte.${to}&select=${select}`)
+          };
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      if (lastError) addLog(`  DB fallback(orders ${field} range): ${lastError.message.slice(0, 80)}`);
+      return { ok: false, rows: [] };
+    }
     async function dbOrdersByWorkDate(date, selects) {
       const dedupe = rows => {
         const byOrd = new Map();
@@ -222,8 +240,8 @@
         return [...byOrd.values()];
       };
       const receipt = await dbOrdersByDateField('receipt_date', date, selects);
-      if (receipt.ok && receipt.rows.length) return dedupe(receipt.rows);
-      if (receipt.ok) addLog('  receipt_date 대상 없음: legacy ord_date fallback');
+      if (receipt.ok) return dedupe(receipt.rows);
+      addLog('  receipt_date query failed: legacy ord_date fallback');
       const legacy = await dbOrdersByDateField('ord_date', date, selects);
       return dedupe(legacy.rows);
     }
@@ -263,12 +281,14 @@
     async function dbOrdersByWorkDateRange(startDate, endDate, selects) {
       const range = normalizeDateRange(startDate, endDate);
       const byOrd = new Map();
-      for (const date of range.dates) {
-        const rows = await dbOrdersByWorkDate(date, selects);
-        for (const row of rows || []) {
-          const ord = normal(row.ord_no);
-          if (ord && !byOrd.has(ord)) byOrd.set(ord, row);
-        }
+      const receipt = await dbOrdersByDateRangeField('receipt_date', range.startDate, range.endDate, selects);
+      const rows = receipt.ok
+        ? receipt.rows
+        : (await dbOrdersByDateRangeField('ord_date', range.startDate, range.endDate, selects)).rows;
+      if (!receipt.ok) addLog('  receipt_date range query failed: legacy ord_date range fallback');
+      for (const row of rows || []) {
+        const ord = normal(row.ord_no);
+        if (ord && !byOrd.has(ord)) byOrd.set(ord, row);
       }
       return [...byOrd.values()];
     }
@@ -1089,32 +1109,6 @@
             addLog(`  DB fallback(shortage date): ${err.message.slice(0, 80)}`);
             shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at');
           }
-        }
-        try {
-          const changedSince = new Date(range.startDate + 'T00:00:00').toISOString();
-          const changedUntilDate = new Date(range.endDate + 'T00:00:00');
-          changedUntilDate.setDate(changedUntilDate.getDate() + 1);
-          const changedUntil = changedUntilDate.toISOString();
-          let changedRows = [];
-          try {
-            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&updated_at=lt.${encodeURIComponent(changedUntil)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,is_gold,updated_at`);
-          } catch (err) {
-            addLog(`  DB fallback(changed shortage): ${err.message.slice(0, 80)}`);
-            changedRows = await dbRequest(`shortage?updated_at=gte.${encodeURIComponent(changedSince)}&updated_at=lt.${encodeURIComponent(changedUntil)}&select=inv_no,ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at`);
-          }
-          const seen = new Set(shortageRows.map(row => [normal(row.ord_no), normal(row.item_no), normal(row.inv_no)].join('|')));
-          const extras = (changedRows || []).filter(row => {
-            const key = [normal(row.ord_no), normal(row.item_no), normal(row.inv_no)].join('|');
-            if (!normal(row.ord_no) || seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          if (extras.length) {
-            shortageRows.push(...extras);
-            addLog(`  기간 내 변경된 과거 미송 ${extras.length}행 추가 포함`);
-          }
-        } catch (err) {
-          addLog(`  기간 변경 미송 조회 건너뜀: ${err.message.slice(0, 80)}`);
         }
         if (!shortageRows.length) return [];
 
