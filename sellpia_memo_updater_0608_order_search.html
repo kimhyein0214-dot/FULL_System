@@ -565,8 +565,8 @@
         });
         if (hit) return hit;
         if (rows.length === 1) {
-          if (!expectedOrdNo) {
-            addLog('  검색 결과 1건: grid 데이터에 송장번호가 없어도 해당 행으로 진행');
+          if (!expectedOrdNo || useInvoice) {
+            addLog('  검색 결과 1건: grid 목록 값 확인은 생략하고 상세 주문번호 검증으로 진행');
             return rows[0];
           }
           addLog(`  검색 결과 1건이지만 주문번호 불일치: 기대 ${expectedOrdNo}`);
