@@ -1300,13 +1300,7 @@
         const hit = await searchInvoice(invNo, task.ordNo);
         detail = await openOrderDetail(hit);
       }
-      if (task.ordNo && normal(detail.ordNo) !== normal(task.ordNo)) {
-        throw new Error(`상세 주문번호 불일치: 기대 ${task.ordNo} / 실제 ${detail.ordNo}`);
-      }
       const rows = detail.rows.length ? detail.rows : detailRows().filter(row => normal(row.ord_no) === detail.ordNo);
-      if (task.ordNo && rows.some(row => normal(row.ord_no) !== normal(task.ordNo))) {
-        throw new Error(`상세 상품 행 주문번호 불일치: ${task.ordNo}`);
-      }
       if (!rows.length) throw new Error('상세 상품 행이 없습니다.');
       if (task.skip) return task.reason || '스킵';
       const firstRow = rows[0];
@@ -1399,7 +1393,8 @@
         order_memo_updated_at: new Date().toISOString()
       });
     }
-    async function patchDetailOrderItemMemos(detail) {
+    async function patchDetailOrderItemMemos(detail, systemOrdNo = '') {
+      const dbOrdNo = normal(systemOrdNo || detail.systemOrdNo || detail.ordNo);
       let count = 0;
       let firstMemo = '';
       let memoCount = 0;
@@ -1407,10 +1402,10 @@
         const memo = rowOrderMemo(row);
         if (!firstMemo && memo) firstMemo = memo;
         if (memo) memoCount++;
-        await patchOrderItemMemo(detail.ordNo, row, memo);
+        await patchOrderItemMemo(dbOrdNo, row, memo);
         count++;
       }
-      return { ordNo: detail.ordNo, count, memoCount, memo: firstMemo };
+      return { ordNo: dbOrdNo, sellpiaOrdNo: detail.ordNo, count, memoCount, memo: firstMemo };
     }
     async function collectOrderMemoTargets(date, filters = {}) {
       const sessionFilter = normal(filters.session || 'ALL').toUpperCase();
@@ -1430,13 +1425,25 @@
     async function updateOrderMemoTarget(target) {
       const hit = await searchInvoice(target.invNo, target.ordNo);
       const detail = await openOrderDetail(hit);
-      return await patchDetailOrderItemMemos(detail);
+      return await patchDetailOrderItemMemos(detail, target.ordNo);
+    }
+    async function findSystemOrdNoByInvoice(invNo) {
+      const inv = normal(invNo);
+      if (!inv) return '';
+      try {
+        const rows = await dbRequest(`orders?inv_no=eq.${encodeURIComponent(inv)}&select=ord_no,inv_no&limit=1`);
+        return normal(rows && rows[0] && rows[0].ord_no);
+      } catch (err) {
+        addLog(`  DB 주문번호 조회 실패(${inv}): ${err.message.slice(0, 80)}`);
+        return '';
+      }
     }
     async function runOrderMemoSyncOnce({ invNo = '', date = '', endDate = '', session = 'ALL' } = {}) {
       if (invNo) {
         const hit = await searchInvoice(invNo);
         const detail = await openOrderDetail(hit);
-        const result = await patchDetailOrderItemMemos(detail);
+        const systemOrdNo = await findSystemOrdNoByInvoice(invNo);
+        const result = await patchDetailOrderItemMemos(detail, systemOrdNo);
         addLog(`상품별 주문메모 저장: ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
         return { ok: 1, fail: 0 };
       }
