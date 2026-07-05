@@ -519,23 +519,75 @@
     async function applyOrderSearchDate(date, runSearch) {
       return await applyOrderSearchRange(date, date, runSearch);
     }
+    function describeControl(el) {
+      if (!el) return '-';
+      return [el.id ? `#${el.id}` : '', el.name ? `name=${el.name}` : '', el.type ? `type=${el.type}` : '']
+        .filter(Boolean)
+        .join(' ');
+    }
+    function looksLikeDateInput(el) {
+      if (!el || !isVisible(el)) return false;
+      const tag = (el.tagName || '').toLowerCase();
+      if (tag !== 'input') return false;
+      const type = (el.type || '').toLowerCase();
+      const key = `${el.id || ''} ${el.name || ''} ${el.className || ''}`.toLowerCase();
+      const value = normal(el.value);
+      return type === 'date' ||
+        /date|dt|day|일자|날짜/.test(key) ||
+        /^\d{4}[-./]\d{1,2}[-./]\d{1,2}$/.test(value);
+    }
+    function findDateTypeSelect() {
+      const direct = document.querySelector('#date_type, select[name="date_type"]');
+      if (direct && isVisible(direct)) return direct;
+      return [...document.querySelectorAll('select')].find(select => {
+        if (!isVisible(select)) return false;
+        return [...select.options].some(option => /접수|수집|collect|receipt|accept/i.test(`${option.textContent || ''} ${option.value || ''}`));
+      }) || null;
+    }
+    function pickDateType(select) {
+      if (!select) return false;
+      const option = [...select.options].find(opt => /접수|수집|collect|receipt|accept/i.test(`${opt.textContent || ''} ${opt.value || ''}`));
+      if (!option) return false;
+      select.value = option.value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+    function findOrderSearchDateInputs() {
+      const directStart = document.querySelector('#search_date_s, input[name="search_date_s"]');
+      const directEnd = document.querySelector('#search_date_e, input[name="search_date_e"]');
+      if (looksLikeDateInput(directStart) && looksLikeDateInput(directEnd)) return { start: directStart, end: directEnd, method: 'direct' };
+
+      const candidates = [...document.querySelectorAll('input')].filter(looksLikeDateInput);
+      const normalizedDate = value => {
+        const m = normal(value).match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+        return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+      };
+      for (let i = 0; i < candidates.length - 1; i++) {
+        const a = candidates[i];
+        const b = candidates[i + 1];
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const sameRow = Math.abs(ar.top - br.top) < 18;
+        const close = Math.abs(br.left - ar.right) < 260 || Math.abs(br.left - ar.left) < 260;
+        if (sameRow && close) return { start: a, end: b, method: 'visible-pair' };
+      }
+      const dated = candidates.filter(el => normalizedDate(el.value));
+      if (dated.length >= 2) return { start: dated[0], end: dated[1], method: 'date-value-pair' };
+      if (candidates.length >= 2) return { start: candidates[0], end: candidates[1], method: 'fallback-pair' };
+      return { start: null, end: null, method: 'none' };
+    }
     async function applyOrderSearchRange(startDate, endDate, runSearch) {
       const range = normalizeDateRange(startDate, endDate);
       if (!range.dates.length) return;
-      const dateType = document.querySelector('#date_type, select[name="date_type"]');
-      if (dateType) {
-        dateType.value = 'collect_date';
-        dateType.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      const start = document.querySelector('#search_date_s, input[name="search_date_s"]');
-      const end = document.querySelector('#search_date_e, input[name="search_date_e"]');
+      const dateType = findDateTypeSelect();
+      const dateTypeApplied = pickDateType(dateType);
+      const { start, end, method } = findOrderSearchDateInputs();
       if (!start || !end) {
-        addLog('  날짜 검색 필드 없음: DB 날짜 기준으로만 대상 선정');
-        return;
+        throw new Error('셀피아 주문조회 날짜 입력칸을 찾지 못했습니다. 주문조회 화면에서 접수기간을 직접 설정/조회한 뒤 다시 실행해주세요.');
       }
       triggerValue(start, range.startDate);
       triggerValue(end, range.endDate);
-      addLog(`  주문조회 검색일자 적용: ${dateRangeLabel(range.startDate, range.endDate)}`);
+      addLog(`  주문조회 검색일자 적용: ${dateRangeLabel(range.startDate, range.endDate)} (${method}, ${describeControl(start)} / ${describeControl(end)}${dateTypeApplied ? ', 접수기간 선택' : ''})`);
       if (!runSearch) return;
       await runOrderSearch();
       await sleep(900);
@@ -1297,7 +1349,8 @@
       }
       if (task.clear) {
         try {
-          await dbPatch(`shortage?inv_no=eq.${encodeURIComponent(invNo)}&status=eq.${encodeURIComponent('검품완료')}`, {
+          const clearFilter = `shortage?inv_no=eq.${encodeURIComponent(invNo)}&ord_no=eq.${encodeURIComponent(task.ordNo || detail.ordNo)}&status=eq.${encodeURIComponent('검품완료')}`;
+          await dbPatch(clearFilter, {
             status: '메모정리완료',
             updated_at: new Date().toISOString()
           });
@@ -1494,6 +1547,19 @@
     function setBar(done, total) {
       $id('smu0608-bar').style.width = total ? Math.round(done / total * 100) + '%' : '0%';
     }
+    function sessionName(session) {
+      const value = normal(session || 'ALL').toUpperCase();
+      return value === 'AM' ? '오전' : value === 'PM' ? '오후' : '전체';
+    }
+    function buildWorkGroups(range, session) {
+      const sessionFilter = normal(session || 'ALL').toUpperCase();
+      const sessions = sessionFilter === 'ALL' ? ['AM', 'PM'] : [sessionFilter];
+      return range.dates.flatMap(date => sessions.map(part => ({
+        date,
+        session: part,
+        label: `${date} ${sessionName(part)}`
+      })));
+    }
     $id('smu0608-close').onclick = () => overlay.remove();
     $id('smu0608-stop').onclick = () => {
       stopped = true;
@@ -1564,7 +1630,7 @@
       $id('smu0608-work').style.display = 'block';
       stopped = false;
       try {
-        if (date) {
+        if (date && invNo) {
           setStatus(`${rangeLabel} 주문조회 검색조건 적용 중`);
           await applyOrderSearchRange(range.startDate, range.endDate, true);
         }
@@ -1580,55 +1646,72 @@
         }
         const runSellpiaUpdates = options.doMemo1 || options.doMemo2 || options.doHold;
         const processedOrdNos = new Set();
-        let tasks = [];
         let ok = 0;
         let fail = 0;
+        let sellpiaTargetCount = 0;
+        let memoTargetCount = 0;
+        const groups = buildWorkGroups(range, session);
+        addLog(`분할 처리: ${groups.length}개 묶음 (${groups.map(group => group.label).join(' / ')})`);
         if (runSellpiaUpdates) {
-          setStatus(`${rangeLabel} ${sessionLabel} ${itemTypeLabel} 데이터 조회 중`);
-          tasks = await collectDateTasks(range.startDate, { endDate: range.endDate, session, itemType });
-        }
-        if (!tasks.length && !options.doOrderMemo) {
-          setStatus('처리할 데이터가 없습니다.');
-          return;
-        }
-        addLog(`필터: ${rangeLabel} / ${sessionLabel} / ${itemTypeLabel}`);
-        if (tasks.length) addLog(`셀피아 반영 대상 ${tasks.length}건`);
-        for (let i = 0; i < tasks.length; i++) {
-          if (stopped) break;
-          const item = tasks[i];
-          setStatus(`[${i + 1}/${tasks.length}] ${item.invNo}\n주문번호 ${item.ordNo}`);
-          try {
-            const result = await applyTask(item.task, options);
-            addLog(`✓ ${item.invNo} / ${result}`);
-            processedOrdNos.add(normal(item.ordNo));
-            ok++;
-          } catch (err) {
-            addLog(`✗ ${item.invNo || item.ordNo}: ${err.message}`);
-            fail++;
+          addLog(`필터: ${rangeLabel} / ${sessionLabel} / ${itemTypeLabel}`);
+          for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            if (stopped) break;
+            const group = groups[groupIndex];
+            setStatus(`[묶음 ${groupIndex + 1}/${groups.length}] ${group.label}\n셀피아 검색조건 적용 중`);
+            await applyOrderSearchRange(group.date, group.date, true);
+            setStatus(`[묶음 ${groupIndex + 1}/${groups.length}] ${group.label}\nDB 대상 조회 중`);
+            const groupTasks = await collectDateTasks(group.date, { endDate: group.date, session: group.session, itemType });
+            addLog(`묶음 ${group.label}: 셀피아 반영 대상 ${groupTasks.length}건`);
+            sellpiaTargetCount += groupTasks.length;
+            for (let i = 0; i < groupTasks.length; i++) {
+              if (stopped) break;
+              const item = groupTasks[i];
+              setStatus(`[${group.label} ${i + 1}/${groupTasks.length}]\n${item.invNo}\n주문번호 ${item.ordNo}`);
+              try {
+                const result = await applyTask(item.task, options);
+                addLog(`✓ ${group.label} / ${item.invNo} / ${result}`);
+                processedOrdNos.add(normal(item.ordNo));
+                ok++;
+              } catch (err) {
+                addLog(`✗ ${group.label} / ${item.invNo || item.ordNo}: ${err.message}`);
+                fail++;
+              }
+              await sleep(150);
+            }
+            setBar(groupIndex + 1, groups.length);
           }
-          setBar(i + 1, tasks.length);
-          await sleep(150);
         }
         if (options.doOrderMemo && !stopped) {
-          const memoTargets = await collectOrderMemoTargets(range.startDate, { endDate: range.endDate, session });
-          const remainingMemoTargets = memoTargets.filter(target => !processedOrdNos.has(normal(target.ordNo)));
-          addLog(`주문메모 추가 대상 ${remainingMemoTargets.length}건${processedOrdNos.size ? ` / 셀피아 반영 중 처리 ${processedOrdNos.size}건 제외` : ''}`);
-          for (let i = 0; i < remainingMemoTargets.length; i++) {
+          for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
             if (stopped) break;
-            const target = remainingMemoTargets[i];
-            setStatus(`[주문메모 ${i + 1}/${remainingMemoTargets.length}]\n${target.invNo || target.ordNo}`);
-            try {
-              const result = await updateOrderMemoTarget(target);
-              addLog(`✓ 주문메모 ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
-              ok++;
-            } catch (err) {
-              addLog(`✗ 주문메모 ${target.invNo || target.ordNo}: ${err.message}`);
-              fail++;
+            const group = groups[groupIndex];
+            setStatus(`[주문메모 묶음 ${groupIndex + 1}/${groups.length}] ${group.label}\n셀피아 검색조건 적용 중`);
+            await applyOrderSearchRange(group.date, group.date, true);
+            const memoTargets = await collectOrderMemoTargets(group.date, { endDate: group.date, session: group.session });
+            const remainingMemoTargets = memoTargets.filter(target => !processedOrdNos.has(normal(target.ordNo)));
+            memoTargetCount += remainingMemoTargets.length;
+            addLog(`주문메모 묶음 ${group.label}: 대상 ${remainingMemoTargets.length}건${processedOrdNos.size ? ` / 이미 처리 ${processedOrdNos.size}건 제외` : ''}`);
+            for (let i = 0; i < remainingMemoTargets.length; i++) {
+              if (stopped) break;
+              const target = remainingMemoTargets[i];
+              setStatus(`[주문메모 ${group.label} ${i + 1}/${remainingMemoTargets.length}]\n${target.invNo || target.ordNo}`);
+              try {
+                const result = await updateOrderMemoTarget(target);
+                addLog(`✓ 주문메모 ${group.label} / ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
+                ok++;
+              } catch (err) {
+                addLog(`✗ 주문메모 ${group.label} / ${target.invNo || target.ordNo}: ${err.message}`);
+                fail++;
+              }
+              await sleep(180);
             }
-            const totalProgress = tasks.length + remainingMemoTargets.length;
-            setBar(tasks.length + i + 1, totalProgress);
-            await sleep(180);
+            setBar(groupIndex + 1, groups.length);
           }
+        }
+        if (!sellpiaTargetCount && !memoTargetCount) {
+          setStatus('처리할 데이터가 없습니다.');
+          addLog('처리할 데이터 없음');
+          return;
         }
         setStatus(`완료\n성공 ${ok}건 / 실패 ${fail}건${stopped ? ' / 중단됨' : ''}`);
       } catch (err) {
