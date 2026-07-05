@@ -353,9 +353,6 @@
     function rowBlob(row) {
       return Object.values(row || {}).map(value => String(value ?? '')).join(' ');
     }
-    function rowOrderNo(row) {
-      return normal(row && (row.ord_no || row.o_ord_no || row.order_no || row.ordNo || row.c_ord_no));
-    }
     function triggerValue(el, value) {
       if (!el) return;
       el.value = value;
@@ -619,13 +616,12 @@
       await runOrderSearch();
       await sleep(900);
     }
-    async function searchInvoice(invNo, ordNo = '', opts = {}) {
+    async function searchInvoice(invNo, ordNo = '') {
       if (!window.grid7 || !window.grid8 || typeof window.view_order_detail !== 'function') {
         throw new Error('주문조회 grid/view_order_detail 함수를 찾을 수 없습니다. 페이지 로딩 후 다시 실행해주세요.');
       }
-      const forceOrderNo = !!(opts && opts.forceOrderNo);
-      const useInvoice = !forceOrderNo && isLikelyInvoiceNo(invNo);
-      const target = useInvoice ? normal(invNo) : normal(ordNo || invNo);
+      const useInvoice = isLikelyInvoiceNo(invNo);
+      const target = useInvoice ? normal(invNo) : normal(ordNo);
       if (!target) throw new Error('검색할 송장번호/주문번호가 없습니다.');
       const pickedControl = useInvoice ? chooseInvoiceSearchMode() : chooseOrderNoSearchMode();
       const input = useInvoice ? findInvoiceInput(pickedControl) : findOrderNoInput(pickedControl);
@@ -636,29 +632,20 @@
       await runOrderSearch();
       let changedFallbackLogged = false;
       const expectedOrdNo = normal(ordNo);
-      const searchLabel = useInvoice ? '송장 검색 결과' : '주문번호 검색 결과';
-      const hit = await waitForStep(searchLabel, () => {
+      const hit = await waitForStep('송장 검색 결과', () => {
         const rows = getGridRows('grid7');
         if (!rows.length) return false;
         const hit = rows.find(({ item }) => {
           const blob = rowBlob(item);
-          const ord = rowOrderNo(item);
-          const matchesExpectedOrder = !expectedOrdNo || (ord ? ord === expectedOrdNo : blob.includes(expectedOrdNo));
-          const matchesSearchTarget = blob.includes(String(target));
-          return matchesExpectedOrder && matchesSearchTarget;
+          return blob.includes(String(target)) || (!!expectedOrdNo && blob.includes(expectedOrdNo));
         });
         if (hit) return hit;
         if (rows.length === 1) {
-          const only = rows[0];
-          const onlyBlob = rowBlob(only.item);
-          const onlyOrd = rowOrderNo(only.item);
-          const matchesExpectedOrder = !expectedOrdNo || (onlyOrd ? onlyOrd === expectedOrdNo : onlyBlob.includes(expectedOrdNo));
-          const matchesSearchTarget = onlyBlob.includes(String(target));
-          if (matchesExpectedOrder && matchesSearchTarget) {
+          if (!expectedOrdNo || useInvoice) {
             addLog('  검색 결과 1건: grid 목록 값 확인은 생략하고 상세 주문번호 검증으로 진행');
-            return only;
+            return rows[0];
           }
-          addLog(`  검색 결과 1건이지만 주문번호/검색값 불일치: 기대 ${expectedOrdNo || target} / 실제 ${onlyOrd || onlyBlob.slice(0, 80)}`);
+          addLog(`  검색 결과 1건이지만 주문번호 불일치: 기대 ${expectedOrdNo}`);
           return false;
         }
         const firstBlob = rowBlob(rows[0].item);
@@ -676,9 +663,6 @@
       });
       return hit;
     }
-    async function searchOrderNo(ordNo) {
-      return await searchInvoice(ordNo, ordNo, { forceOrderNo: true });
-    }
     function findOrderHitInGrid(invNo, ordNo = '') {
       const targets = [isLikelyInvoiceNo(invNo) ? invNo : ''].map(normal).filter(Boolean);
       if (!targets.length) return null;
@@ -690,7 +674,7 @@
     async function openOrderDetail(orderHit) {
       const row = orderHit.item;
       const rowIndex = orderHit.index;
-      const ordNo = rowOrderNo(row);
+      const ordNo = normal(row.ord_no || row.o_ord_no || row.order_no || row.ordNo);
       const sellerId = normal(row.seller_id || row.provider_uid || row.p_provider_uid || row.p_seller_id);
       if (!ordNo) throw new Error('검색 결과에서 주문번호(ord_no)를 찾지 못했습니다.');
       if (!sellerId) throw new Error('검색 결과에서 판매처 uid(seller_id)를 찾지 못했습니다.');
@@ -1345,7 +1329,7 @@
       if (!isLikelyInvoiceNo(invNo)) throw new Error(`송장번호가 없어 주문번호 검색으로 fallback하지 않습니다: ${task.ordNo || '-'}`);
       let detail = detailFromSingle;
       if (!detail) {
-        const hit = task.ordNo ? await searchOrderNo(task.ordNo) : await searchInvoice(invNo, task.ordNo);
+        const hit = await searchInvoice(invNo, task.ordNo);
         detail = await openOrderDetail(hit);
       }
       if (task.ordNo && normal(detail.ordNo) !== normal(task.ordNo)) {
@@ -1476,7 +1460,7 @@
       })).filter(row => row.ordNo);
     }
     async function updateOrderMemoTarget(target) {
-      const hit = target.ordNo ? await searchOrderNo(target.ordNo) : await searchInvoice(target.invNo, target.ordNo);
+      const hit = await searchInvoice(target.invNo, target.ordNo);
       const detail = await openOrderDetail(hit);
       return await patchDetailOrderItemMemos(detail);
     }
