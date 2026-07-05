@@ -1,6 +1,6 @@
 (async function FinalSellpia0705(){
   const BASE_URL = 'https://raw.githubusercontent.com/kimhyein0214-dot/FULL_System/main/';
-  const VERSION = '20260705-memo-retry1';
+  const VERSION = '20260705-memo-retry-ui2';
   const isOrderSearch = /\/order_search\.html/i.test(location.pathname);
   const isSellpia = /(^|\.)sellpia\.com$/i.test(location.hostname) || /(^|\.)curiouswiz\.sellpia\.com$/i.test(location.hostname);
 

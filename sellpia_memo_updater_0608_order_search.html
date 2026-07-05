@@ -1533,7 +1533,7 @@
             <div style="height:7px;border-radius:999px;background:#0f172a;overflow:hidden;margin:12px 0;"><div id="smu0608-bar" style="height:100%;width:0%;background:#3b82f6;transition:width .2s;"></div></div>
             <div style="display:flex;gap:8px;margin:0 0 8px;flex-wrap:wrap;">
               <button id="smu0608-copy-fail" type="button" style="height:30px;border:1px solid #475569;border-radius:7px;background:#253149;color:#e5e7eb;font-size:12px;font-weight:800;cursor:pointer;">실패내역 복사</button>
-              <button id="smu0608-retry-fail" type="button" style="height:30px;border:1px solid #2563eb;border-radius:7px;background:#1d4ed8;color:#fff;font-size:12px;font-weight:900;cursor:pointer;">실패건 재실행</button>
+              <button id="smu0608-retry-fail" type="button" disabled style="height:30px;border:1px solid #475569;border-radius:7px;background:#253149;color:#cbd5e1;font-size:12px;font-weight:800;cursor:not-allowed;opacity:.65;">실패건 없음</button>
               <button id="smu0608-toggle-fail" type="button" style="height:30px;border:1px solid #475569;border-radius:7px;background:#253149;color:#e5e7eb;font-size:12px;font-weight:800;cursor:pointer;">실패만 보기</button>
             </div>
             <div id="smu0608-fail-panel" style="display:none;max-height:120px;overflow:auto;background:#2b0b0b;border:1px solid #7f1d1d;border-radius:8px;color:#fecaca;padding:9px;font-size:11px;line-height:1.5;white-space:pre-wrap;margin-bottom:8px;"></div>
@@ -1577,7 +1577,16 @@
       if (currentEl) currentEl.textContent = runUi.current || '-';
       if (failPanel) failPanel.textContent = runUi.failures.length ? runUi.failures.join('\n') : '실패 내역이 없습니다.';
       const retryBtn = $id('smu0608-retry-fail');
-      if (retryBtn) retryBtn.textContent = runUi.failedJobs.length ? `실패건 재실행 ${runUi.failedJobs.length}` : '실패건 재실행';
+      if (retryBtn) {
+        const hasFailures = runUi.failedJobs.length > 0;
+        retryBtn.textContent = hasFailures ? `실패건 재실행 가능 ${runUi.failedJobs.length}` : '실패건 없음';
+        retryBtn.disabled = !hasFailures;
+        retryBtn.style.background = hasFailures ? '#253149' : '#1f2937';
+        retryBtn.style.borderColor = hasFailures ? '#64748b' : '#475569';
+        retryBtn.style.color = hasFailures ? '#f8fafc' : '#94a3b8';
+        retryBtn.style.cursor = hasFailures ? 'pointer' : 'not-allowed';
+        retryBtn.style.opacity = hasFailures ? '1' : '.65';
+      }
     }
     function setRunUi(patch = {}) {
       Object.assign(runUi, patch);
