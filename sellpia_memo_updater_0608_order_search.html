@@ -181,14 +181,6 @@
       }
       throw new Error(lastError ? lastError.message : '대기 시간이 초과되었습니다.');
     };
-    async function waitForStep(label, predicate, timeout, detailFn, interval = 120) {
-      try {
-        return await waitFor(predicate, timeout, interval);
-      } catch (err) {
-        const detail = typeof detailFn === 'function' ? normal(detailFn()) : '';
-        throw new Error(`${label} 대기시간 초과${detail ? ': ' + detail : ''}`);
-      }
-    }
     async function dbRequest(path) {
       const res = await fetch(CONFIG.supabaseUrl + '/rest/v1/' + path, {
         method: 'GET',
@@ -546,32 +538,19 @@
     }
     function findDateTypeSelect() {
       const direct = document.querySelector('#date_type, select[name="date_type"]');
-      if (direct) return direct;
+      if (direct && isVisible(direct)) return direct;
       return [...document.querySelectorAll('select')].find(select => {
+        if (!isVisible(select)) return false;
         return [...select.options].some(option => /접수|수집|collect|receipt|accept/i.test(`${option.textContent || ''} ${option.value || ''}`));
       }) || null;
     }
     function pickDateType(select) {
       if (!select) return false;
-      const preferredValues = ['collect_date', 'c_collect_date', 'receipt_date', 'accept_date'];
-      let changed = false;
-      for (const value of preferredValues) {
-        select.value = value;
-        if (select.value === value) {
-          changed = true;
-          break;
-        }
-      }
-      if (!changed) {
-        const option = [...select.options].find(opt => /접수|수집|collect|receipt|accept/i.test(`${opt.textContent || ''} ${opt.value || ''}`));
-        if (option) {
-          select.value = option.value;
-          changed = select.value === option.value;
-        }
-      }
+      const option = [...select.options].find(opt => /접수|수집|collect|receipt|accept/i.test(`${opt.textContent || ''} ${opt.value || ''}`));
+      if (!option) return false;
+      select.value = option.value;
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      return changed;
+      return true;
     }
     function findOrderSearchDateInputs() {
       const directStart = document.querySelector('#search_date_s, input[name="search_date_s"]');
@@ -602,9 +581,6 @@
       if (!range.dates.length) return;
       const dateType = findDateTypeSelect();
       const dateTypeApplied = pickDateType(dateType);
-      if (!dateType || !dateTypeApplied) {
-        throw new Error('셀피아 주문조회 날짜구분을 접수기간으로 바꾸지 못했습니다. 상단 날짜구분을 접수기간으로 직접 선택한 뒤 다시 실행해주세요.');
-      }
       const { start, end, method } = findOrderSearchDateInputs();
       if (!start || !end) {
         throw new Error('셀피아 주문조회 날짜 입력칸을 찾지 못했습니다. 주문조회 화면에서 접수기간을 직접 설정/조회한 뒤 다시 실행해주세요.');
@@ -632,7 +608,7 @@
       await runOrderSearch();
       let changedFallbackLogged = false;
       const expectedOrdNo = normal(ordNo);
-      const hit = await waitForStep('송장 검색 결과', () => {
+      const hit = await waitFor(() => {
         const rows = getGridRows('grid7');
         if (!rows.length) return false;
         const hit = rows.find(({ item }) => {
@@ -656,11 +632,7 @@
           }
         }
         return false;
-      }, CONFIG.searchTimeout, () => {
-        const rows = getGridRows('grid7');
-        const first = rows[0]?.item ? rowBlob(rows[0].item).slice(0, 120) : '결과행 없음';
-        return `${target} / 결과 ${rows.length}행 / 첫행 ${first}`;
-      });
+      }, CONFIG.searchTimeout);
       return hit;
     }
     function findOrderHitInGrid(invNo, ordNo = '') {
@@ -684,14 +656,10 @@
         window.grid7.setActiveCell(rowIndex, 0);
       } catch (_) {}
       window.view_order_detail(sellerId, ordNo);
-      await waitForStep('주문 상세 열림', () => {
+      await waitFor(() => {
         const rows = detailRows();
         return rows.length && rows.some(item => normal(item.ord_no) === ordNo) ? rows : false;
-      }, CONFIG.detailTimeout, () => {
-        const rows = detailRows();
-        const ords = uniq(rows.map(item => normal(item.ord_no))).slice(0, 5).join(', ') || '상세행 없음';
-        return `${ordNo} / 현재 상세 주문 ${ords}`;
-      });
+      }, CONFIG.detailTimeout);
       const rows = detailRows().filter(item => normal(item.ord_no) === ordNo);
       rows.forEach(row => { row.__smuSellerId = rowSellerId(row) || sellerId; });
       return { ordNo, sellerId, rows };
@@ -971,7 +939,7 @@
         })[0] || document;
     }
     async function clickDeliveryHoldPrompt(hold) {
-      await waitForStep('배송보류 확인 팝업', () => {
+      await waitFor(() => {
         const root = deliveryPromptRoot();
         const buttons = [...root.querySelectorAll('button,input[type="button"],input[type="submit"],a,[role="button"]')]
           .filter(isVisibleElement)
@@ -985,7 +953,7 @@
           return item.text === '배송보류 해제' || item.text === '배송보류해제';
         });
         return target ? target.el : false;
-      }, 2000, () => `기대 버튼 ${hold ? '배송보류' : '배송보류 해제'}`).then(button => {
+      }, 2000).then(button => {
         button.click();
       });
       await sleep(CONFIG.ajaxDelay);
