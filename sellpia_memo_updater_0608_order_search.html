@@ -1482,9 +1482,9 @@
       overlay.id = 'smu0608-overlay';
       overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.86);display:flex;align-items:center;justify-content:center;font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;color:#f8fafc;';
       overlay.innerHTML = `
-        <section style="width:min(520px,92vw);background:#172033;border:1px solid #334155;border-radius:14px;padding:24px;box-shadow:0 26px 90px rgba(0,0,0,.45);">
-          <h2 style="margin:0 0 6px;font-size:18px;letter-spacing:0;">Sellpia Memo Updater 0608</h2>
-          <div style="margin:0 0 16px;color:#94a3b8;font-size:12px;">주문조회 AJAX 방식 · 체크한 항목만 처리</div>
+        <section style="width:min(720px,94vw);max-height:92vh;overflow:auto;background:#172033;border:1px solid #334155;border-radius:14px;padding:22px;box-shadow:0 26px 90px rgba(0,0,0,.45);">
+          <h2 style="margin:0 0 6px;font-size:18px;letter-spacing:0;">Sellpia Memo Updater 0705</h2>
+          <div style="margin:0 0 16px;color:#94a3b8;font-size:12px;">주문조회 AJAX 방식 · 날짜/오전오후 묶음 분할 처리</div>
           <div id="smu0608-form">
             <label style="display:block;margin:0 0 6px;color:#cbd5e1;font-size:12px;">운송장번호</label>
             <input id="smu0608-inv" placeholder="1건만 처리할 때 입력" style="width:100%;box-sizing:border-box;height:40px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;padding:0 12px;font-size:14px;">
@@ -1523,9 +1523,20 @@
             <button id="smu0608-start" style="width:100%;height:42px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-weight:900;cursor:pointer;">시작</button>
           </div>
           <div id="smu0608-work" style="display:none;">
-            <div id="smu0608-status" style="white-space:pre-line;line-height:1.5;color:#e5e7eb;font-size:13px;min-height:42px;"></div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">
+              <div style="background:#0f172a;border:1px solid #26344d;border-radius:8px;padding:9px;"><div style="color:#94a3b8;font-size:11px;">현재 묶음</div><strong id="smu0608-group" style="display:block;margin-top:4px;font-size:13px;">-</strong></div>
+              <div style="background:#0f172a;border:1px solid #26344d;border-radius:8px;padding:9px;"><div style="color:#94a3b8;font-size:11px;">현재 대상</div><strong id="smu0608-current" style="display:block;margin-top:4px;font-size:13px;word-break:break-all;">-</strong></div>
+              <div style="background:#052e1a;border:1px solid #166534;border-radius:8px;padding:9px;"><div style="color:#86efac;font-size:11px;">성공</div><strong id="smu0608-ok" style="display:block;margin-top:4px;font-size:18px;">0</strong></div>
+              <div style="background:#450a0a;border:1px solid #991b1b;border-radius:8px;padding:9px;"><div style="color:#fecaca;font-size:11px;">실패</div><strong id="smu0608-fail" style="display:block;margin-top:4px;font-size:18px;">0</strong></div>
+            </div>
+            <div id="smu0608-status" style="white-space:pre-line;line-height:1.45;color:#e5e7eb;font-size:13px;min-height:38px;background:#111827;border:1px solid #26344d;border-radius:8px;padding:10px;"></div>
             <div style="height:7px;border-radius:999px;background:#0f172a;overflow:hidden;margin:12px 0;"><div id="smu0608-bar" style="height:100%;width:0%;background:#3b82f6;transition:width .2s;"></div></div>
-            <pre id="smu0608-log" style="max-height:260px;overflow:auto;background:#0f172a;border:1px solid #273449;border-radius:8px;color:#a7f3d0;padding:10px;font-size:11px;line-height:1.45;white-space:pre-wrap;"></pre>
+            <div style="display:flex;gap:8px;margin:0 0 8px;flex-wrap:wrap;">
+              <button id="smu0608-copy-fail" type="button" style="height:30px;border:1px solid #475569;border-radius:7px;background:#253149;color:#e5e7eb;font-size:12px;font-weight:800;cursor:pointer;">실패내역 복사</button>
+              <button id="smu0608-toggle-fail" type="button" style="height:30px;border:1px solid #475569;border-radius:7px;background:#253149;color:#e5e7eb;font-size:12px;font-weight:800;cursor:pointer;">실패만 보기</button>
+            </div>
+            <div id="smu0608-fail-panel" style="display:none;max-height:120px;overflow:auto;background:#2b0b0b;border:1px solid #7f1d1d;border-radius:8px;color:#fecaca;padding:9px;font-size:11px;line-height:1.5;white-space:pre-wrap;margin-bottom:8px;"></div>
+            <div id="smu0608-log" style="max-height:260px;overflow:auto;background:#0f172a;border:1px solid #273449;border-radius:8px;padding:8px;font-size:11px;line-height:1.45;"></div>
             <button id="smu0608-stop" style="width:100%;height:38px;border:0;border-radius:8px;background:#ef4444;color:#fff;font-weight:900;cursor:pointer;">중단</button>
           </div>
           <button id="smu0608-close" style="width:100%;height:36px;margin-top:12px;border:1px solid #475569;border-radius:8px;background:transparent;color:#94a3b8;cursor:pointer;">닫기</button>
@@ -1535,10 +1546,52 @@
     }
     const overlay = buildOverlay();
     const logEl = $id('smu0608-log');
+    const failPanel = $id('smu0608-fail-panel');
+    const runUi = { ok: 0, fail: 0, group: '-', current: '-', failures: [] };
     let stopped = false;
-    function addLog(msg) {
+    function logKind(msg, kind) {
+      if (kind) return kind;
+      const text = String(msg || '');
+      if (/^✓/.test(text)) return 'success';
+      if (/^✗|오류|실패|timeout|초과/i.test(text)) return 'error';
+      if (/스킵|없음|미매칭|fallback|제외/.test(text)) return 'warn';
+      if (/^분할|^필터|^묶음|주문조회 검색일자/.test(text)) return 'group';
+      return 'info';
+    }
+    function logStyle(kind) {
+      if (kind === 'success') return 'color:#bbf7d0;background:#052e1a;border-color:#166534;';
+      if (kind === 'error') return 'color:#fecaca;background:#450a0a;border-color:#991b1b;';
+      if (kind === 'warn') return 'color:#fde68a;background:#3b2605;border-color:#92400e;';
+      if (kind === 'group') return 'color:#bfdbfe;background:#0b2b4a;border-color:#1d4ed8;';
+      return 'color:#d1d5db;background:#111827;border-color:#26344d;';
+    }
+    function renderRunUi() {
+      const okEl = $id('smu0608-ok');
+      const failEl = $id('smu0608-fail');
+      const groupEl = $id('smu0608-group');
+      const currentEl = $id('smu0608-current');
+      if (okEl) okEl.textContent = String(runUi.ok);
+      if (failEl) failEl.textContent = String(runUi.fail);
+      if (groupEl) groupEl.textContent = runUi.group || '-';
+      if (currentEl) currentEl.textContent = runUi.current || '-';
+      if (failPanel) failPanel.textContent = runUi.failures.length ? runUi.failures.join('\n') : '실패 내역이 없습니다.';
+    }
+    function setRunUi(patch = {}) {
+      Object.assign(runUi, patch);
+      renderRunUi();
+    }
+    function addLog(msg, kind) {
       if (!logEl) return;
-      logEl.textContent += msg + '\n';
+      const type = logKind(msg, kind);
+      const line = document.createElement('div');
+      const time = new Date().toTimeString().slice(0, 8);
+      line.textContent = `[${time}] ${msg}`;
+      line.style.cssText = `border:1px solid;border-radius:6px;padding:5px 7px;margin:0 0 5px;white-space:pre-wrap;word-break:break-word;${logStyle(type)}`;
+      logEl.appendChild(line);
+      if (type === 'error') {
+        runUi.failures.push(`${time} ${msg}`);
+        renderRunUi();
+      }
       logEl.scrollTop = logEl.scrollHeight;
     }
     function setStatus(msg) {
@@ -1566,6 +1619,16 @@
       $id('smu0608-stop').textContent = '중단 중...';
       $id('smu0608-stop').disabled = true;
     };
+    $id('smu0608-toggle-fail').onclick = () => {
+      const panel = $id('smu0608-fail-panel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      renderRunUi();
+    };
+    $id('smu0608-copy-fail').onclick = async () => {
+      const text = runUi.failures.length ? runUi.failures.join('\n') : '실패 내역이 없습니다.';
+      await navigator.clipboard.writeText(text);
+      addLog('실패내역을 클립보드에 복사했습니다.', 'info');
+    };
     function orderMemoOptsFromForm() {
       return {
         invNo: normal($id('smu0608-inv').value),
@@ -1586,6 +1649,7 @@
       $id('smu0608-form').style.display = 'none';
       $id('smu0608-work').style.display = 'block';
       stopped = false;
+      setRunUi({ ok: 0, fail: 0, group: optsRangeLabel || '-', current: opts.invNo || '-', failures: [] });
       $id('smu0608-stop').textContent = '중단';
       $id('smu0608-stop').disabled = false;
       try {
@@ -1597,6 +1661,7 @@
           await runOrderMemoWatcher(opts);
         } else {
           const result = await runOrderMemoSyncOnce(opts);
+          setRunUi({ ok: result.ok, fail: result.fail });
           setStatus(`상품별 주문메모 업데이트 완료\n성공 ${result.ok}건 / 실패 ${result.fail}건`);
         }
       } catch (err) {
@@ -1629,6 +1694,7 @@
       $id('smu0608-form').style.display = 'none';
       $id('smu0608-work').style.display = 'block';
       stopped = false;
+      setRunUi({ ok: 0, fail: 0, group: rangeLabel || '-', current: invNo || '-', failures: [] });
       try {
         if (date && invNo) {
           setStatus(`${rangeLabel} 주문조회 검색조건 적용 중`);
@@ -1640,6 +1706,7 @@
           setStatus(`1건 반영 중\n주문번호 ${built.detail.ordNo}`);
           const result = await applyTask(built.task, options, built.detail);
           setBar(1, 1);
+          setRunUi({ ok: 1, fail: 0, current: invNo });
           setStatus(`완료\n${result}`);
           addLog(`완료: ${invNo} / ${result}`);
           return;
@@ -1657,8 +1724,10 @@
           for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
             if (stopped) break;
             const group = groups[groupIndex];
+            setRunUi({ group: group.label, current: '검색조건 적용 중' });
             setStatus(`[묶음 ${groupIndex + 1}/${groups.length}] ${group.label}\n셀피아 검색조건 적용 중`);
             await applyOrderSearchRange(group.date, group.date, true);
+            setRunUi({ group: group.label, current: 'DB 대상 조회 중' });
             setStatus(`[묶음 ${groupIndex + 1}/${groups.length}] ${group.label}\nDB 대상 조회 중`);
             const groupTasks = await collectDateTasks(group.date, { endDate: group.date, session: group.session, itemType });
             addLog(`묶음 ${group.label}: 셀피아 반영 대상 ${groupTasks.length}건`);
@@ -1666,15 +1735,18 @@
             for (let i = 0; i < groupTasks.length; i++) {
               if (stopped) break;
               const item = groupTasks[i];
+              setRunUi({ group: group.label, current: item.invNo || item.ordNo || '-' });
               setStatus(`[${group.label} ${i + 1}/${groupTasks.length}]\n${item.invNo}\n주문번호 ${item.ordNo}`);
               try {
                 const result = await applyTask(item.task, options);
                 addLog(`✓ ${group.label} / ${item.invNo} / ${result}`);
                 processedOrdNos.add(normal(item.ordNo));
                 ok++;
+                setRunUi({ ok, fail });
               } catch (err) {
                 addLog(`✗ ${group.label} / ${item.invNo || item.ordNo}: ${err.message}`);
                 fail++;
+                setRunUi({ ok, fail });
               }
               await sleep(150);
             }
@@ -1685,6 +1757,7 @@
           for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
             if (stopped) break;
             const group = groups[groupIndex];
+            setRunUi({ group: `주문메모 ${group.label}`, current: '검색조건 적용 중' });
             setStatus(`[주문메모 묶음 ${groupIndex + 1}/${groups.length}] ${group.label}\n셀피아 검색조건 적용 중`);
             await applyOrderSearchRange(group.date, group.date, true);
             const memoTargets = await collectOrderMemoTargets(group.date, { endDate: group.date, session: group.session });
@@ -1694,14 +1767,17 @@
             for (let i = 0; i < remainingMemoTargets.length; i++) {
               if (stopped) break;
               const target = remainingMemoTargets[i];
+              setRunUi({ group: `주문메모 ${group.label}`, current: target.invNo || target.ordNo || '-' });
               setStatus(`[주문메모 ${group.label} ${i + 1}/${remainingMemoTargets.length}]\n${target.invNo || target.ordNo}`);
               try {
                 const result = await updateOrderMemoTarget(target);
                 addLog(`✓ 주문메모 ${group.label} / ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
                 ok++;
+                setRunUi({ ok, fail });
               } catch (err) {
                 addLog(`✗ 주문메모 ${group.label} / ${target.invNo || target.ordNo}: ${err.message}`);
                 fail++;
+                setRunUi({ ok, fail });
               }
               await sleep(180);
             }
@@ -1715,6 +1791,7 @@
         }
         setStatus(`완료\n성공 ${ok}건 / 실패 ${fail}건${stopped ? ' / 중단됨' : ''}`);
       } catch (err) {
+        setRunUi({ fail: Math.max(runUi.fail, 1) });
         setStatus('오류\n' + err.message);
         addLog(err.stack || err.message);
       }

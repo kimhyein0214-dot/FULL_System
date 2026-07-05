@@ -1,4 +1,4 @@
-(async function FinalSellpiaV1(){
+(async function FinalSellpia0705(){
   const BASE_URL = 'https://raw.githubusercontent.com/kimhyein0214-dot/FULL_System/main/';
   const VERSION = '20260705-memo-ui1';
   const isOrderSearch = /\/order_search\.html/i.test(location.pathname);
@@ -37,7 +37,7 @@
     const html = await loadText('sellpia_bookmarklet_0519_v1.html');
     (0, eval)(extractScraper(html));
   } catch (err) {
-    console.error('[Final Sellpia V1]', err);
-    alert('Final Sellpia V1 실행 오류: ' + (err && err.message ? err.message : err));
+    console.error('[Final Sellpia 0705]', err);
+    alert('Final Sellpia 0705 실행 오류: ' + (err && err.message ? err.message : err));
   }
 })();
