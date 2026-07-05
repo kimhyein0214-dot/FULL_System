@@ -1548,7 +1548,7 @@
     const overlay = buildOverlay();
     const logEl = $id('smu0608-log');
     const failPanel = $id('smu0608-fail-panel');
-    const runUi = { ok: 0, fail: 0, group: '-', current: '-', failures: [], failedJobs: [] };
+    const runUi = { ok: 0, fail: 0, group: '-', current: '-', failures: [], failedJobs: [], retrying: false };
     let stopped = false;
     function logKind(msg, kind) {
       if (kind) return kind;
@@ -1579,13 +1579,13 @@
       const retryBtn = $id('smu0608-retry-fail');
       if (retryBtn) {
         const hasFailures = runUi.failedJobs.length > 0;
-        retryBtn.textContent = hasFailures ? `실패건 재실행 가능 ${runUi.failedJobs.length}` : '실패건 없음';
-        retryBtn.disabled = !hasFailures;
+        retryBtn.textContent = runUi.retrying ? '실패건 재실행 중' : hasFailures ? `실패건 재실행 가능 ${runUi.failedJobs.length}` : '실패건 없음';
+        retryBtn.disabled = !hasFailures || runUi.retrying;
         retryBtn.style.background = hasFailures ? '#253149' : '#1f2937';
         retryBtn.style.borderColor = hasFailures ? '#64748b' : '#475569';
         retryBtn.style.color = hasFailures ? '#f8fafc' : '#94a3b8';
-        retryBtn.style.cursor = hasFailures ? 'pointer' : 'not-allowed';
-        retryBtn.style.opacity = hasFailures ? '1' : '.65';
+        retryBtn.style.cursor = hasFailures && !runUi.retrying ? 'pointer' : 'not-allowed';
+        retryBtn.style.opacity = hasFailures && !runUi.retrying ? '1' : '.65';
       }
     }
     function setRunUi(patch = {}) {
@@ -1617,8 +1617,25 @@
     }
     function rememberFailedJob(job) {
       if (!job) return;
+      const key = failedJobKey(job);
+      if (key && runUi.failedJobs.some(item => failedJobKey(item) === key)) return;
       runUi.failedJobs.push(job);
       renderRunUi();
+    }
+    function failedJobKey(job) {
+      if (!job) return '';
+      return [job.kind || 'sellpia', job.date || '', job.ordNo || job.target?.ordNo || '', job.invNo || job.target?.invNo || ''].map(normal).join('|');
+    }
+    function uniqueFailedJobs(jobs = []) {
+      const seen = new Set();
+      const unique = [];
+      for (const job of jobs) {
+        const key = failedJobKey(job);
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        unique.push(job);
+      }
+      return unique;
     }
     function setStatus(msg) {
       $id('smu0608-status').textContent = msg;
@@ -1656,7 +1673,8 @@
       addLog('실패내역을 클립보드에 복사했습니다.', 'info');
     };
     $id('smu0608-retry-fail').onclick = async () => {
-      const jobs = [...runUi.failedJobs];
+      if (runUi.retrying) return;
+      const jobs = uniqueFailedJobs(runUi.failedJobs);
       if (!jobs.length) {
         addLog('재실행할 실패건이 없습니다.', 'warn');
         return;
@@ -1666,36 +1684,43 @@
       runUi.failures = [];
       runUi.ok = 0;
       runUi.fail = 0;
+      runUi.retrying = true;
       renderRunUi();
       stopped = false;
       $id('smu0608-stop').textContent = '중단';
       $id('smu0608-stop').disabled = false;
       addLog(`실패건 재실행 시작: ${jobs.length}건`, 'group');
+      addLog(`재실행 대상: ${jobs.map(job => `${job.groupLabel || '-'} / ${job.invNo || job.ordNo || job.target?.invNo || job.target?.ordNo || '-'}`).join(' | ')}`, 'info');
       let retryOk = 0;
       let retryFail = 0;
-      for (let i = 0; i < jobs.length; i++) {
-        if (stopped) break;
-        const job = jobs[i];
-        setRunUi({ group: `재실행 ${job.groupLabel || '-'}`, current: job.invNo || job.ordNo || '-' });
-        setStatus(`[실패 재실행 ${i + 1}/${jobs.length}]\n${job.invNo || job.ordNo || '-'}`);
-        try {
-          if (job.date) await applyOrderSearchRange(job.date, job.date, true);
-          if (job.kind === 'orderMemo') {
-            const result = await updateOrderMemoTarget(job.target);
-            addLog(`✓ 재실행 주문메모 ${job.groupLabel || '-'} / ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
-          } else {
-            const result = await applyTask(job.task, job.options || {});
-            addLog(`✓ 재실행 ${job.groupLabel || '-'} / ${job.invNo || job.ordNo} / ${result}`);
+      try {
+        for (let i = 0; i < jobs.length; i++) {
+          if (stopped) break;
+          const job = jobs[i];
+          setRunUi({ group: `재실행 ${job.groupLabel || '-'}`, current: job.invNo || job.ordNo || job.target?.invNo || job.target?.ordNo || '-' });
+          setStatus(`[실패 재실행 ${i + 1}/${jobs.length}]\n${job.invNo || job.ordNo || job.target?.invNo || job.target?.ordNo || '-'}`);
+          try {
+            if (job.date) await applyOrderSearchRange(job.date, job.date, true);
+            if (job.kind === 'orderMemo') {
+              const result = await updateOrderMemoTarget(job.target);
+              addLog(`✓ 재실행 주문메모 ${job.groupLabel || '-'} / ${result.ordNo} / 상품 ${result.count}개 / 메모 ${result.memoCount}개`);
+            } else {
+              const result = await applyTask(job.task, job.options || {});
+              addLog(`✓ 재실행 ${job.groupLabel || '-'} / ${job.invNo || job.ordNo} / ${result}`);
+            }
+            retryOk++;
+          } catch (err) {
+            retryFail++;
+            addLog(`✗ 재실행 ${job.groupLabel || '-'} / ${job.invNo || job.ordNo || job.target?.invNo || job.target?.ordNo}: ${err.message}`);
+            rememberFailedJob(job);
           }
-          retryOk++;
-        } catch (err) {
-          retryFail++;
-          addLog(`✗ 재실행 ${job.groupLabel || '-'} / ${job.invNo || job.ordNo}: ${err.message}`);
-          rememberFailedJob(job);
+          setRunUi({ ok: retryOk, fail: retryFail });
+          setBar(i + 1, jobs.length);
+          await sleep(180);
         }
-        setRunUi({ ok: retryOk, fail: retryFail });
-        setBar(i + 1, jobs.length);
-        await sleep(180);
+      } finally {
+        runUi.retrying = false;
+        renderRunUi();
       }
       setStatus(`실패건 재실행 완료\n성공 ${retryOk}건 / 실패 ${retryFail}건${stopped ? ' / 중단됨' : ''}`);
     };
