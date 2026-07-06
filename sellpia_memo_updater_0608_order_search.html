@@ -995,6 +995,30 @@
     function isNextShipStatus(status) {
       return normal(status) === '발송대기';
     }
+    function pickingShortageQty(row) {
+      return Number(row.shortage_qty || row.short_qty || 0);
+    }
+    function pickingRowsToShortageRows(rows) {
+      return (rows || [])
+        .filter(row => pickingShortageQty(row) > 0)
+        .map(row => ({
+          ...row,
+          short_qty: pickingShortageQty(row),
+          status: normal(row.status) || '미송',
+          memo2_val: normal(row.memo2_val) || String(pickingShortageQty(row))
+        }));
+    }
+    function mergeShortageRows(shortageRows, derivedRows) {
+      const seen = new Set((shortageRows || []).map(row => `${normal(row.ord_no)}::${normal(row.item_no)}`));
+      const merged = [...(shortageRows || [])];
+      for (const row of derivedRows || []) {
+        const key = `${normal(row.ord_no)}::${normal(row.item_no)}`;
+        if (!key.trim() || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(row);
+      }
+      return merged;
+    }
     function buildTask(invNo, ordNo, shortageRows, pickingRows) {
       const task = {
         invNo,
@@ -1123,9 +1147,10 @@
         'picking',
         invNo,
         detail.ordNo,
-        'inv_no,ord_no,hold,drawer_no'
+        'inv_no,ord_no,item_no,shortage_qty,short_qty,hold,drawer_no'
       );
-      const task = buildTask(invNo, detail.ordNo, shortageRows || [], pickingRows || []);
+      const mergedShortageRows = mergeShortageRows(shortageRows || [], pickingRowsToShortageRows(pickingRows || []));
+      const task = buildTask(invNo, detail.ordNo, mergedShortageRows, pickingRows || []);
       addLog(`  DB shortage ${shortageRows?.length || 0}건 / picking ${pickingRows?.length || 0}건 / 관리메모2 후보 ${task.memo2Map.size}개`);
       return { detail, task };
     }
@@ -1162,9 +1187,7 @@
             shortageRows = await dbRequestIn('shortage', 'ord_no', ordNos, 'ord_no,item_no,short_qty,drawer_no,status,p_code,memo2_val,updated_at');
           }
         }
-        if (!shortageRows.length) return [];
-
-        if (typeFilter !== 'ALL') {
+        if (typeFilter !== 'ALL' && shortageRows.length) {
           let goldMeta = new Map();
           try {
             const itemRows = await dbRequestIn('order_items', 'ord_no', uniq(shortageRows.map(row => row.ord_no)), 'ord_no,p_code,prod_code,p_name,p_option');
@@ -1182,18 +1205,19 @@
             return typeFilter === 'GOLD' ? gold : !gold;
           });
         }
-        if (!shortageRows.length) return [];
 
-        const filteredOrdNos = uniq(shortageRows.map(row => row.ord_no));
+        const filteredOrdNos = shortageRows.length ? uniq(shortageRows.map(row => row.ord_no)) : ordNos;
         let pickingRows = [];
         if (filteredOrdNos.length) {
           try {
-            pickingRows = await dbRequestIn('picking', 'ord_no', filteredOrdNos, 'inv_no,ord_no,hold,drawer_no');
+            pickingRows = await dbRequestIn('picking', 'ord_no', filteredOrdNos, 'inv_no,ord_no,item_no,shortage_qty,short_qty,hold,drawer_no');
           } catch (err) {
             addLog(`  DB fallback(picking date): ${err.message.slice(0, 80)}`);
-            pickingRows = await dbRequestIn('picking', 'ord_no', filteredOrdNos, 'ord_no,hold,drawer_no');
+            pickingRows = await dbRequestIn('picking', 'ord_no', filteredOrdNos, 'ord_no,item_no,shortage_qty,short_qty,hold,drawer_no');
           }
         }
+        shortageRows = mergeShortageRows(shortageRows, pickingRowsToShortageRows(pickingRows));
+        if (!shortageRows.length && !pickingRows.length) return [];
         const byOrd = new Map();
         for (const row of shortageRows) {
           const ord = normal(row.ord_no);
