@@ -373,6 +373,10 @@
       $('smu0707-download').disabled = !results.length;
     }
 
+    function failReason(message, task) {
+      return message + (task && task.reason ? ' / planned: ' + task.reason : '');
+    }
+
     async function setPopupValues(root, rowResult, testMode) {
       if (testMode) {
         addResult({ ...rowResult, log: 'TEST: ' + rowResult.invNo + ' / ' + rowResult.actionSummary });
@@ -452,7 +456,7 @@
           plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
           needsChange: 'UNKNOWN',
           status: 'MATCH_FAIL',
-          reason: task.reason,
+          reason: failReason('Sellpia grid row not found for this invoice/order in the currently loaded stockmatch list.', task),
           actionSummary: 'grid row not found',
           log: 'MATCH_FAIL: ' + (task.invNo || task.ordNo || '-') + ' / grid row not found'
         });
@@ -476,7 +480,7 @@
           plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
           needsChange: 'UNKNOWN',
           status: 'DETAIL_FAIL',
-          reason: task.reason,
+          reason: failReason('Sellpia detail popup did not open for the matched row.', task),
           actionSummary: 'detail open failed',
           log: 'DETAIL_FAIL: ' + (task.invNo || rowInvNo(first.item)) + ' / detail open failed'
         });
