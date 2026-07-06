@@ -1019,6 +1019,49 @@
       }
       return merged;
     }
+    function eventTimeValue(row) {
+      return new Date(row.event_at || row.created_at || 0).getTime() || 0;
+    }
+    function isInspectionCompletedByEvents(events) {
+      let inspected = false;
+      const sorted = [...(events || [])].sort((a, b) => eventTimeValue(a) - eventTimeValue(b) || Number(a.id || 0) - Number(b.id || 0));
+      for (const event of sorted) {
+        const type = normal(event.event_type);
+        if (type === 'inspection_completed') inspected = true;
+        else if (type === 'inspection_reopened') inspected = false;
+        else if (type === 'cancelled') inspected = false;
+      }
+      return inspected;
+    }
+    async function completedOrderNosFromWorkflow(orderNos) {
+      const ords = uniq((orderNos || []).map(normal).filter(Boolean));
+      if (!ords.length) return new Set();
+      try {
+        const rows = await dbRequestIn('workflow_invoice_events', 'order_group_no', ords, 'id,order_group_no,event_type,event_at,created_at');
+        const grouped = new Map();
+        for (const row of rows || []) {
+          const ord = normal(row.order_group_no);
+          if (!ord) continue;
+          if (!grouped.has(ord)) grouped.set(ord, []);
+          grouped.get(ord).push(row);
+        }
+        return new Set([...grouped.entries()].filter(([, events]) => isInspectionCompletedByEvents(events)).map(([ord]) => ord));
+      } catch (err) {
+        addLog(`  workflow_invoice_events 확인 실패: ${err.message.slice(0, 100)}`);
+        return new Set();
+      }
+    }
+    function forceClearTask(task, reason = '검품완료 이벤트: 메모 삭제 + 배송보류 해제') {
+      task.clear = true;
+      task.drawerNo = '';
+      task.memo2Map.clear();
+      task.hold = false;
+      task.writeMemo1 = true;
+      task.writeHold = true;
+      task.skip = false;
+      task.reason = reason;
+      return task;
+    }
     function buildTask(invNo, ordNo, shortageRows, pickingRows) {
       const task = {
         invNo,
@@ -1164,6 +1207,8 @@
       );
       const mergedShortageRows = mergeShortageRows(shortageRows || [], pickingRowsToShortageRows(pickingRows || []));
       const task = buildTask(invNo, detail.ordNo, mergedShortageRows, pickingRows || []);
+      const completedOrdNos = await completedOrderNosFromWorkflow([detail.ordNo]);
+      if (completedOrdNos.has(normal(detail.ordNo))) forceClearTask(task);
       addLog(`  DB shortage ${shortageRows?.length || 0}건 / picking ${pickingRows?.length || 0}건 / 관리메모2 후보 ${task.memo2Map.size}개`);
       return { detail, task };
     }
@@ -1231,6 +1276,7 @@
         }
         shortageRows = mergeShortageRows(shortageRows, pickingRowsToShortageRows(pickingRows));
         if (!shortageRows.length && !pickingRows.length) return [];
+        const completedOrdNos = await completedOrderNosFromWorkflow(filteredOrdNos.length ? filteredOrdNos : ordNos);
         const byOrd = new Map();
         for (const row of shortageRows) {
           const ord = normal(row.ord_no);
@@ -1248,11 +1294,11 @@
           if (!bucket.invNo) bucket.invNo = isLikelyInvoiceNo(row.inv_no) ? normal(row.inv_no) : (isLikelyInvoiceNo(orderMeta.get(ord)?.invNo) ? orderMeta.get(ord).invNo : '');
           bucket.pickingRows.push(row);
         }
-        const tasks = [...byOrd.entries()].map(([ordNo, bucket]) => ({
-          invNo: bucket.invNo,
-          ordNo,
-          task: buildTask(bucket.invNo, ordNo, bucket.shortageRows, bucket.pickingRows)
-        }));
+        const tasks = [...byOrd.entries()].map(([ordNo, bucket]) => {
+          const task = buildTask(bucket.invNo, ordNo, bucket.shortageRows, bucket.pickingRows);
+          if (completedOrdNos.has(normal(ordNo))) forceClearTask(task);
+          return { invNo: bucket.invNo, ordNo, task };
+        });
         const missingInvoiceCount = tasks.filter(item => !isLikelyInvoiceNo(item.invNo)).length;
         if (missingInvoiceCount) addLog(`  송장번호 없는 주문 ${missingInvoiceCount}건 제외`);
         return tasks.filter(item => isLikelyInvoiceNo(item.invNo));
@@ -1380,7 +1426,7 @@
       }
       if (task.clear) {
         try {
-          const clearFilter = `shortage?inv_no=eq.${encodeURIComponent(invNo)}&ord_no=eq.${encodeURIComponent(task.ordNo || detail.ordNo)}&status=eq.${encodeURIComponent('검품완료')}`;
+          const clearFilter = `shortage?inv_no=eq.${encodeURIComponent(invNo)}&ord_no=eq.${encodeURIComponent(task.ordNo || detail.ordNo)}`;
           await dbPatch(clearFilter, {
             status: '메모정리완료',
             updated_at: new Date().toISOString()
