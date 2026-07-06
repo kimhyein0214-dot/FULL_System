@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sellpia Stockmatch Memo Updater 0707</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background:#141414; color:#f0f0f0; font-family:Arial,'Noto Sans KR',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card { width:680px; max-width:100%; background:#1e1e1e; border-radius:12px; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,.55); }
+  h1 { font-size:19px; margin-bottom:6px; }
+  .sub { color:#9ca3af; font-size:12px; margin-bottom:18px; }
+  .note { background:#101820; border:1px solid #2f4f6f; border-radius:8px; padding:12px 14px; color:#b9d6f2; font-size:12px; line-height:1.7; margin-bottom:18px; }
+  .btn { display:inline-block; padding:12px 18px; border-radius:8px; background:#2563eb; color:#fff; text-decoration:none; font-weight:800; }
+  pre { margin-top:14px; max-height:180px; overflow:auto; background:#0d0d0d; color:#9cdcfe; border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-all; font-size:11px; }
+  button { margin-top:10px; padding:8px 14px; border-radius:7px; border:1px solid #444; background:#2a2a2a; color:#ddd; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Sellpia Stockmatch Memo Updater 0707</h1>
+  <div class="sub">재고매칭(order_stockmatch.html) 전용 / TEST MODE 기본 ON</div>
+  <div class="note">
+    <b>TEST MODE (NO WRITE)</b><br>
+    셀피아 화면에서는 검색, 대상 행 찾기, 상세 열기, 현재값 읽기만 수행합니다.<br>
+    관리메모/관리메모2/주문메모 저장, 배송보류 설정/해제, DB PATCH는 테스트모드에서 실행하지 않습니다.<br>
+    결과 CSV에는 현재 셀피아 값, 시스템 예정값, 변경 필요 여부, 매칭 실패/상세없음 예외, 상태 사유가 들어갑니다.
+  </div>
+  <a id="bookmarklet-link" class="btn" href="#">sellpia_stockmatch_memo_0707_safe</a>
+  <pre id="code-display">loading...</pre>
+  <button id="copy-btn">코드 복사</button>
+</div>
+
+<script id="bookmarklet-source" type="text/plain">
+(function(){
+  (async function StockmatchMemoUpdater0707(){
+    const CONFIG = {
+      supabaseUrl: 'https://vgxocngpykhlkosiaeew.supabase.co',
+      supabaseKey: 'sb_publishable_XVnKGJo66GZiYTq5Ivu8dA_SjBVvX0g',
+      batchSize: 80,
+      popupDelay: 900,
+      saveDelay: 900
+    };
+    const SB_URL = CONFIG.supabaseUrl;
+    const SB_KEY = CONFIG.supabaseKey;
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const normal = value => String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+    const today = () => new Date().toISOString().slice(0, 10);
+    const $ = id => document.getElementById(id);
+    const results = [];
+    let stopped = false;
+
+    if (!/order_stockmatch\.html/i.test(location.pathname)) {
+      alert('재고매칭 탭(order_stockmatch.html)에서 실행해주세요.');
+      return;
+    }
+    if (!window.grid || !window.grid.getData) {
+      alert('재고매칭 grid 객체를 찾지 못했습니다.');
+      return;
+    }
+    if (document.getElementById('smu0707-overlay')) {
+      alert('이미 실행 중입니다.');
+      return;
+    }
+
+    async function dbRequest(path, options = {}) {
+      const res = await fetch(SB_URL + '/rest/v1/' + path, {
+        method: options.method || 'GET',
+        headers: {
+          apikey: SB_KEY,
+          Authorization: 'Bearer ' + SB_KEY,
+          'Content-Type': 'application/json',
+          Range: '0-9999',
+          ...(options.headers || {})
+        },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      });
+      if (!res.ok) throw new Error('DB read failed [' + path + ']: ' + await res.text());
+      if (res.status === 204) return null;
+      const text = await res.text();
+      return text ? JSON.parse(text) : null;
+    }
+
+    async function dbRequestIn(table, column, values, select) {
+      const ids = [...new Set((values || []).map(normal).filter(Boolean))];
+      const out = [];
+      for (let i = 0; i < ids.length; i += CONFIG.batchSize) {
+        const batch = ids.slice(i, i + CONFIG.batchSize).map(encodeURIComponent).join(',');
+        const rows = await dbRequest(table + '?' + column + '=in.(' + batch + ')&select=' + encodeURIComponent(select));
+        out.push(...(rows || []));
+      }
+      return out;
+    }
+
+    function dateRange(date) {
+      const d0 = String(date || '').replace(/-/g, '');
+      const next = new Date(date + 'T00:00:00');
+      next.setDate(next.getDate() + 1);
+      return { d0, d1: next.toISOString().slice(0, 10).replace(/-/g, '') };
+    }
+
+    function gridItems() {
+      const data = window.grid.getData();
+      const len = data.getLength();
+      const rows = [];
+      for (let i = 0; i < len; i++) rows.push({ idx: i, item: data.getItem(i) || {} });
+      return rows;
+    }
+
+    function rowOrdNo(row) {
+      return normal(row.c_ord_no || row.ord_no || row.order_no);
+    }
+
+    function rowInvNo(row) {
+      return normal(row.c_delinum || row.inv_no || row.dnum);
+    }
+
+    function rowItemNo(row, index) {
+      return normal(row.sellpia_order_item_no || row.c_order_item_no || row.c_ord_item_no || row.c_item_no || row.item_no || row.c_prv_item_no || (index + 1));
+    }
+
+    function rowsForTask(task) {
+      return gridItems().filter(({ item }) => {
+        const ord = rowOrdNo(item);
+        const inv = rowInvNo(item);
+        return (task.ordNo && ord === task.ordNo) || (task.invNo && inv === task.invNo);
+      });
+    }
+
+    function visibleDialogs() {
+      return [...document.querySelectorAll('.ui-dialog')].filter(el => el.offsetParent !== null);
+    }
+
+    function openDialogRoot() {
+      return visibleDialogs().find(el => el.querySelector('#dt_shop_memo,#dt_shop_memo2,#dt_ord_memo,#dt_order_memo')) || null;
+    }
+
+    async function openDetail(rowIdx) {
+      window.grid.scrollRowIntoView(rowIdx);
+      await sleep(180);
+      window.grid.setActiveCell(rowIdx, 0);
+      if (window.grid.onDblClick && window.jQuery) {
+        window.grid.onDblClick.notify({ row: rowIdx, cell: 0 }, new jQuery.Event('dblclick'), window.grid);
+      }
+      await sleep(CONFIG.popupDelay);
+      return openDialogRoot();
+    }
+
+    async function closeDetail() {
+      const dlg = openDialogRoot();
+      if (!dlg) return;
+      const btn = dlg.querySelector('.ui-dialog-titlebar-close');
+      if (btn) btn.click();
+      await sleep(200);
+    }
+
+    function fieldValue(root, selectors) {
+      for (const selector of selectors) {
+        const el = root && root.querySelector(selector);
+        if (!el) continue;
+        if ('value' in el) return normal(el.value);
+        return normal(el.textContent);
+      }
+      return '';
+    }
+
+    function holdCheckbox(root) {
+      if (!root) return null;
+      return root.querySelector('#dt_deli_delay,[name="dt_deli_delay"],#o_deli_delay,[name="o_deli_delay"],#deli_delay,[name="deli_delay"],input[type="checkbox"][id*="deli"][id*="delay"],input[type="checkbox"][name*="deli"][name*="delay"]');
+    }
+
+    function readCurrentValues(root, row) {
+      const cb = holdCheckbox(root);
+      return {
+        memo1: fieldValue(root, ['#dt_shop_memo', '[name="dt_shop_memo"]']) || normal(row.c_shop_memo || row.o_shop_memo || row.shop_memo),
+        memo2: fieldValue(root, ['#dt_shop_memo2', '[name="dt_shop_memo2"]']) || normal(row.c_shop_memo2 || row.o_shop_memo2 || row.shop_memo2),
+        orderMemo: fieldValue(root, ['#dt_ord_memo', '#dt_order_memo', '[name="dt_ord_memo"]']) || normal(row.c_ord_memo || row.order_memo || row.o_memo),
+        hold: cb ? !!cb.checked : /배송보류/.test(normal(row.c_bflag_status_h || row.c_result || row.o_status))
+      };
+    }
+
+    function isDoneStatus(status) {
+      return ['검품완료', '메모정리완료'].includes(normal(status));
+    }
+
+    function isNextShipStatus(status) {
+      return normal(status) === '발송대기';
+    }
+
+    function addMemo2Alias(map, row, ordNo, value) {
+      const val = normal(value);
+      if (!val) return;
+      [row.item_no, row.sellpia_order_item_no, row.p_code, row.sellpia_p_code].forEach(key => {
+        const k = normal(key);
+        if (k) map.set(k, val);
+      });
+      const itemNo = normal(row.item_no);
+      if (itemNo && ordNo) map.set(ordNo + '::' + itemNo, val);
+    }
+
+    function memo2ForGridRow(task, row, index) {
+      const keys = [
+        rowItemNo(row, index),
+        normal(row.c_prv_item_no),
+        normal(row.c_p_code),
+        normal(row.c_dp_code),
+        task.ordNo + '::' + rowItemNo(row, index)
+      ].filter(Boolean);
+      for (const key of keys) {
+        if (task.memo2Map.has(key)) return task.memo2Map.get(key);
+      }
+      return '';
+    }
+
+    function buildTask(invNo, ordNo, shortageRows, pickingRows, orderRow) {
+      const task = {
+        invNo: normal(invNo || orderRow?.inv_no),
+        ordNo: normal(ordNo || orderRow?.ord_no),
+        memo1: '',
+        memo2Map: new Map(),
+        orderMemo: normal(orderRow?.order_memo || orderRow?.o_memo),
+        hold: false,
+        clear: false,
+        writeMemo1: false,
+        writeMemo2: false,
+        writeOrderMemo: false,
+        writeHold: false,
+        skip: false,
+        reason: ''
+      };
+
+      for (const row of pickingRows || []) {
+        if (row.hold) task.hold = true;
+        if (!task.memo1 && normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY') task.memo1 = normal(row.drawer_no);
+      }
+
+      const doneRows = [];
+      const activeRows = [];
+      const nextShipRows = [];
+      for (const row of shortageRows || []) {
+        const status = normal(row.status);
+        const drawer = normal(row.drawer_no);
+        if (!task.memo1 && drawer && drawer !== 'EMPTY') task.memo1 = drawer;
+        if (isDoneStatus(status)) doneRows.push(row);
+        else if (isNextShipStatus(status)) nextShipRows.push(row);
+        else if (drawer || normal(row.memo2_val) || status === '보류' || status === '배송대기' || status === '서랍입력') activeRows.push(row);
+      }
+
+      if (doneRows.length) {
+        task.clear = true;
+        task.memo1 = '';
+        task.orderMemo = '';
+        task.memo2Map.clear();
+        task.hold = false;
+        task.writeMemo1 = true;
+        task.writeMemo2 = true;
+        task.writeOrderMemo = true;
+        task.writeHold = true;
+        task.reason = '검품완료: 관리메모/관리메모2/주문메모 삭제 + 배송보류 해제';
+        return task;
+      }
+
+      if (nextShipRows.length && !activeRows.length) {
+        task.memo1 = task.memo1 || '!!';
+        task.hold = false;
+        task.writeMemo1 = true;
+        task.writeMemo2 = true;
+        task.writeOrderMemo = !!task.orderMemo;
+        task.writeHold = true;
+        for (const row of nextShipRows) addMemo2Alias(task.memo2Map, row, task.ordNo, normal(row.memo2_val) || 'ㅁ');
+        task.reason = '발송대기: 예정 메모 반영 + 배송보류 해제';
+        return task;
+      }
+
+      for (const row of activeRows) addMemo2Alias(task.memo2Map, row, task.ordNo, row.memo2_val);
+      task.writeMemo1 = !!task.memo1;
+      task.writeMemo2 = task.memo2Map.size > 0;
+      task.writeOrderMemo = !!task.orderMemo;
+      task.writeHold = activeRows.length > 0 || task.hold || !!task.memo1 || task.memo2Map.size > 0;
+      task.hold = task.writeHold ? true : task.hold;
+
+      if (task.writeMemo1 || task.writeMemo2 || task.writeOrderMemo || task.writeHold) {
+        task.reason = '잔여 메모/보류 대상: 서랍번호, memo2_val 텍스트, 주문메모 또는 배송보류 반영';
+      } else {
+        task.skip = true;
+        task.reason = '반영할 시스템 값 없음';
+      }
+      return task;
+    }
+
+    async function buildTasks(invFilter, date) {
+      if (invFilter) {
+        const hit = gridItems().find(({ item }) => rowInvNo(item) === invFilter || rowOrdNo(item) === invFilter);
+        if (!hit) return [{ invNo: invFilter, ordNo: '', skip: true, reason: '셀피아 그리드에서 송장/주문번호 매칭 실패', memo2Map: new Map() }];
+        const ordNo = rowOrdNo(hit.item);
+        const invNo = rowInvNo(hit.item) || invFilter;
+        const [shortageRows, pickingRows, orderRows] = await Promise.all([
+          dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+          dbRequestIn('picking', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,hold,drawer_no'),
+          dbRequestIn('orders', 'ord_no', [ordNo], 'ord_no,inv_no,order_memo,o_memo')
+        ]);
+        return [buildTask(invNo, ordNo, shortageRows, pickingRows, orderRows[0] || {})];
+      }
+
+      const { d0, d1 } = dateRange(date);
+      const shortageRows = await dbRequest('shortage?ord_no=gte.' + d0 + '&ord_no=lt.' + d1 + '&select=inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at');
+      const ordNos = [...new Set((shortageRows || []).map(row => normal(row.ord_no)).filter(Boolean))];
+      if (!ordNos.length) return [];
+      const [pickingRows, orderRows] = await Promise.all([
+        dbRequestIn('picking', 'ord_no', ordNos, 'inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,hold,drawer_no'),
+        dbRequestIn('orders', 'ord_no', ordNos, 'ord_no,inv_no,order_memo,o_memo')
+      ]);
+      const byOrd = rows => {
+        const map = new Map();
+        for (const row of rows || []) {
+          const key = normal(row.ord_no);
+          if (!map.has(key)) map.set(key, []);
+          map.get(key).push(row);
+        }
+        return map;
+      };
+      const shortageMap = byOrd(shortageRows);
+      const pickingMap = byOrd(pickingRows);
+      const orderMap = new Map((orderRows || []).map(row => [normal(row.ord_no), row]));
+      return ordNos.map(ordNo => buildTask(
+        normal((shortageMap.get(ordNo) || [])[0]?.inv_no || orderMap.get(ordNo)?.inv_no),
+        ordNo,
+        shortageMap.get(ordNo) || [],
+        pickingMap.get(ordNo) || [],
+        orderMap.get(ordNo) || {}
+      ));
+    }
+
+    function needsChange(cur, planned) {
+      return normal(cur) !== normal(planned);
+    }
+
+    function addResult(result) {
+      results.push(result);
+      const log = $('smu0707-log');
+      log.textContent += result.log + '\n';
+      log.scrollTop = log.scrollHeight;
+      $('smu0707-download').disabled = !results.length;
+    }
+
+    async function setPopupValues(root, rowResult, testMode) {
+      if (testMode) {
+        addResult({ ...rowResult, log: 'TEST: ' + rowResult.invNo + ' / ' + rowResult.actionSummary });
+        return true;
+      }
+      if (!confirm('LIVE WRITE: 셀피아에 실제 저장합니다. 계속할까요?')) return false;
+      if (rowResult.writeMemo1) {
+        const el = root.querySelector('#dt_shop_memo,[name="dt_shop_memo"]');
+        if (el) {
+          el.value = rowResult.plannedMemo1;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      if (rowResult.writeMemo2) {
+        const el = root.querySelector('#dt_shop_memo2,[name="dt_shop_memo2"]');
+        if (el) {
+          el.value = rowResult.plannedMemo2;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      if (rowResult.writeOrderMemo) {
+        const el = root.querySelector('#dt_ord_memo,#dt_order_memo,[name="dt_ord_memo"]');
+        if (el) {
+          el.value = rowResult.plannedOrderMemo;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      if (rowResult.writeHold) {
+        const cb = holdCheckbox(root);
+        if (cb && !!cb.checked !== !!rowResult.plannedHold) cb.click();
+      }
+      if (typeof window.updateOrder !== 'function') throw new Error('updateOrder 함수를 찾지 못했습니다.');
+      window.updateOrder();
+      await sleep(CONFIG.saveDelay);
+      addResult({ ...rowResult, log: 'LIVE: ' + rowResult.invNo + ' / 저장 호출 완료' });
+      return true;
+    }
+
+    async function inspectTask(task, options) {
+      if (task.skip) {
+        addResult({
+          invNo: task.invNo || '',
+          ordNo: task.ordNo || '',
+          itemNo: '',
+          currentMemo1: '',
+          plannedMemo1: '',
+          currentMemo2: '',
+          plannedMemo2: '',
+          currentOrderMemo: '',
+          plannedOrderMemo: '',
+          currentHold: '',
+          plannedHold: '',
+          needsChange: 'N',
+          status: 'SKIP',
+          reason: task.reason,
+          actionSummary: 'skip',
+          log: 'SKIP: ' + (task.invNo || task.ordNo || '-') + ' / ' + task.reason
+        });
+        return;
+      }
+      const rows = rowsForTask(task);
+      if (!rows.length) {
+        addResult({
+          invNo: task.invNo || '',
+          ordNo: task.ordNo || '',
+          itemNo: '',
+          currentMemo1: '',
+          plannedMemo1: task.memo1,
+          currentMemo2: '',
+          plannedMemo2: task.memo2Map.size ? JSON.stringify(Object.fromEntries(task.memo2Map)) : '',
+          currentOrderMemo: '',
+          plannedOrderMemo: task.orderMemo,
+          currentHold: '',
+          plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
+          needsChange: 'UNKNOWN',
+          status: 'MATCH_FAIL',
+          reason: task.reason,
+          actionSummary: 'grid row not found',
+          log: 'MATCH_FAIL: ' + (task.invNo || task.ordNo || '-') + ' / grid row not found'
+        });
+        return;
+      }
+
+      const first = rows[0];
+      const root = await openDetail(first.idx);
+      if (!root) {
+        addResult({
+          invNo: task.invNo || rowInvNo(first.item),
+          ordNo: task.ordNo || rowOrdNo(first.item),
+          itemNo: '',
+          currentMemo1: '',
+          plannedMemo1: task.memo1,
+          currentMemo2: '',
+          plannedMemo2: '',
+          currentOrderMemo: '',
+          plannedOrderMemo: task.orderMemo,
+          currentHold: '',
+          plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
+          needsChange: 'UNKNOWN',
+          status: 'DETAIL_FAIL',
+          reason: task.reason,
+          actionSummary: 'detail open failed',
+          log: 'DETAIL_FAIL: ' + (task.invNo || rowInvNo(first.item)) + ' / detail open failed'
+        });
+        return;
+      }
+
+      const current = readCurrentValues(root, first.item);
+      const plannedMemo1 = task.writeMemo1 ? task.memo1 : current.memo1;
+      const plannedOrderMemo = task.writeOrderMemo ? task.orderMemo : current.orderMemo;
+      const plannedHold = task.writeHold ? !!task.hold : !!current.hold;
+      const memo1Changed = task.writeMemo1 && needsChange(current.memo1, plannedMemo1);
+      const orderMemoChanged = task.writeOrderMemo && needsChange(current.orderMemo, plannedOrderMemo);
+      const holdChanged = task.writeHold && !!current.hold !== plannedHold;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i].item;
+        const plannedMemo2 = task.clear ? '' : memo2ForGridRow(task, row, i);
+        const writeMemo2 = task.writeMemo2 && (task.clear || plannedMemo2 !== '');
+        const curMemo2 = normal(row.c_shop_memo2 || row.o_shop_memo2 || row.shop_memo2 || (i === 0 ? current.memo2 : ''));
+        const memo2Changed = writeMemo2 && needsChange(curMemo2, plannedMemo2);
+        const actionParts = [];
+        if (memo1Changed && i === 0) actionParts.push('관리메모 ' + (plannedMemo1 || '(clear)'));
+        if (memo2Changed) actionParts.push('관리메모2 ' + (plannedMemo2 || '(clear)'));
+        if (orderMemoChanged && i === 0) actionParts.push('주문메모 ' + (plannedOrderMemo || '(clear)'));
+        if (holdChanged && i === 0) actionParts.push('배송보류 ' + (plannedHold ? 'ON' : 'OFF'));
+        const rowResult = {
+          invNo: task.invNo || rowInvNo(row),
+          ordNo: task.ordNo || rowOrdNo(row),
+          itemNo: rowItemNo(row, i),
+          currentMemo1: i === 0 ? current.memo1 : '',
+          plannedMemo1: i === 0 ? plannedMemo1 : '',
+          currentMemo2: curMemo2,
+          plannedMemo2,
+          currentOrderMemo: i === 0 ? current.orderMemo : '',
+          plannedOrderMemo: i === 0 ? plannedOrderMemo : '',
+          currentHold: i === 0 ? (current.hold ? 'ON' : 'OFF') : '',
+          plannedHold: i === 0 ? (plannedHold ? 'ON' : 'OFF') : '',
+          needsChange: actionParts.length ? 'Y' : 'N',
+          status: 'OK',
+          reason: task.reason,
+          actionSummary: actionParts.length ? actionParts.join(' / ') : '변경 없음',
+          writeMemo1: i === 0 && task.writeMemo1,
+          writeMemo2,
+          writeOrderMemo: i === 0 && task.writeOrderMemo,
+          writeHold: i === 0 && task.writeHold
+        };
+        if (options.testMode) {
+          addResult({ ...rowResult, log: 'TEST: ' + rowResult.invNo + ' / ' + rowResult.actionSummary });
+        } else {
+          let writeRoot = root;
+          if (i > 0) {
+            await closeDetail();
+            writeRoot = await openDetail(rows[i].idx);
+            if (!writeRoot) {
+              addResult({ ...rowResult, status: 'DETAIL_FAIL', needsChange: 'UNKNOWN', log: 'DETAIL_FAIL: ' + rowResult.invNo + ' / live write detail reopen failed' });
+              continue;
+            }
+          }
+          await setPopupValues(writeRoot, rowResult, false);
+        }
+      }
+      await closeDetail();
+    }
+
+    function csvValue(value) {
+      const s = String(value == null ? '' : value);
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+
+    function downloadCsv() {
+      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','예정 관리메모','현재 관리메모2','예정 관리메모2','현재 주문메모','예정 주문메모','현재 배송보류','예정 배송보류','변경필요','상태','사유'];
+      const lines = [headers.map(csvValue).join(',')];
+      for (const r of results) {
+        lines.push([r.invNo,r.ordNo,r.itemNo,r.currentMemo1,r.plannedMemo1,r.currentMemo2,r.plannedMemo2,r.currentOrderMemo,r.plannedOrderMemo,r.currentHold,r.plannedHold,r.needsChange,r.status,r.reason].map(csvValue).join(','));
+      }
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sellpia_stockmatch_memo_test_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function makeOverlay() {
+      const overlay = document.createElement('div');
+      overlay.id = 'smu0707-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;';
+      overlay.innerHTML =
+        '<div style="width:560px;max-width:94vw;background:#111827;color:#fff;border:1px solid #334155;border-radius:12px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)">' +
+        '<div style="font-size:18px;font-weight:900;margin-bottom:4px">Stockmatch Memo Updater 0707</div>' +
+        '<div style="font-size:12px;color:#93c5fd;margin-bottom:14px">TEST MODE (NO WRITE) is ON by default</div>' +
+        '<label style="font-size:12px;color:#cbd5e1">송장번호/주문번호 (선택)</label>' +
+        '<input id="smu0707-inv" style="width:100%;height:38px;margin:5px 0 10px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff" placeholder="비우면 날짜 기준">' +
+        '<label style="font-size:12px;color:#cbd5e1">날짜</label>' +
+        '<input id="smu0707-date" type="date" value="' + today() + '" style="width:100%;height:38px;margin:5px 0 12px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff">' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;color:#cbd5e1">' +
+        '<label><input id="smu0707-test" type="checkbox" checked> TEST MODE (NO WRITE)</label>' +
+        '<label><input id="smu0707-memo1" type="checkbox" checked> 관리메모</label>' +
+        '<label><input id="smu0707-memo2" type="checkbox" checked> 관리메모2</label>' +
+        '<label><input id="smu0707-order-memo" type="checkbox" checked> 주문메모</label>' +
+        '<label><input id="smu0707-hold" type="checkbox" checked> 배송보류</label>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+        '<button id="smu0707-start" style="flex:1;height:40px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:900;cursor:pointer">읽기 검증 시작</button>' +
+        '<button id="smu0707-download" disabled style="height:40px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#cbd5e1;font-weight:800;cursor:pointer">CSV 다운로드</button>' +
+        '</div>' +
+        '<div id="smu0707-status" style="min-height:38px;white-space:pre-line;color:#d1d5db;font-size:13px;margin-bottom:8px"></div>' +
+        '<pre id="smu0707-log" style="height:210px;overflow:auto;background:#020617;color:#a7f3d0;border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap"></pre>' +
+        '<div style="display:flex;gap:8px;margin-top:12px">' +
+        '<button id="smu0707-stop" style="display:none;flex:1;height:36px;border:0;border-radius:8px;background:#b91c1c;color:#fff;font-weight:800;cursor:pointer">중단</button>' +
+        '<button id="smu0707-close" style="flex:1;height:36px;border:1px solid #475569;border-radius:8px;background:transparent;color:#cbd5e1;cursor:pointer">닫기</button>' +
+        '</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+      $('smu0707-close').onclick = () => overlay.remove();
+      $('smu0707-stop').onclick = () => { stopped = true; $('smu0707-stop').disabled = true; $('smu0707-stop').textContent = '중단 중'; };
+      $('smu0707-download').onclick = downloadCsv;
+      $('smu0707-start').onclick = run;
+    }
+
+    async function run() {
+      results.length = 0;
+      stopped = false;
+      $('smu0707-log').textContent = '';
+      $('smu0707-download').disabled = true;
+      $('smu0707-stop').style.display = 'block';
+      const options = {
+        inv: normal($('smu0707-inv').value),
+        date: $('smu0707-date').value,
+        testMode: $('smu0707-test').checked,
+        doMemo1: $('smu0707-memo1').checked,
+        doMemo2: $('smu0707-memo2').checked,
+        doOrderMemo: $('smu0707-order-memo').checked,
+        doHold: $('smu0707-hold').checked
+      };
+      if (!options.inv && !options.date) {
+        alert('송장번호/주문번호 또는 날짜를 입력해주세요.');
+        return;
+      }
+      if (!options.testMode && !confirm('LIVE WRITE mode입니다. 셀피아에 실제 저장/배송보류 변경을 진행할까요?')) return;
+      try {
+        $('smu0707-status').textContent = 'DB/F.v1 기준 반영 예정 목록 생성 중...';
+        const tasks = await buildTasks(options.inv, options.date);
+        $('smu0707-status').textContent = '대상 ' + tasks.length + '건 읽기 검증 중...\nTEST MODE=' + (options.testMode ? 'ON (NO WRITE)' : 'OFF (LIVE WRITE)');
+        for (let i = 0; i < tasks.length; i++) {
+          if (stopped) break;
+          const task = tasks[i];
+          if (!options.doMemo1) task.writeMemo1 = false;
+          if (!options.doMemo2) task.writeMemo2 = false;
+          if (!options.doOrderMemo) task.writeOrderMemo = false;
+          if (!options.doHold) task.writeHold = false;
+          $('smu0707-status').textContent = '[' + (i + 1) + '/' + tasks.length + '] ' + (task.invNo || task.ordNo || '-') + '\n' + task.reason;
+          await inspectTask(task, options);
+          await sleep(120);
+        }
+        $('smu0707-status').textContent = 'TEST MODE DONE: no Sellpia or DB changes\n결과 ' + results.length + '행';
+      } catch (err) {
+        $('smu0707-status').textContent = '오류: ' + err.message;
+        $('smu0707-log').textContent += (err.stack || err.message) + '\n';
+      } finally {
+        $('smu0707-stop').style.display = 'none';
+      }
+    }
+
+    makeOverlay();
+  })().catch(function(err){
+    console.error('[Stockmatch Memo Updater 0707]', err);
+    alert('Stockmatch Memo Updater error: ' + (err && err.message ? err.message : err));
+  });
+})();
+</script>
+
+<script>
+const SRC = document.getElementById('bookmarklet-source').textContent.trim();
+document.getElementById('code-display').textContent = SRC;
+document.getElementById('bookmarklet-link').href = 'javascript:' + encodeURIComponent(SRC);
+document.getElementById('copy-btn').addEventListener('click', async function() {
+  await navigator.clipboard.writeText(SRC);
+  this.textContent = '복사 완료';
+  setTimeout(() => { this.textContent = '코드 복사'; }, 1500);
+});
+</script>
+</body>
+</html>
