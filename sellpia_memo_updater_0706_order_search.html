@@ -1028,6 +1028,24 @@
       }
       return merged;
     }
+    async function orderItemMemo1Map(ordNos) {
+      const map = new Map();
+      const ids = uniq(ordNos);
+      if (!ids.length) return map;
+      const rows = await dbRequestIn('order_items', 'ord_no', ids, 'ord_no,item_no,o_shop_memo,shop_memo,memo1');
+      for (const row of rows || []) {
+        const memo = normal(row.o_shop_memo || row.shop_memo || row.memo1);
+        if (!memo) continue;
+        map.set(`${normal(row.ord_no)}::${normal(row.item_no)}`, memo);
+      }
+      return map;
+    }
+    function applyOrderItemMemo1(rows, memoMap) {
+      return (rows || []).map(row => {
+        const memo = memoMap.get(`${normal(row.ord_no)}::${normal(row.item_no)}`);
+        return memo ? { ...row, drawer_no: memo } : row;
+      });
+    }
     function eventTimeValue(row) {
       return new Date(row.event_at || row.created_at || 0).getTime() || 0;
     }
@@ -1214,8 +1232,11 @@
         detail.ordNo,
         'inv_no,ord_no,item_no,shortage_qty,short_qty,hold,drawer_no'
       );
-      const mergedShortageRows = mergeShortageRows(shortageRows || [], pickingRowsToShortageRows(pickingRows || []));
-      const task = buildTask(invNo, detail.ordNo, mergedShortageRows, pickingRows || []);
+      const memo1Map = await orderItemMemo1Map([detail.ordNo]);
+      const memoShortageRows = applyOrderItemMemo1(shortageRows || [], memo1Map);
+      const memoPickingRows = applyOrderItemMemo1(pickingRows || [], memo1Map);
+      const mergedShortageRows = mergeShortageRows(memoShortageRows, pickingRowsToShortageRows(memoPickingRows));
+      const task = buildTask(invNo, detail.ordNo, mergedShortageRows, memoPickingRows);
       const completedOrdNos = await completedOrderNosFromWorkflow([detail.ordNo]);
       if (completedOrdNos.has(normal(detail.ordNo))) forceClearTask(task);
       addLog(`  DB shortage ${shortageRows?.length || 0}건 / picking ${pickingRows?.length || 0}건 / 관리메모2 후보 ${task.memo2Map.size}개`);
@@ -1283,6 +1304,9 @@
             pickingRows = await dbRequestIn('picking', 'ord_no', filteredOrdNos, 'ord_no,item_no,shortage_qty,short_qty,hold,drawer_no');
           }
         }
+        const memo1Map = await orderItemMemo1Map(filteredOrdNos.length ? filteredOrdNos : ordNos);
+        shortageRows = applyOrderItemMemo1(shortageRows, memo1Map);
+        pickingRows = applyOrderItemMemo1(pickingRows, memo1Map);
         shortageRows = mergeShortageRows(shortageRows, pickingRowsToShortageRows(pickingRows));
         if (!shortageRows.length && !pickingRows.length) return [];
         const completedOrdNos = await completedOrderNosFromWorkflow(filteredOrdNos.length ? filteredOrdNos : ordNos);
@@ -1358,6 +1382,9 @@
           pickingRows = await dbRequest(`picking?ord_no=in.(${postgrestIn(filteredOrdNos)})&select=ord_no,hold,drawer_no`);
         }
       }
+      const memo1Map = await orderItemMemo1Map(filteredOrdNos);
+      shortageRows = applyOrderItemMemo1(shortageRows, memo1Map);
+      pickingRows = applyOrderItemMemo1(pickingRows, memo1Map);
       const byOrd = new Map();
       for (const row of shortageRows) {
         const ord = normal(row.ord_no);
