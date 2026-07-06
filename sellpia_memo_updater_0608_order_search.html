@@ -984,7 +984,7 @@
       await sleep(CONFIG.ajaxDelay);
     }
     function isDoneStatus(status) {
-      return normal(status) === '검품완료';
+      return normal(status) === '검품완료' || normal(status) === '메모정리완료';
     }
     function isDrawerStatus(status) {
       return normal(status) === '서랍입력' || normal(status) === '보류';
@@ -1044,6 +1044,10 @@
       const pickedRows = [];
       const nextShipRows = [];
       const clearRows = [];
+      const hasRemainingMemo = shortageRows.some(row => {
+        const drawer = normal(row.drawer_no);
+        return (drawer && drawer !== 'EMPTY') || !!normal(row.memo2_val);
+      });
       for (const row of shortageRows) {
         const status = normal(row.status);
         const drawer = normal(row.drawer_no);
@@ -1090,8 +1094,9 @@
       }
       if (activeRows.length && pickedRows.length) {
         task.writeMemo1 = false;
-        task.writeHold = false;
-        task.reason = '부분 미송피킹: 피킹된 상품만 관리메모2 ㅁ';
+        task.writeHold = true;
+        task.hold = true;
+        task.reason = '부분 미송피킹: 피킹된 상품만 관리메모2 ㅁ + 배송보류 유지';
         for (const row of pickedRows) {
           const itemNo = normal(row.item_no);
           addItemNoAliases(task.memo2Map, itemNo, ordNo, normal(row.memo2_val) || 'ㅁ');
@@ -1100,8 +1105,9 @@
       }
       if (pickedRows.length && !activeRows.length) {
         task.writeMemo1 = false;
-        task.writeHold = false;
-        task.reason = '미송 전량 피킹완료: 상품별 관리메모2 ㅁ';
+        task.writeHold = true;
+        task.hold = true;
+        task.reason = '미송 전량 피킹완료: 상품별 관리메모2 ㅁ + 검품 전 배송보류 유지';
         for (const row of pickedRows) {
           const itemNo = normal(row.item_no);
           addItemNoAliases(task.memo2Map, itemNo, ordNo, normal(row.memo2_val) || 'ㅁ');
@@ -1113,6 +1119,13 @@
         task.writeHold = true;
         task.hold = true;
         task.reason = '서랍입력: 서랍번호 + 배송보류';
+        return task;
+      }
+      if (hasRemainingMemo) {
+        task.writeMemo1 = !!task.drawerNo;
+        task.writeHold = true;
+        task.hold = true;
+        task.reason = '검품 전 메모 잔여: 배송보류 유지';
         return task;
       }
       task.skip = true;
