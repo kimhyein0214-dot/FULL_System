@@ -1,6 +1,6 @@
 (async function FinalSellpia0706(){
   const BASE_URL = 'https://raw.githubusercontent.com/kimhyein0214-dot/FULL_System/main/';
-  const VERSION = '20260707-stockmatch-memo1';
+  const VERSION = '20260707-stockmatch-memo2';
   const isOrderSearch = /\/order_search\.html/i.test(location.pathname);
   const isStockmatch = /\/order_stockmatch\.html/i.test(location.pathname);
   const isSellpia = /(^|\.)sellpia\.com$/i.test(location.hostname) || /(^|\.)curiouswiz\.sellpia\.com$/i.test(location.hostname);

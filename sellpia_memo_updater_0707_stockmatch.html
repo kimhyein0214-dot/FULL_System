@@ -92,11 +92,41 @@
       return out;
     }
 
-    function dateRange(date) {
-      const d0 = String(date || '').replace(/-/g, '');
-      const next = new Date(date + 'T00:00:00');
-      next.setDate(next.getDate() + 1);
-      return { d0, d1: next.toISOString().slice(0, 10).replace(/-/g, '') };
+    function readPageDateInput(id) {
+      const el = document.getElementById(id);
+      const value = el && normal(el.value);
+      return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+    }
+
+    function defaultStartDate() {
+      return readPageDateInput('search_date_s') || today();
+    }
+
+    function defaultEndDate() {
+      const start = defaultStartDate();
+      const end = readPageDateInput('search_date_e') || start;
+      return end < start ? start : end;
+    }
+
+    function addDays(date, days) {
+      const m = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) throw new Error('Invalid date: ' + date);
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return yyyy + '-' + mm + '-' + dd;
+    }
+
+    function compactDate(date) {
+      return String(date || '').replace(/-/g, '');
+    }
+
+    function dateRange(startDate, endDate) {
+      const start = startDate || today();
+      const end = endDate || start;
+      if (end < start) throw new Error('End date is earlier than start date.');
+      return { d0: compactDate(start), d1: compactDate(addDays(end, 1)), label: start + '~' + end };
     }
 
     function gridItems() {
@@ -288,26 +318,26 @@
       return task;
     }
 
-    async function buildTasks(invFilter, date) {
+    async function buildTasks(invFilter, startDate, endDate) {
       if (invFilter) {
         const hit = gridItems().find(({ item }) => rowInvNo(item) === invFilter || rowOrdNo(item) === invFilter);
         if (!hit) return [{ invNo: invFilter, ordNo: '', skip: true, reason: '셀피아 그리드에서 송장/주문번호 매칭 실패', memo2Map: new Map() }];
         const ordNo = rowOrdNo(hit.item);
         const invNo = rowInvNo(hit.item) || invFilter;
         const [shortageRows, pickingRows, orderRows] = await Promise.all([
-          dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
-          dbRequestIn('picking', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,hold,drawer_no'),
+          dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+          dbRequestIn('picking', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
           dbRequestIn('orders', 'ord_no', [ordNo], 'ord_no,inv_no,order_memo,o_memo')
         ]);
         return [buildTask(invNo, ordNo, shortageRows, pickingRows, orderRows[0] || {})];
       }
 
-      const { d0, d1 } = dateRange(date);
-      const shortageRows = await dbRequest('shortage?ord_no=gte.' + d0 + '&ord_no=lt.' + d1 + '&select=inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at');
+      const { d0, d1 } = dateRange(startDate, endDate);
+      const shortageRows = await dbRequest('shortage?ord_no=gte.' + d0 + '&ord_no=lt.' + d1 + '&select=inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at');
       const ordNos = [...new Set((shortageRows || []).map(row => normal(row.ord_no)).filter(Boolean))];
       if (!ordNos.length) return [];
       const [pickingRows, orderRows] = await Promise.all([
-        dbRequestIn('picking', 'ord_no', ordNos, 'inv_no,ord_no,item_no,sellpia_order_item_no,p_code,sellpia_p_code,hold,drawer_no'),
+        dbRequestIn('picking', 'ord_no', ordNos, 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
         dbRequestIn('orders', 'ord_no', ordNos, 'ord_no,inv_no,order_memo,o_memo')
       ]);
       const byOrd = rows => {
@@ -541,31 +571,33 @@
         '<div style="width:560px;max-width:94vw;background:#111827;color:#fff;border:1px solid #334155;border-radius:12px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)">' +
         '<div style="font-size:18px;font-weight:900;margin-bottom:4px">Stockmatch Memo Updater 0707</div>' +
         '<div style="font-size:12px;color:#93c5fd;margin-bottom:14px">TEST MODE (NO WRITE) is ON by default</div>' +
-        '<label style="font-size:12px;color:#cbd5e1">송장번호/주문번호 (선택)</label>' +
-        '<input id="smu0707-inv" style="width:100%;height:38px;margin:5px 0 10px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff" placeholder="비우면 날짜 기준">' +
-        '<label style="font-size:12px;color:#cbd5e1">날짜</label>' +
-        '<input id="smu0707-date" type="date" value="' + today() + '" style="width:100%;height:38px;margin:5px 0 12px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff">' +
+        '<label style="font-size:12px;color:#cbd5e1">Invoice / order number (optional)</label>' +
+        '<input id="smu0707-inv" style="width:100%;height:38px;margin:5px 0 10px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff" placeholder="Blank = use date range">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">' +
+        '<div><label style="font-size:12px;color:#cbd5e1">Start date</label><input id="smu0707-date-start" type="date" value="' + defaultStartDate() + '" style="width:100%;height:38px;margin-top:5px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff"></div>' +
+        '<div><label style="font-size:12px;color:#cbd5e1">End date</label><input id="smu0707-date-end" type="date" value="' + defaultEndDate() + '" style="width:100%;height:38px;margin-top:5px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff"></div>' +
+        '</div>' +
         '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;color:#cbd5e1">' +
         '<label><input id="smu0707-test" type="checkbox" checked> TEST MODE (NO WRITE)</label>' +
-        '<label><input id="smu0707-memo1" type="checkbox" checked> 관리메모</label>' +
-        '<label><input id="smu0707-memo2" type="checkbox" checked> 관리메모2</label>' +
-        '<label><input id="smu0707-order-memo" type="checkbox" checked> 주문메모</label>' +
-        '<label><input id="smu0707-hold" type="checkbox" checked> 배송보류</label>' +
+        '<label><input id="smu0707-memo1" type="checkbox" checked> memo1</label>' +
+        '<label><input id="smu0707-memo2" type="checkbox" checked> memo2</label>' +
+        '<label><input id="smu0707-order-memo" type="checkbox" checked> order memo</label>' +
+        '<label><input id="smu0707-hold" type="checkbox" checked> delivery hold</label>' +
         '</div>' +
         '<div style="display:flex;gap:8px;margin-bottom:12px">' +
-        '<button id="smu0707-start" style="flex:1;height:40px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:900;cursor:pointer">읽기 검증 시작</button>' +
-        '<button id="smu0707-download" disabled style="height:40px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#cbd5e1;font-weight:800;cursor:pointer">CSV 다운로드</button>' +
+        '<button id="smu0707-start" style="flex:1;height:40px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:900;cursor:pointer">Start read test</button>' +
+        '<button id="smu0707-download" disabled style="height:40px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#cbd5e1;font-weight:800;cursor:pointer">Download CSV</button>' +
         '</div>' +
         '<div id="smu0707-status" style="min-height:38px;white-space:pre-line;color:#d1d5db;font-size:13px;margin-bottom:8px"></div>' +
         '<pre id="smu0707-log" style="height:210px;overflow:auto;background:#020617;color:#a7f3d0;border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap"></pre>' +
         '<div style="display:flex;gap:8px;margin-top:12px">' +
-        '<button id="smu0707-stop" style="display:none;flex:1;height:36px;border:0;border-radius:8px;background:#b91c1c;color:#fff;font-weight:800;cursor:pointer">중단</button>' +
-        '<button id="smu0707-close" style="flex:1;height:36px;border:1px solid #475569;border-radius:8px;background:transparent;color:#cbd5e1;cursor:pointer">닫기</button>' +
+        '<button id="smu0707-stop" style="display:none;flex:1;height:36px;border:0;border-radius:8px;background:#b91c1c;color:#fff;font-weight:800;cursor:pointer">Stop</button>' +
+        '<button id="smu0707-close" style="flex:1;height:36px;border:1px solid #475569;border-radius:8px;background:transparent;color:#cbd5e1;cursor:pointer">Close</button>' +
         '</div>' +
         '</div>';
       document.body.appendChild(overlay);
       $('smu0707-close').onclick = () => overlay.remove();
-      $('smu0707-stop').onclick = () => { stopped = true; $('smu0707-stop').disabled = true; $('smu0707-stop').textContent = '중단 중'; };
+      $('smu0707-stop').onclick = () => { stopped = true; $('smu0707-stop').disabled = true; $('smu0707-stop').textContent = 'Stopping'; };
       $('smu0707-download').onclick = downloadCsv;
       $('smu0707-start').onclick = run;
     }
@@ -578,22 +610,24 @@
       $('smu0707-stop').style.display = 'block';
       const options = {
         inv: normal($('smu0707-inv').value),
-        date: $('smu0707-date').value,
+        startDate: $('smu0707-date-start').value,
+        endDate: $('smu0707-date-end').value,
         testMode: $('smu0707-test').checked,
         doMemo1: $('smu0707-memo1').checked,
         doMemo2: $('smu0707-memo2').checked,
         doOrderMemo: $('smu0707-order-memo').checked,
         doHold: $('smu0707-hold').checked
       };
-      if (!options.inv && !options.date) {
-        alert('송장번호/주문번호 또는 날짜를 입력해주세요.');
+      if (!options.inv && (!options.startDate || !options.endDate)) {
+        alert('Enter an invoice/order number or a date range.');
         return;
       }
-      if (!options.testMode && !confirm('LIVE WRITE mode입니다. 셀피아에 실제 저장/배송보류 변경을 진행할까요?')) return;
+      if (!options.testMode && !confirm('LIVE WRITE mode. This will save to Sellpia. Continue?')) return;
       try {
-        $('smu0707-status').textContent = 'DB/F.v1 기준 반영 예정 목록 생성 중...';
-        const tasks = await buildTasks(options.inv, options.date);
-        $('smu0707-status').textContent = '대상 ' + tasks.length + '건 읽기 검증 중...\nTEST MODE=' + (options.testMode ? 'ON (NO WRITE)' : 'OFF (LIVE WRITE)');
+        const range = options.inv ? 'single target' : dateRange(options.startDate, options.endDate).label;
+        $('smu0707-status').textContent = 'Building planned updates from DB/F.v1...\nRange: ' + range;
+        const tasks = await buildTasks(options.inv, options.startDate, options.endDate);
+        $('smu0707-status').textContent = 'Read-testing ' + tasks.length + ' target(s)...\nRange: ' + range + '\nTEST MODE=' + (options.testMode ? 'ON (NO WRITE)' : 'OFF (LIVE WRITE)');
         for (let i = 0; i < tasks.length; i++) {
           if (stopped) break;
           const task = tasks[i];
@@ -605,9 +639,9 @@
           await inspectTask(task, options);
           await sleep(120);
         }
-        $('smu0707-status').textContent = 'TEST MODE DONE: no Sellpia or DB changes\n결과 ' + results.length + '행';
+        $('smu0707-status').textContent = 'TEST MODE DONE: no Sellpia or DB changes\nResult rows: ' + results.length;
       } catch (err) {
-        $('smu0707-status').textContent = '오류: ' + err.message;
+        $('smu0707-status').textContent = 'Error: ' + err.message;
         $('smu0707-log').textContent += (err.stack || err.message) + '\n';
       } finally {
         $('smu0707-stop').style.display = 'none';
