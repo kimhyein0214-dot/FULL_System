@@ -767,10 +767,6 @@
         alert('Enter an invoice/order number or a date range.');
         return;
       }
-      if (!options.testMode && (!lastDryRunSummary || lastDryRunSummary.blocking)) {
-        alert('LIVE WRITE blocked. Run TEST MODE first and resolve SKIP/DETAIL_FAIL/MATCH_FAIL/UNKNOWN before saving.');
-        return;
-      }
       if (!options.testMode && !confirm('LIVE WRITE mode. This will save to Sellpia. Continue?')) return;
       try {
         const range = options.inv ? 'single target' : dateRange(options.startDate, options.endDate).label;
