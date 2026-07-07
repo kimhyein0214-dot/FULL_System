@@ -46,6 +46,11 @@
     const SB_KEY = CONFIG.supabaseKey;
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     const normal = value => String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+    const targetToken = value => {
+      const text = normal(value);
+      const match = text.match(/\d{6,}/);
+      return match ? match[0] : text;
+    };
     const today = () => new Date().toISOString().slice(0, 10);
     const $ = id => document.getElementById(id);
     const results = [];
@@ -476,6 +481,68 @@
       };
     }
 
+    function gridValuesForKeys(row, keys) {
+      const values = [];
+      for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(row, key)) values.push(normal(row[key]));
+      }
+      return {
+        hasKey: values.length > 0,
+        value: values.find(value => !!value) || '',
+        allBlank: values.length > 0 && values.every(value => !value),
+        values
+      };
+    }
+
+    function gridCurrentValues(row) {
+      const memo1 = gridValuesForKeys(row, ['c_shop_memo', 'o_shop_memo', 'shop_memo', 'dt_shop_memo']);
+      const memo2 = gridValuesForKeys(row, ['c_shop_memo2', 'o_shop_memo2', 'shop_memo2', 'dt_shop_memo2']);
+      const orderMemo = gridValuesForKeys(row, ['c_ord_memo', 'c_order_memo', 'o_memo', 'order_memo', 'ord_memo']);
+      const hold = gridValuesForKeys(row, ['c_bflag_status_h', 'c_deli_delay', 'o_deli_delay', 'deli_delay', 'dt_deli_delay', 'delivery_hold', 'hold']);
+      const holdOn = hold.values.some(value => {
+        const text = normal(value);
+        if (!text) return false;
+        if (/배송보류/.test(text) && !/해제|아님|없음|미보류/.test(text)) return true;
+        return /^(1|Y|YES|ON|TRUE|CHECKED)$/i.test(text);
+      });
+      const holdUnknown = hold.values.some(value => {
+        const text = normal(value);
+        if (!text || holdOn) return false;
+        if (/^(0|N|NO|OFF|FALSE|UNCHECKED)$/i.test(text)) return false;
+        if (/^(해제|미보류|없음|일반|정상)$/.test(text)) return false;
+        return true;
+      });
+      return {
+        memo1: memo1.value,
+        memo2: memo2.value,
+        orderMemo: orderMemo.value,
+        hold: hold.hasKey && !holdUnknown ? (holdOn ? 'ON' : 'OFF') : '',
+        memo1Known: memo1.hasKey,
+        memo2Known: memo2.hasKey,
+        orderMemoKnown: orderMemo.hasKey,
+        holdKnown: hold.hasKey && !holdUnknown
+      };
+    }
+
+    function gridAlreadyClear(row) {
+      const current = gridCurrentValues(row);
+      return current.memo1Known &&
+        current.memo2Known &&
+        current.orderMemoKnown &&
+        current.holdKnown &&
+        !normal(current.memo1) &&
+        !normal(current.memo2) &&
+        !normal(current.orderMemo) &&
+        current.hold === 'OFF';
+    }
+
+    function canGridFastSkip(task, row) {
+      return !!(task &&
+        task.clear === true &&
+        /검품완료/.test(normal(task.reason)) &&
+        gridAlreadyClear(row));
+    }
+
     function isDoneStatus(status) {
       return ['검품완료', '메모정리완료'].includes(normal(status));
     }
@@ -698,13 +765,40 @@
       };
 
       if (invFilter) {
-        const hit = gridItems().find(({ item }) => rowInvNo(item) === invFilter || rowOrdNo(item) === invFilter);
+        const target = targetToken(invFilter);
+        const hit = gridItems().find(({ item }) => rowInvNo(item) === target || rowOrdNo(item) === target);
         if (!hit) {
           lastBuildMeta = { mode: 'single', gridRows: gridItems().length, uniqueOrdNos: 0, missingOrdRows: 0, multiInvOrdNos: [], dbMissingOrdNos: [] };
-          return [{ invNo: invFilter, ordNo: '', skip: true, reason: '셀피아 그리드에서 송장/주문번호 매칭 실패', memo2Map: new Map() }];
+          const [shortageByInv, pickingByInv, orderByInv, shortageByOrd, pickingByOrd, orderByOrd] = await Promise.all([
+            safeDbRequestIn('shortage', 'inv_no', [target], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+            safeDbRequestIn('picking', 'inv_no', [target], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
+            safeDbRequestIn('orders', 'inv_no', [target], 'ord_no,inv_no,order_memo,o_memo'),
+            safeDbRequestIn('shortage', 'ord_no', [target], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+            safeDbRequestIn('picking', 'ord_no', [target], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
+            safeDbRequestIn('orders', 'ord_no', [target], 'ord_no,inv_no,order_memo,o_memo')
+          ]);
+          const dbSeed = [...(shortageByInv || []), ...(pickingByInv || []), ...(orderByInv || []), ...(shortageByOrd || []), ...(pickingByOrd || []), ...(orderByOrd || [])];
+          const ordNoFromDb = normal((dbSeed.find(row => normal(row.ord_no)) || {}).ord_no);
+          if (!ordNoFromDb) {
+            return [{ invNo: target, ordNo: '', skip: true, reason: '셀피아 그리드에서 송장/주문번호 매칭 실패', memo2Map: new Map() }];
+          }
+          const invNoFromDb = normal((dbSeed.find(row => normal(row.inv_no)) || {}).inv_no) || target;
+          lastBuildMeta.uniqueOrdNos = 1;
+          const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows] = await Promise.all([
+            dbRequestIn('shortage', 'ord_no', [ordNoFromDb], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+            dbRequestIn('picking', 'ord_no', [ordNoFromDb], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
+            dbRequestIn('orders', 'ord_no', [ordNoFromDb], 'ord_no,inv_no,order_memo,o_memo'),
+            dbRequestIn('order_items', 'ord_no', [ordNoFromDb], 'ord_no,item_no,sellpia_order_item_no,p_code,o_shop_memo2'),
+            safeDbRequestIn('workflow_invoice_events', 'order_group_no', [ordNoFromDb], 'order_group_no,event_type,event_at,created_at,id,memo')
+          ]);
+          const workflowDoneMap = workflowDoneByOrdNo(workflowRows);
+          lastBuildMeta.pickingMatchedOrders = [...new Set((pickingRows || []).map(row => normal(row.ord_no)).filter(Boolean))].length;
+          lastBuildMeta.pickingHoldRows = (pickingRows || []).filter(row => !!row.hold).length;
+          lastBuildMeta.pickingDrawerRows = (pickingRows || []).filter(row => normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY').length;
+          return [buildTask(invNoFromDb, ordNoFromDb, shortageRows, pickingRows, orderRows || [], orderItemRows || [], workflowDoneMap.get(ordNoFromDb))];
         }
         const ordNo = rowOrdNo(hit.item);
-        const invNo = rowInvNo(hit.item) || invFilter;
+        const invNo = rowInvNo(hit.item) || target;
         lastBuildMeta = { mode: 'single', gridRows: gridItems().length, uniqueOrdNos: ordNo ? 1 : 0, missingOrdRows: ordNo ? 0 : 1, multiInvOrdNos: [], dbMissingOrdNos: [] };
         const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows] = await Promise.all([
           dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
@@ -1040,6 +1134,31 @@
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i].item;
         const rowPerf = newPerf();
+        if (canGridFastSkip(task, row)) {
+          const current = gridCurrentValues(row);
+          addResult(withPerf({
+            invNo: task.invNo || rowInvNo(row),
+            ordNo: task.ordNo || rowOrdNo(row),
+            itemNo: rowItemNo(row, i),
+            itemNoForVerify: rowItemNoStrict(row) || rowItemNo(row, i),
+            currentMemo1: current.memo1,
+            plannedMemo1: '',
+            currentMemo2: current.memo2,
+            plannedMemo2: '',
+            currentOrderMemo: current.orderMemo,
+            plannedOrderMemo: '',
+            currentHold: current.hold,
+            plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
+            needsChange: 'N',
+            status: 'GRID_FAST_SKIP',
+            reason: (task.reason || '') + ' / grid visible values already clear',
+            dbMatchStatus: task.dbMatchStatus || '',
+            clearOffReason: '',
+            actionSummary: 'grid already clear; detail skipped',
+            log: 'GRID_FAST_SKIP: ' + (task.invNo || rowInvNo(row)) + ' / grid visible values already clear / 팝업 확인 생략'
+          }, rowPerf));
+          continue;
+        }
         const openStart = perfNow();
         const openInfo = await openDetail(rows[i].idx);
         const root = openInfo && openInfo.root;
