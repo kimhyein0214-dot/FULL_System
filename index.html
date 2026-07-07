@@ -8161,10 +8161,10 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
         status: '배송대기', updated_at: new Date().toISOString(),
       },{inv_no,item_no:itemNo});
     } else {
-      // 미송피킹 완료: 삭제 대신 '피킹완료' 상태로 변경 → 메모 업데이터가 셀피아에 'ㅁ' 씀
+      // 미송피킹 완료: 삭제 대신 '피킹완료' 상태로 유지하고 관리메모2는 빈값으로 정리합니다.
       await upsertOrReplaceByItem('shortage',{
         inv_no, ord_no:_ord2, item_no:itemNo, item_sort_order:item?.itemSortOrder??row?.itemSortOrder??null, sellpia_p_code:item?.sellpiaCode||row?.sellpiaCode||'', p_code:storageCode,
-        short_qty: 0, memo2_val: 'ㅁ', status: '피킹완료',
+        short_qty: 0, memo2_val: '', status: '피킹완료',
         updated_at: new Date().toISOString(),
       },{inv_no,item_no:itemNo});
     }
@@ -8176,7 +8176,7 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
     const k=String(seq)+'-'+code;
     if(newShortage===0) delete shortage[k]; else shortage[k]=newShortage;
     shortageStatus[k]=newShortage===0?'피킹완료':'배송대기';
-    shortageMemo2[k]=newShortage===0?'ㅁ':String(newShortage);
+    shortageMemo2[k]=newShortage===0?'':String(newShortage);
     insp_misongCacheReady=false;
     if(document.getElementById('sys-insp')?.classList.contains('active')){
       insp_refreshMisongCache(true).catch(()=>{});
@@ -8189,6 +8189,7 @@ async function saveMisongShortage(seq, code, newShortage, prevShortage){
       const k=String(seq)+'-'+code;
       if(prevShortage===0) delete shortage[k]; else shortage[k]=prevShortage;
       shortageStatus[k]=row.status;
+      shortageMemo2[k]=prevShortage===0?'':String(prevShortage);
       renderMisongList();
     }
     toast('⚠ 저장 실패: '+e.message);

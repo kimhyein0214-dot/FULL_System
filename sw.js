@@ -1,4 +1,4 @@
-const CACHE_NAME = 'picking-system-0630-label-xlsx-v1';
+const CACHE_NAME = 'picking-system-0707-stockmatch-memo-v1';
 const APP_ASSETS = [
   './',
   './index.html',
