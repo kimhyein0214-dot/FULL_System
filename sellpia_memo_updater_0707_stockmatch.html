@@ -193,12 +193,85 @@
       });
     }
 
+    const DETAIL_FIELD_SELECTOR = '#dt_shop_memo,[name="dt_shop_memo"],#dt_shop_memo2,[name="dt_shop_memo2"],#dt_ord_memo,#dt_order_memo,[name="dt_ord_memo"]';
+
+    function isVisible(el) {
+      return !!(el && (el.offsetParent || el.getClientRects().length));
+    }
+
     function visibleDialogs() {
-      return [...document.querySelectorAll('.ui-dialog')].filter(el => el.offsetParent !== null);
+      return [...document.querySelectorAll('.ui-dialog')].filter(isVisible);
+    }
+
+    function detailReadyRoot(root) {
+      if (!root) return null;
+      const field = root.querySelector(DETAIL_FIELD_SELECTOR);
+      return isVisible(field) ? root : null;
+    }
+
+    function rootKind(root) {
+      if (!root) return 'none';
+      if (root === document) return 'document';
+      if (root.classList && root.classList.contains('ui-dialog')) return 'ui-dialog';
+      if (root.matches && root.matches('.modal')) return 'modal';
+      if (root.matches && root.matches('[role="dialog"]')) return 'role-dialog';
+      return (root.tagName || 'node').toLowerCase();
+    }
+
+    function currentDetailRoot() {
+      for (const root of visibleDialogs()) {
+        const ready = detailReadyRoot(root);
+        if (ready) return ready;
+      }
+      const field = document.querySelector(DETAIL_FIELD_SELECTOR);
+      if (!isVisible(field)) return null;
+      const dialog = field.closest('.ui-dialog,.modal,[role="dialog"]');
+      if (dialog && isVisible(dialog)) return dialog;
+      return field.closest('form,table') || document;
     }
 
     function openDialogRoot() {
-      return visibleDialogs().find(el => el.querySelector('#dt_shop_memo,#dt_shop_memo2,#dt_ord_memo,#dt_order_memo')) || null;
+      return currentDetailRoot();
+    }
+
+    async function waitForDetailReady(maxMs) {
+      const deadline = perfNow() + (maxMs || CONFIG.popupDelay || 900);
+      while (perfNow() < deadline) {
+        const root = currentDetailRoot();
+        if (root) return root;
+        await sleep(80);
+      }
+      return currentDetailRoot();
+    }
+
+    function detailStillOpen(root) {
+      if (!root) return !!currentDetailRoot();
+      if (root !== document && !document.documentElement.contains(root)) return false;
+      if (root !== document && !isVisible(root)) return false;
+      return !!detailReadyRoot(root);
+    }
+
+    async function waitForDetailClosed(root, maxMs) {
+      const deadline = perfNow() + (maxMs || 1200);
+      while (perfNow() < deadline) {
+        if (!detailStillOpen(root)) return true;
+        await sleep(80);
+      }
+      return !detailStillOpen(root);
+    }
+
+    function detailCloseButton(root) {
+      const local = root && root !== document && root.querySelector && root.querySelector('.ui-dialog-titlebar-close');
+      if (isVisible(local)) return local;
+      for (const dlg of visibleDialogs()) {
+        if (!detailReadyRoot(dlg)) continue;
+        const btn = dlg.querySelector('.ui-dialog-titlebar-close');
+        if (isVisible(btn)) return btn;
+      }
+      for (const btn of [...document.querySelectorAll('.ui-dialog-titlebar-close')]) {
+        if (isVisible(btn)) return btn;
+      }
+      return null;
     }
 
     async function openDetail(rowIdx) {
@@ -208,16 +281,22 @@
       if (window.grid.onDblClick && window.jQuery) {
         window.grid.onDblClick.notify({ row: rowIdx, cell: 0 }, new jQuery.Event('dblclick'), window.grid);
       }
-      await sleep(CONFIG.popupDelay);
-      return openDialogRoot();
+      let root = await waitForDetailReady(Math.max(CONFIG.popupDelay || 900, 1200));
+      if (root) return { root, fallback: false, rootKind: rootKind(root), ready: true };
+      await sleep(300);
+      root = await waitForDetailReady(1800);
+      return { root, fallback: true, rootKind: rootKind(root), ready: !!root };
     }
 
     async function closeDetail() {
       const dlg = openDialogRoot();
-      if (!dlg) return;
-      const btn = dlg.querySelector('.ui-dialog-titlebar-close');
+      if (!dlg) return { fallback: false, rootKind: 'none', button: false };
+      const btn = detailCloseButton(dlg);
       if (btn) btn.click();
-      await sleep(200);
+      const closed = await waitForDetailClosed(dlg, 1200);
+      if (closed) return { fallback: false, rootKind: rootKind(dlg), button: !!btn };
+      await sleep(300);
+      return { fallback: true, rootKind: rootKind(dlg), button: !!btn };
     }
 
     function fieldValue(root, selectors) {
@@ -738,7 +817,19 @@
     }
 
     function newPerf() {
-      return { totalStart: perfNow(), openMs: null, readMs: null, writeMs: null, closeMs: null };
+      return {
+        totalStart: perfNow(),
+        openMs: null,
+        readMs: null,
+        writeMs: null,
+        closeMs: null,
+        openFallback: null,
+        openRoot: null,
+        openReady: null,
+        closeFallback: null,
+        closeRoot: null,
+        closeBtn: null
+      };
     }
 
     function perfText(perf) {
@@ -749,12 +840,33 @@
       if (perf.writeMs != null) parts.push('write=' + perf.writeMs + 'ms');
       if (perf.closeMs != null) parts.push('close=' + perf.closeMs + 'ms');
       parts.push('total=' + perfMs(perf.totalStart) + 'ms');
+      if (perf.openFallback != null) parts.push('openFallback=' + perf.openFallback);
+      if (perf.openRoot != null) parts.push('openRoot=' + perf.openRoot);
+      if (perf.openReady != null) parts.push('openReady=' + perf.openReady);
+      if (perf.closeFallback != null) parts.push('closeFallback=' + perf.closeFallback);
+      if (perf.closeRoot != null) parts.push('closeRoot=' + perf.closeRoot);
+      if (perf.closeBtn != null) parts.push('closeBtn=' + perf.closeBtn);
       return 'PERF ' + parts.join(', ');
     }
 
     function withPerf(result, perf) {
       const text = perfText(perf);
-      return text ? { ...result, log: result.log + ' / ' + text } : result;
+      if (!perf) return result;
+      return {
+        ...result,
+        perfOpenMs: perf.openMs != null ? perf.openMs : '',
+        perfReadMs: perf.readMs != null ? perf.readMs : '',
+        perfWriteMs: perf.writeMs != null ? perf.writeMs : '',
+        perfCloseMs: perf.closeMs != null ? perf.closeMs : '',
+        perfTotalMs: perfMs(perf.totalStart),
+        perfOpenFallback: perf.openFallback != null ? perf.openFallback : '',
+        perfOpenRoot: perf.openRoot != null ? perf.openRoot : '',
+        perfOpenReady: perf.openReady != null ? perf.openReady : '',
+        perfCloseFallback: perf.closeFallback != null ? perf.closeFallback : '',
+        perfCloseRoot: perf.closeRoot != null ? perf.closeRoot : '',
+        perfCloseBtn: perf.closeBtn != null ? perf.closeBtn : '',
+        log: text ? result.log + ' / ' + text : result.log
+      };
     }
 
     function sampleList(values) {
@@ -929,8 +1041,12 @@
         const row = rows[i].item;
         const rowPerf = newPerf();
         const openStart = perfNow();
-        const root = await openDetail(rows[i].idx);
+        const openInfo = await openDetail(rows[i].idx);
+        const root = openInfo && openInfo.root;
         rowPerf.openMs = perfMs(openStart);
+        rowPerf.openFallback = openInfo && openInfo.fallback ? 'Y' : 'N';
+        rowPerf.openRoot = openInfo && openInfo.rootKind;
+        rowPerf.openReady = openInfo && openInfo.ready ? 'Y' : 'N';
         if (!root) {
           addResult(withPerf({
             invNo: task.invNo || rowInvNo(row),
@@ -1030,8 +1146,11 @@
         }
         } finally {
           const closeStart = perfNow();
-          await closeDetail();
+          const closeInfo = await closeDetail();
           rowPerf.closeMs = perfMs(closeStart);
+          rowPerf.closeFallback = closeInfo && closeInfo.fallback ? 'Y' : 'N';
+          rowPerf.closeRoot = closeInfo && closeInfo.rootKind;
+          rowPerf.closeBtn = closeInfo && closeInfo.button ? 'Y' : 'N';
           if (pendingResult) addResult(withPerf(pendingResult, rowPerf));
         }
       }
@@ -1066,7 +1185,8 @@
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i].item;
-        const root = await openDetail(rows[i].idx);
+        const openInfo = await openDetail(rows[i].idx);
+        const root = openInfo && openInfo.root;
         if (!root) {
           addResult({
             invNo: task.invNo || rowInvNo(row),
@@ -1152,10 +1272,10 @@
     }
 
     function downloadCsv() {
-      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','예정 관리메모','현재 관리메모2','예정 관리메모2','현재 주문메모','예정 주문메모','현재 배송보류','예정 배송보류','변경필요','상태','사유','DB매칭상태','clear/OFF사유'];
+      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','예정 관리메모','현재 관리메모2','예정 관리메모2','현재 주문메모','예정 주문메모','현재 배송보류','예정 배송보류','변경필요','상태','사유','DB매칭상태','clear/OFF사유','perf_open_ms','perf_read_ms','perf_write_ms','perf_close_ms','perf_total_ms','perf_open_fallback','perf_open_root','perf_open_ready','perf_close_fallback','perf_close_root','perf_close_btn'];
       const lines = [headers.map(csvValue).join(',')];
       for (const r of results) {
-        lines.push([r.invNo,r.ordNo,r.itemNo,r.currentMemo1,r.plannedMemo1,r.currentMemo2,r.plannedMemo2,r.currentOrderMemo,r.plannedOrderMemo,r.currentHold,r.plannedHold,r.needsChange,r.status,r.reason,r.dbMatchStatus,r.clearOffReason].map(csvValue).join(','));
+        lines.push([r.invNo,r.ordNo,r.itemNo,r.currentMemo1,r.plannedMemo1,r.currentMemo2,r.plannedMemo2,r.currentOrderMemo,r.plannedOrderMemo,r.currentHold,r.plannedHold,r.needsChange,r.status,r.reason,r.dbMatchStatus,r.clearOffReason,r.perfOpenMs,r.perfReadMs,r.perfWriteMs,r.perfCloseMs,r.perfTotalMs,r.perfOpenFallback,r.perfOpenRoot,r.perfOpenReady,r.perfCloseFallback,r.perfCloseRoot,r.perfCloseBtn].map(csvValue).join(','));
       }
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
