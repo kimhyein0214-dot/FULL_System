@@ -3008,12 +3008,30 @@ async function loadData(silent=false,preserveView=false){
     if(!silent&&sw) sw.innerHTML='<div style="padding:20px;color:var(--red);font-size:12px;">❌ '+e.message+'</div>';
   }
 }
+function resetLoadedPickingState(){
+  checked={};shortage={};drawer={};seqToReal={};realToSeq={};noMap={};invToNo={};colors={};ci=0;jos=[];josInfo=[];curJo=0;zoneSortMode=false;zoneSortedOrders=null;
+  const zb=document.getElementById('zone-sort-btn');
+  if(zb){zb.style.background='rgba(255,255,255,0.15)';zb.style.color='rgba(255,255,255,0.6)';zb.style.fontWeight='normal';}
+}
 function reloadData(){
   if(hasUnsyncedLocalChanges()){
     toast('⚠ 저장되지 않은 작업이 있어 새로고침을 잠깐 막았어요. 다시 저장되면 새로고침됩니다.',4000);
-    return;
+    return Promise.resolve(false);
   }
-  checked={};shortage={};drawer={};seqToReal={};realToSeq={};noMap={};invToNo={};colors={};ci=0;jos=[];josInfo=[];curJo=0;zoneSortMode=false;zoneSortedOrders=null;const zb=document.getElementById('zone-sort-btn');if(zb){zb.style.background='rgba(255,255,255,0.15)';zb.style.color='rgba(255,255,255,0.6)';zb.style.fontWeight='normal';}updateWorkSortUI();loadData();
+  resetLoadedPickingState();
+  updateWorkSortUI();
+  return loadData().then(()=>true);
+}
+
+async function reloadDataForInspection(){
+  if(hasUnsyncedLocalChanges()){
+    toast('⚠ 저장되지 않은 작업이 있어 검품 최신 로드를 잠깐 막았어요. 저장 후 다시 열어주세요.',4000);
+    return false;
+  }
+  resetLoadedPickingState();
+  updateWorkSortUI();
+  await loadData(true,true);
+  return true;
 }
 
 function rebuildJos(){
@@ -3346,7 +3364,7 @@ function renderRightDetail(no){
   }).join('');
 }
 
-function setSysTab(tab){
+async function setSysTab(tab){
   ['pick','insp','cs','misong'].forEach(t=>{ const el=document.getElementById('sys-'+t); if(el) el.classList.toggle('active',t===tab); });
   const leftPanel   = document.querySelector('.panel.left-panel');
   const rightPanel  = document.getElementById('right-detail-panel');
@@ -3370,11 +3388,20 @@ function setSysTab(tab){
     if(inspPanel)   inspPanel.style.display='flex';
     if(misongPanel) misongPanel.style.display='none';
     if(sbBottom)    sbBottom.style.display='none';
-    if(!insp_initialized) insp_loadData();
-    else {
-      insp_renderAll();
-      insp_refreshMisongCache(true).catch(()=>{});
-    }
+    insp_tabMode='all';
+    insp_searchQuery='';
+    const inspSearch=document.getElementById('insp-search');
+    if(inspSearch) inspSearch.value='';
+    ['all','gold','golditem','undone','misong'].forEach(x=>{
+      const el=document.getElementById('insp-tab-'+x);
+      if(el) el.classList.toggle('active',x==='all');
+    });
+    const listWrap=document.getElementById('insp-list-scroll');
+    if(listWrap) listWrap.innerHTML='<div style="padding:30px;text-align:center;color:#7C7D81;font-size:12px;">당일 주문 새로고침 중...</div>';
+    const refreshed=await reloadDataForInspection();
+    if(!document.getElementById('sys-insp')?.classList.contains('active')) return;
+    insp_loadData();
+    if(!refreshed) insp_renderAll();
     insp_renderSidebar();
   } else if(tab==='misong'){
     if(leftPanel)   leftPanel.style.display='none';

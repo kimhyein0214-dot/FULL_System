@@ -49,6 +49,8 @@
     const $ = id => document.getElementById(id);
     const results = [];
     let stopped = false;
+    let lastBuildMeta = null;
+    let lastDryRunSummary = null;
 
     if (!/order_stockmatch\.html/i.test(location.pathname)) {
       alert('재고매칭 탭(order_stockmatch.html)에서 실행해주세요.');
@@ -135,6 +137,21 @@
       const rows = [];
       for (let i = 0; i < len; i++) rows.push({ idx: i, item: data.getItem(i) || {} });
       return rows;
+    }
+
+    async function ensureAllGridRowsLoaded() {
+      const before = gridItems().length;
+      const pagerEls = [...document.querySelectorAll('.slick-pager a,.slick-pager button,.slick-pager span')];
+      const allBtn = pagerEls.find(el => {
+        const text = normal(el.innerText || el.textContent);
+        return text === '모두' || /^all$/i.test(text);
+      });
+      if (allBtn && !allBtn.classList.contains('ui-state-disabled')) {
+        allBtn.click();
+        await sleep(1000);
+      }
+      const after = gridItems().length;
+      return { before, after, clickedAll: !!allBtn && after >= before };
     }
 
     function rowOrdNo(row) {
@@ -256,8 +273,18 @@
         writeOrderMemo: false,
         writeHold: false,
         skip: false,
-        reason: ''
+        reason: '',
+        dbMatchStatus: ''
       };
+      const hasShortageMatch = !!(shortageRows || []).length;
+      const hasPickingMatch = !!(pickingRows || []).length;
+      const hasOrderMatch = !!normal(orderRow?.ord_no);
+      const hasDbMatch = hasShortageMatch || hasPickingMatch || hasOrderMatch;
+      task.dbMatchStatus = [
+        hasShortageMatch ? 'shortage' : '',
+        hasPickingMatch ? 'picking' : '',
+        hasOrderMatch ? 'orders' : ''
+      ].filter(Boolean).join('+') || 'DB 매칭 없음';
 
       for (const row of pickingRows || []) {
         if (row.hold) task.hold = true;
@@ -303,43 +330,30 @@
       }
 
       for (const row of activeRows) addMemo2Alias(task.memo2Map, row, task.ordNo, row.memo2_val);
-      task.writeMemo1 = !!task.memo1;
-      task.writeMemo2 = task.memo2Map.size > 0;
-      task.writeOrderMemo = !!task.orderMemo;
-      task.writeHold = activeRows.length > 0 || task.hold || !!task.memo1 || task.memo2Map.size > 0;
-      task.hold = task.writeHold ? true : task.hold;
+      task.writeMemo1 = true;
+      task.writeMemo2 = true;
+      task.writeOrderMemo = true;
+      task.writeHold = true;
+      const shouldHold = activeRows.length > 0 || task.hold || !!task.memo1 || task.memo2Map.size > 0;
+      const hasSystemValue = shouldHold || !!task.orderMemo;
+      const noSystemReason = hasDbMatch ? 'DB 매칭은 있으나 반영할 시스템 값 없음: 현재 셀피아 값을 읽고 있으면 빈값/배송보류 해제 예정' : 'DB shortage/picking/orders 매칭 없음: 현재 셀피아 값을 읽고 있으면 빈값/배송보류 해제 예정';
+      if (shouldHold) task.hold = true;
 
       if (task.writeMemo1 || task.writeMemo2 || task.writeOrderMemo || task.writeHold) {
-        task.reason = '잔여 메모/보류 대상: 서랍번호, memo2_val 텍스트, 주문메모 또는 배송보류 반영';
+        task.reason = hasSystemValue ? '잔여 메모/보류 대상: 서랍번호, memo2_val 텍스트, 주문메모 또는 배송보류 반영' : noSystemReason;
       } else {
-        task.skip = true;
-        task.reason = '반영할 시스템 값 없음';
+        task.clear = true;
+        task.writeMemo1 = true;
+        task.writeMemo2 = true;
+        task.writeOrderMemo = true;
+        task.writeHold = true;
+        task.hold = false;
+        task.reason = noSystemReason;
       }
       return task;
     }
 
     async function buildTasks(invFilter, startDate, endDate) {
-      if (invFilter) {
-        const hit = gridItems().find(({ item }) => rowInvNo(item) === invFilter || rowOrdNo(item) === invFilter);
-        if (!hit) return [{ invNo: invFilter, ordNo: '', skip: true, reason: '셀피아 그리드에서 송장/주문번호 매칭 실패', memo2Map: new Map() }];
-        const ordNo = rowOrdNo(hit.item);
-        const invNo = rowInvNo(hit.item) || invFilter;
-        const [shortageRows, pickingRows, orderRows] = await Promise.all([
-          dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
-          dbRequestIn('picking', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
-          dbRequestIn('orders', 'ord_no', [ordNo], 'ord_no,inv_no,order_memo,o_memo')
-        ]);
-        return [buildTask(invNo, ordNo, shortageRows, pickingRows, orderRows[0] || {})];
-      }
-
-      const { d0, d1 } = dateRange(startDate, endDate);
-      const shortageRows = await dbRequest('shortage?ord_no=gte.' + d0 + '&ord_no=lt.' + d1 + '&select=inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at');
-      const ordNos = [...new Set((shortageRows || []).map(row => normal(row.ord_no)).filter(Boolean))];
-      if (!ordNos.length) return [];
-      const [pickingRows, orderRows] = await Promise.all([
-        dbRequestIn('picking', 'ord_no', ordNos, 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
-        dbRequestIn('orders', 'ord_no', ordNos, 'ord_no,inv_no,order_memo,o_memo')
-      ]);
       const byOrd = rows => {
         const map = new Map();
         for (const row of rows || []) {
@@ -349,11 +363,77 @@
         }
         return map;
       };
+
+      if (invFilter) {
+        const hit = gridItems().find(({ item }) => rowInvNo(item) === invFilter || rowOrdNo(item) === invFilter);
+        if (!hit) {
+          lastBuildMeta = { mode: 'single', gridRows: gridItems().length, uniqueOrdNos: 0, missingOrdRows: 0, multiInvOrdNos: [], dbMissingOrdNos: [] };
+          return [{ invNo: invFilter, ordNo: '', skip: true, reason: '셀피아 그리드에서 송장/주문번호 매칭 실패', memo2Map: new Map() }];
+        }
+        const ordNo = rowOrdNo(hit.item);
+        const invNo = rowInvNo(hit.item) || invFilter;
+        lastBuildMeta = { mode: 'single', gridRows: gridItems().length, uniqueOrdNos: ordNo ? 1 : 0, missingOrdRows: ordNo ? 0 : 1, multiInvOrdNos: [], dbMissingOrdNos: [] };
+        const [shortageRows, pickingRows, orderRows] = await Promise.all([
+          dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+          dbRequestIn('picking', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
+          dbRequestIn('orders', 'ord_no', [ordNo], 'ord_no,inv_no,order_memo,o_memo')
+        ]);
+        lastBuildMeta.pickingMatchedOrders = [...new Set((pickingRows || []).map(row => normal(row.ord_no)).filter(Boolean))].length;
+        lastBuildMeta.pickingHoldRows = (pickingRows || []).filter(row => !!row.hold).length;
+        lastBuildMeta.pickingDrawerRows = (pickingRows || []).filter(row => normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY').length;
+        return [buildTask(invNo, ordNo, shortageRows, pickingRows, orderRows[0] || {})];
+      }
+
+      const loadMeta = await ensureAllGridRowsLoaded();
+      const gridRows = gridItems();
+      const gridOrdMap = new Map();
+      const invsByOrd = new Map();
+      let missingOrdRows = 0;
+      for (const { item } of gridRows) {
+        const ordNo = rowOrdNo(item);
+        const invNo = rowInvNo(item);
+        if (!ordNo) {
+          missingOrdRows++;
+          continue;
+        }
+        if (!invsByOrd.has(ordNo)) invsByOrd.set(ordNo, new Set());
+        if (invNo) invsByOrd.get(ordNo).add(invNo);
+        if (gridOrdMap.has(ordNo)) continue;
+        gridOrdMap.set(ordNo, { invNo, ordNo });
+      }
+      const ordNos = [...gridOrdMap.keys()];
+      const multiInvOrdNos = [...invsByOrd.entries()].filter(([, invs]) => invs.size > 1).map(([ordNo]) => ordNo);
+      if (!ordNos.length) {
+        lastBuildMeta = { mode: 'grid', gridRows: gridRows.length, uniqueOrdNos: 0, missingOrdRows, multiInvOrdNos, dbMissingOrdNos: [] };
+        return [];
+      }
+      const [shortageRows, pickingRows, orderRows] = await Promise.all([
+        dbRequestIn('shortage', 'ord_no', ordNos, 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
+        dbRequestIn('picking', 'ord_no', ordNos, 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
+        dbRequestIn('orders', 'ord_no', ordNos, 'ord_no,inv_no,order_memo,o_memo')
+      ]);
       const shortageMap = byOrd(shortageRows);
       const pickingMap = byOrd(pickingRows);
       const orderMap = new Map((orderRows || []).map(row => [normal(row.ord_no), row]));
+      const dbMissingOrdNos = ordNos.filter(ordNo => !(shortageMap.get(ordNo) || []).length && !(pickingMap.get(ordNo) || []).length && !orderMap.has(ordNo));
+      const pickingMatchedOrders = [...new Set((pickingRows || []).map(row => normal(row.ord_no)).filter(Boolean))].length;
+      const pickingHoldRows = (pickingRows || []).filter(row => !!row.hold).length;
+      const pickingDrawerRows = (pickingRows || []).filter(row => normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY').length;
+      lastBuildMeta = {
+        mode: 'grid',
+        gridRowsBeforeAll: loadMeta.before,
+        clickedAllRows: loadMeta.clickedAll,
+        gridRows: gridRows.length,
+        uniqueOrdNos: ordNos.length,
+        missingOrdRows,
+        multiInvOrdNos,
+        dbMissingOrdNos,
+        pickingMatchedOrders,
+        pickingHoldRows,
+        pickingDrawerRows
+      };
       return ordNos.map(ordNo => buildTask(
-        normal((shortageMap.get(ordNo) || [])[0]?.inv_no || orderMap.get(ordNo)?.inv_no),
+        normal(gridOrdMap.get(ordNo)?.invNo || (shortageMap.get(ordNo) || [])[0]?.inv_no || orderMap.get(ordNo)?.inv_no),
         ordNo,
         shortageMap.get(ordNo) || [],
         pickingMap.get(ordNo) || [],
@@ -371,6 +451,52 @@
       log.textContent += result.log + '\n';
       log.scrollTop = log.scrollHeight;
       $('smu0707-download').disabled = !results.length;
+    }
+
+    function sampleList(values) {
+      const list = (values || []).slice(0, 5);
+      return list.join(', ') + ((values || []).length > list.length ? ' ...' : '');
+    }
+
+    function buildMetaLines(tasks) {
+      const meta = lastBuildMeta || {};
+      const lines = [
+        'Grid rows=' + (meta.gridRows ?? '?') + ', unique order targets=' + (meta.uniqueOrdNos ?? tasks.length) + ', tasks=' + tasks.length,
+        'Grid all-load: before=' + (meta.gridRowsBeforeAll ?? meta.gridRows ?? '?') + ', after=' + (meta.gridRows ?? '?') + ', clickedAll=' + (meta.clickedAllRows ? 'Y' : 'N'),
+        'Target basis: grid rows can differ from unique order targets when one order has multiple rows/items.',
+        'Picking matches=' + (meta.pickingMatchedOrders ?? 0) + ', picking hold rows=' + (meta.pickingHoldRows ?? 0) + ', picking drawer rows=' + (meta.pickingDrawerRows ?? 0)
+      ];
+      if (meta.missingOrdRows) lines.push('WARN: grid rows with empty order number=' + meta.missingOrdRows);
+      if ((meta.multiInvOrdNos || []).length) lines.push('WARN: orders with multiple invoices=' + meta.multiInvOrdNos.length + ' [' + sampleList(meta.multiInvOrdNos) + ']');
+      if ((meta.dbMissingOrdNos || []).length) lines.push('WARN: no DB shortage/picking/orders match=' + meta.dbMissingOrdNos.length + ' [' + sampleList(meta.dbMissingOrdNos) + ']');
+      return lines;
+    }
+
+    function summarizeResults() {
+      const statusCounts = {};
+      let unknown = 0;
+      let clearOff = 0;
+      let memo1Clear = 0;
+      let memo2Clear = 0;
+      let orderMemoClear = 0;
+      let holdOff = 0;
+      for (const r of results) {
+        statusCounts[r.status || ''] = (statusCounts[r.status || ''] || 0) + 1;
+        if (r.needsChange === 'UNKNOWN') unknown++;
+        if (normal(r.currentMemo1) && !normal(r.plannedMemo1)) memo1Clear++;
+        if (normal(r.currentMemo2) && !normal(r.plannedMemo2)) memo2Clear++;
+        if (normal(r.currentOrderMemo) && !normal(r.plannedOrderMemo)) orderMemoClear++;
+        if (r.currentHold === 'ON' && r.plannedHold === 'OFF') holdOff++;
+      }
+      clearOff = memo1Clear + memo2Clear + orderMemoClear + holdOff;
+      const blocking = !!(statusCounts.SKIP || statusCounts.DETAIL_FAIL || statusCounts.MATCH_FAIL || unknown);
+      const lines = [
+        'Summary: ' + Object.keys(statusCounts).sort().map(key => key + '=' + statusCounts[key]).join(', '),
+        'Clear/OFF candidates=' + clearOff + ' (memo1=' + memo1Clear + ', memo2=' + memo2Clear + ', orderMemo=' + orderMemoClear + ', holdOff=' + holdOff + ')'
+      ];
+      if (blocking) lines.push('LIVE WRITE BLOCKED: SKIP/DETAIL_FAIL/MATCH_FAIL/UNKNOWN exists.');
+      if (clearOff >= 10) lines.push('WARN: clear/OFF candidates are high. Review CSV before LIVE WRITE.');
+      return { blocking, clearOff, lines };
     }
 
     function failReason(message, task) {
@@ -424,20 +550,22 @@
           invNo: task.invNo || '',
           ordNo: task.ordNo || '',
           itemNo: '',
-          currentMemo1: '',
-          plannedMemo1: '',
-          currentMemo2: '',
-          plannedMemo2: '',
-          currentOrderMemo: '',
-          plannedOrderMemo: '',
-          currentHold: '',
-          plannedHold: '',
-          needsChange: 'N',
-          status: 'SKIP',
-          reason: task.reason,
-          actionSummary: 'skip',
-          log: 'SKIP: ' + (task.invNo || task.ordNo || '-') + ' / ' + task.reason
-        });
+        currentMemo1: '',
+        plannedMemo1: '',
+        currentMemo2: '',
+        plannedMemo2: '',
+        currentOrderMemo: '',
+        plannedOrderMemo: '',
+        currentHold: '',
+        plannedHold: '',
+        needsChange: 'N',
+        status: 'SKIP',
+        reason: task.reason,
+        dbMatchStatus: task.dbMatchStatus || '',
+        clearOffReason: '',
+        actionSummary: 'skip',
+        log: 'SKIP: ' + (task.invNo || task.ordNo || '-') + ' / ' + task.reason
+      });
         return;
       }
       const rows = rowsForTask(task);
@@ -457,6 +585,8 @@
           needsChange: 'UNKNOWN',
           status: 'MATCH_FAIL',
           reason: failReason('Sellpia grid row not found for this invoice/order in the currently loaded stockmatch list.', task),
+          dbMatchStatus: task.dbMatchStatus || '',
+          clearOffReason: '',
           actionSummary: 'grid row not found',
           log: 'MATCH_FAIL: ' + (task.invNo || task.ordNo || '-') + ' / grid row not found'
         });
@@ -481,6 +611,8 @@
           needsChange: 'UNKNOWN',
           status: 'DETAIL_FAIL',
           reason: failReason('Sellpia detail popup did not open for the matched row.', task),
+          dbMatchStatus: task.dbMatchStatus || '',
+          clearOffReason: '',
           actionSummary: 'detail open failed',
           log: 'DETAIL_FAIL: ' + (task.invNo || rowInvNo(first.item)) + ' / detail open failed'
         });
@@ -498,7 +630,7 @@
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i].item;
         const plannedMemo2 = task.clear ? '' : memo2ForGridRow(task, row, i);
-        const writeMemo2 = task.writeMemo2 && (task.clear || plannedMemo2 !== '');
+        const writeMemo2 = task.writeMemo2;
         const curMemo2 = normal(row.c_shop_memo2 || row.o_shop_memo2 || row.shop_memo2 || (i === 0 ? current.memo2 : ''));
         const memo2Changed = writeMemo2 && needsChange(curMemo2, plannedMemo2);
         const actionParts = [];
@@ -506,6 +638,11 @@
         if (memo2Changed) actionParts.push('관리메모2 ' + (plannedMemo2 || '(clear)'));
         if (orderMemoChanged && i === 0) actionParts.push('주문메모 ' + (plannedOrderMemo || '(clear)'));
         if (holdChanged && i === 0) actionParts.push('배송보류 ' + (plannedHold ? 'ON' : 'OFF'));
+        const clearOffParts = [];
+        if (i === 0 && normal(current.memo1) && !normal(plannedMemo1)) clearOffParts.push('관리메모 clear');
+        if (normal(curMemo2) && !normal(plannedMemo2)) clearOffParts.push('관리메모2 clear');
+        if (i === 0 && normal(current.orderMemo) && !normal(plannedOrderMemo)) clearOffParts.push('주문메모 clear');
+        if (i === 0 && current.hold && !plannedHold) clearOffParts.push('배송보류 OFF');
         const rowResult = {
           invNo: task.invNo || rowInvNo(row),
           ordNo: task.ordNo || rowOrdNo(row),
@@ -521,6 +658,8 @@
           needsChange: actionParts.length ? 'Y' : 'N',
           status: 'OK',
           reason: task.reason,
+          dbMatchStatus: task.dbMatchStatus || '',
+          clearOffReason: clearOffParts.join(' / '),
           actionSummary: actionParts.length ? actionParts.join(' / ') : '변경 없음',
           writeMemo1: i === 0 && task.writeMemo1,
           writeMemo2,
@@ -551,16 +690,18 @@
     }
 
     function downloadCsv() {
-      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','예정 관리메모','현재 관리메모2','예정 관리메모2','현재 주문메모','예정 주문메모','현재 배송보류','예정 배송보류','변경필요','상태','사유'];
+      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','예정 관리메모','현재 관리메모2','예정 관리메모2','현재 주문메모','예정 주문메모','현재 배송보류','예정 배송보류','변경필요','상태','사유','DB매칭상태','clear/OFF사유'];
       const lines = [headers.map(csvValue).join(',')];
       for (const r of results) {
-        lines.push([r.invNo,r.ordNo,r.itemNo,r.currentMemo1,r.plannedMemo1,r.currentMemo2,r.plannedMemo2,r.currentOrderMemo,r.plannedOrderMemo,r.currentHold,r.plannedHold,r.needsChange,r.status,r.reason].map(csvValue).join(','));
+        lines.push([r.invNo,r.ordNo,r.itemNo,r.currentMemo1,r.plannedMemo1,r.currentMemo2,r.plannedMemo2,r.currentOrderMemo,r.plannedOrderMemo,r.currentHold,r.plannedHold,r.needsChange,r.status,r.reason,r.dbMatchStatus,r.clearOffReason].map(csvValue).join(','));
       }
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sellpia_stockmatch_memo_test_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.csv';
+      const meta = lastBuildMeta || {};
+      const countSuffix = '_rows' + (meta.gridRows ?? 'x') + '_targets' + (meta.uniqueOrdNos ?? 'x');
+      a.download = 'sellpia_stockmatch_memo_test' + countSuffix + '_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.csv';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -626,12 +767,18 @@
         alert('Enter an invoice/order number or a date range.');
         return;
       }
+      if (!options.testMode && (!lastDryRunSummary || lastDryRunSummary.blocking)) {
+        alert('LIVE WRITE blocked. Run TEST MODE first and resolve SKIP/DETAIL_FAIL/MATCH_FAIL/UNKNOWN before saving.');
+        return;
+      }
       if (!options.testMode && !confirm('LIVE WRITE mode. This will save to Sellpia. Continue?')) return;
       try {
         const range = options.inv ? 'single target' : dateRange(options.startDate, options.endDate).label;
         $('smu0707-status').textContent = 'Building planned updates from DB/F.v1...\nRange: ' + range;
         const tasks = await buildTasks(options.inv, options.startDate, options.endDate);
-        $('smu0707-status').textContent = 'Read-testing ' + tasks.length + ' target(s)...\nRange: ' + range + '\nTEST MODE=' + (options.testMode ? 'ON (NO WRITE)' : 'OFF (LIVE WRITE)');
+        const metaLines = buildMetaLines(tasks);
+        $('smu0707-log').textContent += metaLines.join('\n') + '\n';
+        $('smu0707-status').textContent = 'Read-testing ' + tasks.length + ' target(s)...\nRange: ' + range + '\n' + metaLines.join('\n') + '\nTEST MODE=' + (options.testMode ? 'ON (NO WRITE / NO updateOrder / NO click / NO save)' : 'OFF (LIVE WRITE)');
         for (let i = 0; i < tasks.length; i++) {
           if (stopped) break;
           const task = tasks[i];
@@ -643,7 +790,10 @@
           await inspectTask(task, options);
           await sleep(120);
         }
-        $('smu0707-status').textContent = 'TEST MODE DONE: no Sellpia or DB changes\nResult rows: ' + results.length;
+        const summary = summarizeResults();
+        if (options.testMode) lastDryRunSummary = summary;
+        $('smu0707-log').textContent += summary.lines.join('\n') + '\n';
+        $('smu0707-status').textContent = (options.testMode ? 'TEST MODE DONE: no Sellpia or DB changes\nNO updateOrder / NO click / NO save\n' : 'LIVE WRITE DONE\n') + 'Result rows: ' + results.length + '\n' + summary.lines.join('\n');
       } catch (err) {
         $('smu0707-status').textContent = 'Error: ' + err.message;
         $('smu0707-log').textContent += (err.stack || err.message) + '\n';
