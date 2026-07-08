@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sellpia Stockmatch Memo Updater 0707</title>
+<title>Sellpia Stockmatch Memo Updater 0708-배치별실행가능</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background:#141414; color:#f0f0f0; font-family:Arial,'Noto Sans KR',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
@@ -18,7 +18,7 @@
 </head>
 <body>
 <div class="card">
-  <h1>Sellpia Stockmatch Memo Updater 0707</h1>
+  <h1>Sellpia Stockmatch Memo Updater 0708-배치별실행가능</h1>
   <div class="sub">재고매칭(order_stockmatch.html) 전용 / TEST MODE 기본 ON</div>
   <div class="note">
     <b>TEST MODE (NO WRITE)</b><br>
@@ -26,18 +26,19 @@
     관리메모/관리메모2/주문메모 저장, 배송보류 설정/해제, DB PATCH는 테스트모드에서 실행하지 않습니다.<br>
     결과 CSV에는 현재 셀피아 값, 시스템 예정값, 변경 필요 여부, 매칭 실패/상세없음 예외, 상태 사유가 들어갑니다.
   </div>
-  <a id="bookmarklet-link" class="btn" href="#">sellpia_stockmatch_memo_0707_safe</a>
+  <a id="bookmarklet-link" class="btn" href="#">sellpia_stockmatch_memo_0708_batch</a>
   <pre id="code-display">loading...</pre>
   <button id="copy-btn">코드 복사</button>
 </div>
 
 <script id="bookmarklet-source" type="text/plain">
 (function(){
-  (async function StockmatchMemoUpdater0707(){
+  (async function StockmatchMemoUpdater0708Batch(){
     const CONFIG = {
       supabaseUrl: 'https://vgxocngpykhlkosiaeew.supabase.co',
       supabaseKey: 'sb_publishable_XVnKGJo66GZiYTq5Ivu8dA_SjBVvX0g',
       batchSize: 80,
+      taskBatchSize: 50,
       popupDelay: 900,
       saveDelay: 900,
       confirmDelay: 800
@@ -968,6 +969,68 @@
       return list.join(', ') + ((values || []).length > list.length ? ' ...' : '');
     }
 
+    function taskBatchLabel(task) {
+      const inv = normal(task && task.invNo);
+      const ord = normal(task && task.ordNo);
+      if (inv && ord) return inv + ' / ' + ord;
+      return inv || ord || '-';
+    }
+
+    function sortTasksForBatch(tasks) {
+      return (tasks || []).map((task, index) => ({ task, index })).sort((left, right) => {
+        const invCompare = normal(left.task.invNo).localeCompare(normal(right.task.invNo));
+        if (invCompare) return invCompare;
+        const ordCompare = normal(left.task.ordNo).localeCompare(normal(right.task.ordNo));
+        if (ordCompare) return ordCompare;
+        return left.index - right.index;
+      }).map(entry => entry.task);
+    }
+
+    function selectTaskBatch(tasks, batchSize, batchNo) {
+      const sorted = sortTasksForBatch(tasks);
+      const total = sorted.length;
+      const batchTotal = Math.ceil(total / batchSize);
+      const start = (batchNo - 1) * batchSize;
+      const end = Math.min(start + batchSize, total);
+      const selected = sorted.slice(start, end);
+      return {
+        tasks: selected,
+        meta: {
+          batchEnabled: true,
+          batchSize,
+          batchNo,
+          batchTotal,
+          batchTotalTargets: total,
+          batchStart: start + 1,
+          batchEnd: end,
+          batchSelectedTargets: Math.max(0, end - start),
+          batchFirstTarget: taskBatchLabel(selected[0]),
+          batchLastTarget: taskBatchLabel(selected[selected.length - 1])
+        }
+      };
+    }
+
+    function promptTaskBatch(tasks, batchSize) {
+      const total = (tasks || []).length;
+      const batchTotal = Math.ceil(total / batchSize);
+      const input = prompt('총 ' + total + '개 대상, ' + batchSize + '개 단위, 총 ' + batchTotal + '배치입니다. 실행할 배치 번호를 입력하세요.');
+      if (input == null || !normal(input)) return null;
+      const batchNo = Number(normal(input));
+      if (!Number.isInteger(batchNo) || batchNo < 1 || batchNo > batchTotal) {
+        alert('배치 번호는 1부터 ' + batchTotal + ' 사이의 숫자로 입력해주세요.');
+        return null;
+      }
+      const selected = selectTaskBatch(tasks, batchSize, batchNo);
+      const meta = selected.meta;
+      const ok = confirm('배치 ' + meta.batchNo + '/' + meta.batchTotal + ' 실행 확인\n' +
+        '대상 index: ' + meta.batchStart + '-' + meta.batchEnd + ' / ' + meta.batchTotalTargets + '\n' +
+        '선택 대상 수: ' + meta.batchSelectedTargets + '\n' +
+        '첫 대상: ' + meta.batchFirstTarget + '\n' +
+        '마지막 대상: ' + meta.batchLastTarget + '\n\n' +
+        '이 배치만 실행할까요?');
+      return ok ? selected : null;
+    }
+
     function buildMetaLines(tasks) {
       const meta = lastBuildMeta || {};
       const lines = [
@@ -980,6 +1043,10 @@
       if ((meta.multiInvOrdNos || []).length) lines.push('WARN: orders with multiple invoices=' + meta.multiInvOrdNos.length + ' [' + sampleList(meta.multiInvOrdNos) + ']');
       if ((meta.dbMissingOrdNos || []).length) lines.push('WARN: no DB shortage/picking/orders match=' + meta.dbMissingOrdNos.length + ' [' + sampleList(meta.dbMissingOrdNos) + ']');
       if ((meta.optionalDbWarnings || []).length) lines.push('WARN optional DB read: ' + meta.optionalDbWarnings.join(' / '));
+      if (meta.batchEnabled) {
+        lines.push('Batch split: batch ' + meta.batchNo + '/' + meta.batchTotal + ', size=' + meta.batchSize + ', selected=' + meta.batchSelectedTargets + ', target index=' + meta.batchStart + '-' + meta.batchEnd + ' of ' + meta.batchTotalTargets);
+        lines.push('Batch targets: first=' + meta.batchFirstTarget + ', last=' + meta.batchLastTarget);
+      }
       return lines;
     }
 
@@ -1416,7 +1483,7 @@
       overlay.style.cssText = 'position:fixed;right:16px;top:80px;left:auto;bottom:auto;max-width:94vw;max-height:calc(100vh - 96px);overflow:auto;background:transparent;z-index:999999;font-family:Arial,sans-serif;';
       overlay.innerHTML =
         '<div style="width:560px;max-width:94vw;background:#111827;color:#fff;border:1px solid #334155;border-radius:12px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)">' +
-        '<div style="font-size:18px;font-weight:900;margin-bottom:4px">Stockmatch Memo Updater 0707</div>' +
+        '<div style="font-size:18px;font-weight:900;margin-bottom:4px">Stockmatch Memo Updater 0708-배치별실행가능</div>' +
         '<div style="font-size:12px;color:#93c5fd;margin-bottom:14px">TEST MODE (NO WRITE) is ON by default</div>' +
         '<label style="font-size:12px;color:#cbd5e1">Invoice / order number (optional)</label>' +
         '<input id="smu0707-inv" style="width:100%;height:38px;margin:5px 0 10px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff" placeholder="Blank = use date range">' +
@@ -1430,6 +1497,7 @@
         '<label><input id="smu0707-memo2" type="checkbox" checked> memo2</label>' +
         '<label><input id="smu0707-order-memo" type="checkbox" checked> order memo</label>' +
         '<label><input id="smu0707-hold" type="checkbox" checked> delivery hold</label>' +
+        '<label><input id="smu0707-split-batch" type="checkbox"> split 50 invoices</label>' +
         '</div>' +
         '<div style="display:flex;gap:8px;margin-bottom:12px">' +
         '<button id="smu0707-start" style="flex:1;height:40px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:900;cursor:pointer">Start read test</button>' +
@@ -1485,7 +1553,8 @@
         doMemo1: $('smu0707-memo1').checked,
         doMemo2: $('smu0707-memo2').checked,
         doOrderMemo: $('smu0707-order-memo').checked,
-        doHold: $('smu0707-hold').checked
+        doHold: $('smu0707-hold').checked,
+        splitBatch: $('smu0707-split-batch').checked
       };
       if (!options.inv && (!options.startDate || !options.endDate)) {
         alert('Enter an invoice/order number or a date range.');
@@ -1497,8 +1566,23 @@
         const range = options.inv ? 'single target' : dateRange(options.startDate, options.endDate).label;
         $('smu0707-status').textContent = 'Building planned updates from DB/F.v1...\nRange: ' + range;
         const buildStart = perfNow();
-        const tasks = await buildTasks(options.inv, options.startDate, options.endDate);
+        let tasks = await buildTasks(options.inv, options.startDate, options.endDate);
         const buildMs = perfMs(buildStart);
+        if (!options.inv && options.splitBatch) {
+          if (!tasks.length) {
+            alert('배치 분리 대상이 없습니다.');
+            return;
+          }
+          const selectedBatch = promptTaskBatch(tasks, CONFIG.taskBatchSize);
+          if (!selectedBatch) return;
+          tasks = selectedBatch.tasks;
+          lastBuildMeta = { ...(lastBuildMeta || {}), ...selectedBatch.meta };
+          $('smu0707-log').textContent += 'Batch split selected: before=' + selectedBatch.meta.batchTotalTargets + ', after=' + selectedBatch.meta.batchSelectedTargets + ', batch=' + selectedBatch.meta.batchNo + '/' + selectedBatch.meta.batchTotal + ', target index=' + selectedBatch.meta.batchStart + '-' + selectedBatch.meta.batchEnd + ', first=' + selectedBatch.meta.batchFirstTarget + ', last=' + selectedBatch.meta.batchLastTarget + '\n';
+          if (!tasks.length) {
+            alert('선택한 배치에 실행 대상이 없습니다.');
+            return;
+          }
+        }
         const metaLines = buildMetaLines(tasks);
         $('smu0707-log').textContent += metaLines.join('\n') + '\n' + 'PERF buildTasks=' + buildMs + 'ms\n';
         $('smu0707-status').textContent = 'Read-testing ' + tasks.length + ' target(s)...\nRange: ' + range + '\n' + metaLines.join('\n') + '\nTEST MODE=' + (options.testMode ? 'ON (NO WRITE / NO updateOrder / NO click / NO save)' : 'OFF (LIVE WRITE)');
@@ -1509,7 +1593,10 @@
           if (!options.doMemo2) task.writeMemo2 = false;
           if (!options.doOrderMemo) task.writeOrderMemo = false;
           if (!options.doHold) task.writeHold = false;
-          $('smu0707-status').textContent = '[' + (i + 1) + '/' + tasks.length + '] ' + (task.invNo || task.ordNo || '-') + '\n' + task.reason;
+          const batchLine = lastBuildMeta && lastBuildMeta.batchEnabled
+            ? 'Batch ' + lastBuildMeta.batchNo + '/' + lastBuildMeta.batchTotal + ', global target ' + (lastBuildMeta.batchStart + i) + '/' + lastBuildMeta.batchTotalTargets + '\n'
+            : '';
+          $('smu0707-status').textContent = '[' + (i + 1) + '/' + tasks.length + '] ' + (task.invNo || task.ordNo || '-') + '\n' + batchLine + task.reason;
           await inspectTask(task, options);
           await sleep(120);
         }
@@ -1519,7 +1606,10 @@
         const doneTitle = options.testMode
           ? 'TEST MODE DONE: no Sellpia or DB changes\nNO updateOrder / NO click / NO save\n'
           : (summary.blocking ? 'LIVE WRITE PARTIAL/FAILED\n' : 'LIVE WRITE DONE\n');
-        $('smu0707-status').textContent = doneTitle + 'Result rows: ' + results.length + '\n' + summary.lines.join('\n');
+        const doneBatchLine = lastBuildMeta && lastBuildMeta.batchEnabled
+          ? 'Batch ' + lastBuildMeta.batchNo + '/' + lastBuildMeta.batchTotal + ', target index=' + lastBuildMeta.batchStart + '-' + lastBuildMeta.batchEnd + ' of ' + lastBuildMeta.batchTotalTargets + '\n'
+          : '';
+        $('smu0707-status').textContent = doneTitle + doneBatchLine + 'Result rows: ' + results.length + '\n' + summary.lines.join('\n');
       } catch (err) {
         $('smu0707-status').textContent = 'Error: ' + err.message;
         $('smu0707-log').textContent += (err.stack || err.message) + '\n';
@@ -1530,7 +1620,7 @@
 
     makeOverlay();
   })().catch(function(err){
-    console.error('[Stockmatch Memo Updater 0707]', err);
+    console.error('[Stockmatch Memo Updater 0708-배치별실행가능]', err);
     alert('Stockmatch Memo Updater error: ' + (err && err.message ? err.message : err));
   });
 })();
