@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sellpia Stockmatch Memo Updater 0708-배치별실행가능</title>
+<title>Sellpia Stockmatch Memo Updater 0709-관리메모2수정</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background:#141414; color:#f0f0f0; font-family:Arial,'Noto Sans KR',sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
@@ -18,7 +18,7 @@
 </head>
 <body>
 <div class="card">
-  <h1>Sellpia Stockmatch Memo Updater 0708-배치별실행가능</h1>
+  <h1>Sellpia Stockmatch Memo Updater 0709-관리메모2수정</h1>
   <div class="sub">재고매칭(order_stockmatch.html) 전용 / TEST MODE 기본 ON</div>
   <div class="note">
     <b>TEST MODE (NO WRITE)</b><br>
@@ -26,14 +26,14 @@
     관리메모/관리메모2/주문메모 저장, 배송보류 설정/해제, DB PATCH는 테스트모드에서 실행하지 않습니다.<br>
     결과 CSV에는 현재 셀피아 값, 시스템 예정값, 변경 필요 여부, 매칭 실패/상세없음 예외, 상태 사유가 들어갑니다.
   </div>
-  <a id="bookmarklet-link" class="btn" href="#">sellpia_stockmatch_memo_0708_batch</a>
+  <a id="bookmarklet-link" class="btn" href="#">sellpia_stockmatch_memo_0709_memo2</a>
   <pre id="code-display">loading...</pre>
   <button id="copy-btn">코드 복사</button>
 </div>
 
 <script id="bookmarklet-source" type="text/plain">
 (function(){
-  (async function StockmatchMemoUpdater0708Batch(){
+  (async function StockmatchMemoUpdater0709Memo2Fix(){
     const CONFIG = {
       supabaseUrl: 'https://vgxocngpykhlkosiaeew.supabase.co',
       supabaseKey: 'sb_publishable_XVnKGJo66GZiYTq5Ivu8dA_SjBVvX0g',
@@ -559,10 +559,19 @@
     function addMemo2Alias(map, row, ordNo, value, overwrite) {
       const val = normal(value);
       if (!val) return;
-      [row.item_no, row.sellpia_order_item_no, row.p_code, row.sellpia_p_code].forEach(key => {
+      [row.item_no, row.sellpia_order_item_no, row.sellpia_item_no, row.p_code, row.sellpia_p_code, row.sellpia_product_code].forEach(key => {
         const k = normal(key);
         if (k && (overwrite || !map.has(k))) map.set(k, val);
         if (k && ordNo && (overwrite || !map.has(ordNo + '::' + k))) map.set(ordNo + '::' + k, val);
+      });
+    }
+
+    function addItemClearAlias(set, row, ordNo) {
+      [row.item_no, row.sellpia_order_item_no, row.sellpia_item_no, row.p_code, row.sellpia_p_code, row.sellpia_product_code].forEach(key => {
+        const k = normal(key);
+        if (!k) return;
+        set.add(k);
+        if (ordNo) set.add(ordNo + '::' + k);
       });
     }
 
@@ -579,6 +588,7 @@
     }
 
     function memo2ForGridRow(task, row, index) {
+      if (memo2ClearForGridRow(task, row, index)) return '';
       const keys = [
         rowItemNo(row, index),
         normal(row.c_prv_item_no),
@@ -593,6 +603,21 @@
         if (task.memo2Map.has(key)) return task.memo2Map.get(key);
       }
       return '';
+    }
+
+    function memo2ClearForGridRow(task, row, index) {
+      if (!task || !task.memo2ClearMap) return false;
+      const keys = [
+        rowItemNo(row, index),
+        normal(row.c_prv_item_no),
+        normal(row.c_p_code),
+        normal(row.c_dp_code),
+        task.ordNo + '::' + rowItemNo(row, index),
+        task.ordNo + '::' + normal(row.c_prv_item_no),
+        task.ordNo + '::' + normal(row.c_p_code),
+        task.ordNo + '::' + normal(row.c_dp_code)
+      ].filter(Boolean);
+      return keys.some(key => task.memo2ClearMap.has(key));
     }
 
     function orderMemoForGridRow(task, row, index) {
@@ -654,7 +679,24 @@
       return doneMap;
     }
 
-    function buildTask(invNo, ordNo, shortageRows, pickingRows, orderRowsInput, orderItemRowsInput, workflowDone) {
+    function workflowItemDoneByOrdNo(rows) {
+      const doneMap = new Map();
+      for (const row of rows || []) {
+        const ord = normal(row.order_group_no || row.ord_no);
+        if (!ord) continue;
+        if (normal(row.event_type) !== 'shortage_repick_completed') continue;
+        if (!doneMap.has(ord)) {
+          doneMap.set(ord, { rows: [], lastAt: '', count: 0 });
+        }
+        const entry = doneMap.get(ord);
+        entry.rows.push(row);
+        entry.count++;
+        entry.lastAt = row.event_at || row.created_at || entry.lastAt;
+      }
+      return doneMap;
+    }
+
+    function buildTask(invNo, ordNo, shortageRows, pickingRows, orderRowsInput, orderItemRowsInput, workflowDone, workflowItemDone) {
       const orderRows = Array.isArray(orderRowsInput) ? orderRowsInput : (orderRowsInput ? [orderRowsInput] : []);
       const orderItemRows = Array.isArray(orderItemRowsInput) ? orderItemRowsInput : (orderItemRowsInput ? [orderItemRowsInput] : []);
       const firstOrderRow = orderRows[0] || {};
@@ -663,6 +705,7 @@
         ordNo: normal(ordNo || firstOrderRow?.ord_no),
         memo1: '',
         memo2Map: new Map(),
+        memo2ClearMap: new Set(),
         orderMemo: normal(firstOrderRow?.order_memo || firstOrderRow?.o_memo),
         orderMemoMap: new Map(),
         hold: false,
@@ -680,12 +723,14 @@
       const hasPickingMatch = !!(pickingRows || []).length;
       const hasOrderMatch = orderRows.some(row => !!normal(row?.ord_no));
       const hasOrderItemsMemo2 = orderItemRows.some(row => !!normal(row?.o_shop_memo2));
+      const workflowItemDoneRows = (workflowItemDone && workflowItemDone.rows) || [];
       const hasDbMatch = hasShortageMatch || hasPickingMatch || hasOrderMatch || hasOrderItemsMemo2;
       task.dbMatchStatus = [
         hasShortageMatch ? 'shortage' : '',
         hasPickingMatch ? 'picking' : '',
         hasOrderMatch ? 'orders' : '',
         hasOrderItemsMemo2 ? 'order_items_memo2' : '',
+        workflowItemDoneRows.length ? 'workflow_item_done' : '',
         workflowDone?.done ? 'workflow_done' : ''
       ].filter(Boolean).join('+') || 'DB 매칭 없음';
 
@@ -703,7 +748,7 @@
         if (!task.memo1 && drawer && drawer !== 'EMPTY') task.memo1 = drawer;
         if (isDoneStatus(status)) doneRows.push(row);
         else if (isNextShipStatus(status)) nextShipRows.push(row);
-        else if (drawer || normal(row.memo2_val) || status === '보류' || status === '배송대기' || status === '서랍입력') activeRows.push(row);
+        else if (drawer || status === '보류' || status === '배송대기' || status === '서랍입력') activeRows.push(row);
       }
 
       if (doneRows.length || workflowDone?.done) {
@@ -725,29 +770,33 @@
 
       if (nextShipRows.length && !activeRows.length) {
         task.memo1 = task.memo1 || '!!';
-        for (const row of nextShipRows) addMemo2Alias(task.memo2Map, row, task.ordNo, normal(row.memo2_val) || 'ㅁ', false);
       }
 
+      for (const row of workflowItemDoneRows) addItemClearAlias(task.memo2ClearMap, row, task.ordNo);
       for (const row of orderItemRows) addMemo2Alias(task.memo2Map, row, task.ordNo, row.o_shop_memo2, true);
-      for (const row of activeRows) addMemo2Alias(task.memo2Map, row, task.ordNo, row.memo2_val, false);
       for (const row of orderRows) addOrderMemoAlias(task.orderMemoMap, row, task.ordNo, normal(row.order_memo || row.o_memo));
 
       const hasMemo1Value = !!normal(task.memo1);
       const hasMemo2Value = task.memo2Map.size > 0;
+      const hasMemo2Clear = task.memo2ClearMap.size > 0;
       const hasSystemMatch = hasShortageMatch || hasPickingMatch;
       const hasOrderMemoValue = hasSystemMatch && (!!normal(task.orderMemo) || task.orderMemoMap.size > 0);
       const memo1HoldSignal = hasMemo1Value && !isSellerOrderMemo(task.memo1);
       const hasHoldSignal = activeRows.length > 0 || hasPickingMatch || task.hold || memo1HoldSignal || hasMemo2Value;
 
       task.writeMemo1 = hasMemo1Value;
-      task.writeMemo2 = hasMemo2Value;
+      task.writeMemo2 = hasMemo2Value || hasMemo2Clear;
       task.writeOrderMemo = hasOrderMemoValue;
       task.writeHold = hasHoldSignal;
 
       if (hasHoldSignal) task.hold = true;
 
-      if (task.writeMemo1 || task.writeMemo2 || task.writeOrderMemo || task.writeHold) {
-        task.reason = '잔여 메모/보류 대상: 서랍번호, memo2_val 텍스트, 주문메모 또는 배송보류 반영';
+      if (hasMemo2Clear && !(task.writeMemo1 || hasMemo2Value || task.writeOrderMemo || task.writeHold)) {
+        task.reason = '미송피킹완료(workflow_item): 관리메모2 clear';
+      } else if (task.writeMemo1 || task.writeMemo2 || task.writeOrderMemo || task.writeHold) {
+        task.reason = hasMemo2Clear
+          ? '미송피킹완료(workflow_item) 포함: 관리메모2 clear + 잔여 메모/보류 대상 반영'
+          : '잔여 메모/보류 대상: 서랍번호, 주문메모 또는 배송보류 반영';
       } else {
         task.reason = '시스템 반영값 없음: 현재 셀피아 값 CSV 확인만, LIVE write 제외';
       }
@@ -785,34 +834,38 @@
           }
           const invNoFromDb = normal((dbSeed.find(row => normal(row.inv_no)) || {}).inv_no) || target;
           lastBuildMeta.uniqueOrdNos = 1;
-          const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows] = await Promise.all([
+          const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows, workflowItemRows] = await Promise.all([
             dbRequestIn('shortage', 'ord_no', [ordNoFromDb], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
             dbRequestIn('picking', 'ord_no', [ordNoFromDb], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
             dbRequestIn('orders', 'ord_no', [ordNoFromDb], 'ord_no,inv_no,order_memo,o_memo'),
             dbRequestIn('order_items', 'ord_no', [ordNoFromDb], 'ord_no,item_no,sellpia_order_item_no,p_code,o_shop_memo2'),
-            safeDbRequestIn('workflow_invoice_events', 'order_group_no', [ordNoFromDb], 'order_group_no,event_type,event_at,created_at,id,memo')
+            safeDbRequestIn('workflow_invoice_events', 'order_group_no', [ordNoFromDb], 'order_group_no,event_type,event_at,created_at,id,memo'),
+            safeDbRequestIn('workflow_item_events', 'order_group_no', [ordNoFromDb], 'order_group_no,event_type,event_at,created_at,id,sellpia_item_no,sellpia_product_code')
           ]);
           const workflowDoneMap = workflowDoneByOrdNo(workflowRows);
+          const workflowItemDoneMap = workflowItemDoneByOrdNo(workflowItemRows);
           lastBuildMeta.pickingMatchedOrders = [...new Set((pickingRows || []).map(row => normal(row.ord_no)).filter(Boolean))].length;
           lastBuildMeta.pickingHoldRows = (pickingRows || []).filter(row => !!row.hold).length;
           lastBuildMeta.pickingDrawerRows = (pickingRows || []).filter(row => normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY').length;
-          return [buildTask(invNoFromDb, ordNoFromDb, shortageRows, pickingRows, orderRows || [], orderItemRows || [], workflowDoneMap.get(ordNoFromDb))];
+          return [buildTask(invNoFromDb, ordNoFromDb, shortageRows, pickingRows, orderRows || [], orderItemRows || [], workflowDoneMap.get(ordNoFromDb), workflowItemDoneMap.get(ordNoFromDb))];
         }
         const ordNo = rowOrdNo(hit.item);
         const invNo = rowInvNo(hit.item) || target;
         lastBuildMeta = { mode: 'single', gridRows: gridItems().length, uniqueOrdNos: ordNo ? 1 : 0, missingOrdRows: ordNo ? 0 : 1, multiInvOrdNos: [], dbMissingOrdNos: [] };
-        const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows] = await Promise.all([
+        const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows, workflowItemRows] = await Promise.all([
           dbRequestIn('shortage', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
           dbRequestIn('picking', 'ord_no', [ordNo], 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
           dbRequestIn('orders', 'ord_no', [ordNo], 'ord_no,inv_no,order_memo,o_memo'),
           dbRequestIn('order_items', 'ord_no', [ordNo], 'ord_no,item_no,sellpia_order_item_no,p_code,o_shop_memo2'),
-          safeDbRequestIn('workflow_invoice_events', 'order_group_no', [ordNo], 'order_group_no,event_type,event_at,created_at,id,memo')
+          safeDbRequestIn('workflow_invoice_events', 'order_group_no', [ordNo], 'order_group_no,event_type,event_at,created_at,id,memo'),
+          safeDbRequestIn('workflow_item_events', 'order_group_no', [ordNo], 'order_group_no,event_type,event_at,created_at,id,sellpia_item_no,sellpia_product_code')
         ]);
         const workflowDoneMap = workflowDoneByOrdNo(workflowRows);
+        const workflowItemDoneMap = workflowItemDoneByOrdNo(workflowItemRows);
         lastBuildMeta.pickingMatchedOrders = [...new Set((pickingRows || []).map(row => normal(row.ord_no)).filter(Boolean))].length;
         lastBuildMeta.pickingHoldRows = (pickingRows || []).filter(row => !!row.hold).length;
         lastBuildMeta.pickingDrawerRows = (pickingRows || []).filter(row => normal(row.drawer_no) && normal(row.drawer_no) !== 'EMPTY').length;
-        return [buildTask(invNo, ordNo, shortageRows, pickingRows, orderRows || [], orderItemRows || [], workflowDoneMap.get(ordNo))];
+        return [buildTask(invNo, ordNo, shortageRows, pickingRows, orderRows || [], orderItemRows || [], workflowDoneMap.get(ordNo), workflowItemDoneMap.get(ordNo))];
       }
 
       const loadMeta = await ensureAllGridRowsLoaded();
@@ -848,12 +901,13 @@
         multiInvOrdNos,
         dbMissingOrdNos: []
       };
-      const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows] = await Promise.all([
+      const [shortageRows, pickingRows, orderRows, orderItemRows, workflowRows, workflowItemRows] = await Promise.all([
         dbRequestIn('shortage', 'ord_no', ordNos, 'inv_no,ord_no,item_no,p_code,sellpia_p_code,status,memo2_val,drawer_no,updated_at'),
         dbRequestIn('picking', 'ord_no', ordNos, 'inv_no,ord_no,item_no,p_code,sellpia_p_code,hold,drawer_no'),
         dbRequestIn('orders', 'ord_no', ordNos, 'ord_no,inv_no,order_memo,o_memo'),
         dbRequestIn('order_items', 'ord_no', ordNos, 'ord_no,item_no,sellpia_order_item_no,p_code,o_shop_memo2'),
-        safeDbRequestIn('workflow_invoice_events', 'order_group_no', ordNos, 'order_group_no,event_type,event_at,created_at,id,memo')
+        safeDbRequestIn('workflow_invoice_events', 'order_group_no', ordNos, 'order_group_no,event_type,event_at,created_at,id,memo'),
+        safeDbRequestIn('workflow_item_events', 'order_group_no', ordNos, 'order_group_no,event_type,event_at,created_at,id,sellpia_item_no,sellpia_product_code')
       ]);
       const shortageMap = byOrd(shortageRows);
       const pickingMap = byOrd(pickingRows);
@@ -861,6 +915,7 @@
       const orderRowsMap = byOrd(orderRows);
       const orderMap = new Map((orderRows || []).map(row => [normal(row.ord_no), row]));
       const workflowDoneMap = workflowDoneByOrdNo(workflowRows);
+      const workflowItemDoneMap = workflowItemDoneByOrdNo(workflowItemRows);
       const dbMissingOrdNos = ordNos.filter(ordNo => !(shortageMap.get(ordNo) || []).length && !(pickingMap.get(ordNo) || []).length && !orderMap.has(ordNo) && !(orderItemMap.get(ordNo) || []).length);
       const pickingMatchedOrders = [...new Set((pickingRows || []).map(row => normal(row.ord_no)).filter(Boolean))].length;
       const pickingHoldRows = (pickingRows || []).filter(row => !!row.hold).length;
@@ -887,7 +942,8 @@
         pickingMap.get(ordNo) || [],
         orderRowsMap.get(ordNo) || [],
         orderItemMap.get(ordNo) || [],
-        workflowDoneMap.get(ordNo)
+        workflowDoneMap.get(ordNo),
+        workflowItemDoneMap.get(ordNo)
       ));
     }
 
@@ -1234,6 +1290,7 @@
         rowPerf.openRoot = openInfo && openInfo.rootKind;
         rowPerf.openReady = openInfo && openInfo.ready ? 'Y' : 'N';
         if (!root) {
+          const plannedMemo2WithoutRoot = task.clear ? '' : memo2ForGridRow(task, row, i);
           addResult(withPerf({
             invNo: task.invNo || rowInvNo(row),
             ordNo: task.ordNo || rowOrdNo(row),
@@ -1242,7 +1299,7 @@
             currentMemo1: '',
             plannedMemo1: task.clear ? '' : task.memo1,
             currentMemo2: '',
-            plannedMemo2: task.clear ? '' : memo2ForGridRow(task, row, i),
+            plannedMemo2: plannedMemo2WithoutRoot,
             currentOrderMemo: '',
             plannedOrderMemo: task.clear ? '' : orderMemoForGridRow(task, row, i),
             currentHold: '',
@@ -1270,9 +1327,11 @@
           const memo1Changed = task.writeMemo1 && needsChange(current.memo1, plannedMemo1);
           const orderMemoChanged = task.writeOrderMemo && needsChange(current.orderMemo, plannedOrderMemo);
           const holdChanged = task.writeHold && !!current.hold !== plannedHold;
-        const writeMemo2 = task.writeMemo2;
+        const rowMemo2Clear = memo2ClearForGridRow(task, row, i);
           const curMemo2 = current.memo2;
-        const plannedMemo2 = task.clear ? '' : (writeMemo2 ? memo2ForGridRow(task, row, i) : curMemo2);
+        const rowPlannedMemo2 = memo2ForGridRow(task, row, i);
+        const writeMemo2 = task.writeMemo2 && (task.clear || rowMemo2Clear || !!normal(rowPlannedMemo2));
+        const plannedMemo2 = task.clear ? '' : (writeMemo2 ? rowPlannedMemo2 : curMemo2);
         const memo2Changed = writeMemo2 && needsChange(curMemo2, plannedMemo2);
         const actionParts = [];
           if (memo1Changed) actionParts.push('관리메모 ' + (plannedMemo1 || '(clear)'));
@@ -1483,7 +1542,7 @@
       overlay.style.cssText = 'position:fixed;right:16px;top:80px;left:auto;bottom:auto;max-width:94vw;max-height:calc(100vh - 96px);overflow:auto;background:transparent;z-index:999999;font-family:Arial,sans-serif;';
       overlay.innerHTML =
         '<div style="width:560px;max-width:94vw;background:#111827;color:#fff;border:1px solid #334155;border-radius:12px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)">' +
-        '<div style="font-size:18px;font-weight:900;margin-bottom:4px">Stockmatch Memo Updater 0708-배치별실행가능</div>' +
+        '<div style="font-size:18px;font-weight:900;margin-bottom:4px">Stockmatch Memo Updater 0709-관리메모2수정</div>' +
         '<div style="font-size:12px;color:#93c5fd;margin-bottom:14px">TEST MODE (NO WRITE) is ON by default</div>' +
         '<label style="font-size:12px;color:#cbd5e1">Invoice / order number (optional)</label>' +
         '<input id="smu0707-inv" style="width:100%;height:38px;margin:5px 0 10px;padding:0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff" placeholder="Blank = use date range">' +
@@ -1620,7 +1679,7 @@
 
     makeOverlay();
   })().catch(function(err){
-    console.error('[Stockmatch Memo Updater 0708-배치별실행가능]', err);
+    console.error('[Stockmatch Memo Updater 0709-관리메모2수정]', err);
     alert('Stockmatch Memo Updater error: ' + (err && err.message ? err.message : err));
   });
 })();
