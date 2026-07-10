@@ -727,18 +727,32 @@
       return normal(task.orderMemo) ? 'invoice_level_reference' : 'none';
     }
 
+    function plannedOrderMemoForGridRow(task, row, index, currentOrderMemo) {
+      if (task.clear) return '';
+      const itemTarget = orderMemoForGridRow(task, row, index);
+      if (task.writeOrderMemo && normal(itemTarget)) return itemTarget;
+      return currentOrderMemo;
+    }
+
     function currentWarningsForGridRow(task, row, index, planned) {
       const match = gridItemMatchInfo(task, row, index);
       const keys = gridItemAliasKeys(task, row, index);
       const warnings = [];
       const memo2Target = memo2ForGridRow(task, row, index);
       const orderMemoSource = orderMemoSourceForGridRow(task, row, index);
+      const currentOrderMemo = normal(planned?.currentOrderMemo);
+      const plannedOrderMemo = normal(planned?.plannedOrderMemo);
+      const orderMemoTarget = normal(planned?.orderMemoTarget);
       if (match.failed) warnings.push(match.warning || 'item_key_match_failed');
       if (keys.some(key => task.memo2ConflictMap?.has(key))) warnings.push('memo2_event_conflict');
       if (task.clear && memo2Target) warnings.push('completed_but_memo2_exists');
       if (task.clear && memo2Target) warnings.push('inspection_completed_with_shortage_open');
       if (!task.dbMatchStatus || task.dbMatchStatus === 'DB 매칭 없음') warnings.push('missing_current_source');
-      if (!task.clear && normal(planned?.orderMemoTarget) && !normal(planned?.plannedOrderMemo)) warnings.push('pre_inspection_order_memo_clear');
+      if (!task.clear && orderMemoTarget && !plannedOrderMemo) warnings.push('pre_inspection_order_memo_clear');
+      if (!task.clear && currentOrderMemo && !plannedOrderMemo && !orderMemoTarget && (orderMemoSource === 'invoice_level_reference' || orderMemoSource === 'none')) {
+        warnings.push('order_memo_clear_without_item_target');
+        if (orderMemoSource === 'invoice_level_reference') warnings.push('invoice_level_order_memo_clear');
+      }
       return [...new Set(warnings)];
     }
 
@@ -751,7 +765,9 @@
         'completed_but_memo2_exists',
         'inspection_completed_with_shortage_open',
         'missing_current_source',
-        'pre_inspection_order_memo_clear'
+        'pre_inspection_order_memo_clear',
+        'order_memo_clear_without_item_target',
+        'invoice_level_order_memo_clear'
       ];
       if (hardBlock.some(type => list.has(type))) return 'N';
       if (list.has('order_memo_fallback_invoice_level') || list.has('memo1_conflict') || list.has('completed_then_reopened')) return 'REVIEW';
@@ -1128,6 +1144,8 @@
       log.textContent += result.log + '\n';
       log.scrollTop = log.scrollHeight;
       $('smu0707-download').disabled = !results.length;
+      const issueBtn = $('smu0707-issue-download');
+      if (issueBtn) issueBtn.disabled = !results.some(isIssueResult);
     }
 
     function perfNow() {
@@ -1281,27 +1299,39 @@
       const statusCounts = {};
       const liveCounts = {};
       let unknown = 0;
+      let issueCount = 0;
       let clearOff = 0;
+      let clearOffLiveY = 0;
       let memo1Clear = 0;
       let memo2Clear = 0;
       let orderMemoClear = 0;
       let holdOff = 0;
+      let holdOffLiveY = 0;
       for (const r of results) {
         statusCounts[r.status || ''] = (statusCounts[r.status || ''] || 0) + 1;
         liveCounts[r.liveWriteAllowed || ''] = (liveCounts[r.liveWriteAllowed || ''] || 0) + 1;
         if (r.needsChange === 'UNKNOWN') unknown++;
+        if (isIssueResult(r)) issueCount++;
         if (r.needsChange === 'SNAPSHOT') continue;
-        if (normal(r.currentMemo1) && !normal(r.plannedMemo1)) memo1Clear++;
-        if (normal(r.currentMemo2) && !normal(r.plannedMemo2)) memo2Clear++;
-        if (normal(r.currentOrderMemo) && !normal(r.plannedOrderMemo)) orderMemoClear++;
-        if (r.currentHold === 'ON' && r.plannedHold === 'OFF') holdOff++;
+        const rowMemo1Clear = normal(r.currentMemo1) && !normal(r.plannedMemo1);
+        const rowMemo2Clear = normal(r.currentMemo2) && !normal(r.plannedMemo2);
+        const rowOrderMemoClear = normal(r.currentOrderMemo) && !normal(r.plannedOrderMemo);
+        const rowHoldOff = r.currentHold === 'ON' && r.plannedHold === 'OFF';
+        if (rowMemo1Clear) memo1Clear++;
+        if (rowMemo2Clear) memo2Clear++;
+        if (rowOrderMemoClear) orderMemoClear++;
+        if (rowHoldOff) holdOff++;
+        if (r.liveWriteAllowed === 'Y' && (rowMemo1Clear || rowMemo2Clear || rowOrderMemoClear || rowHoldOff)) clearOffLiveY++;
+        if (r.liveWriteAllowed === 'Y' && rowHoldOff) holdOffLiveY++;
       }
       clearOff = memo1Clear + memo2Clear + orderMemoClear + holdOff;
       const blocking = !!(statusCounts.SKIP || statusCounts.DETAIL_FAIL || statusCounts.MATCH_FAIL || statusCounts.WRITE_FAIL || statusCounts.PARTIAL_FAIL || unknown);
       const lines = [
         'Summary: ' + Object.keys(statusCounts).sort().map(key => key + '=' + statusCounts[key]).join(', '),
         'live_write_allowed: ' + Object.keys(liveCounts).sort().map(key => (key || 'blank') + '=' + liveCounts[key]).join(', '),
-        'Clear/OFF candidates=' + clearOff + ' (memo1=' + memo1Clear + ', memo2=' + memo2Clear + ', orderMemo=' + orderMemoClear + ', holdOff=' + holdOff + ')'
+        'Issue rows (blocked/fail/warning/unknown)=' + issueCount,
+        'Clear/OFF candidates=' + clearOff + ' (memo1=' + memo1Clear + ', memo2=' + memo2Clear + ', orderMemo=' + orderMemoClear + ', holdOff=' + holdOff + ')',
+        'LIVE Y Clear/OFF candidates=' + clearOffLiveY + ' (holdOff=' + holdOffLiveY + ')'
       ];
       if (blocking) lines.push('LIVE WRITE BLOCKED/PARTIAL: SKIP/DETAIL_FAIL/MATCH_FAIL/WRITE_FAIL/PARTIAL_FAIL/UNKNOWN exists.');
       if (clearOff >= 10) lines.push('WARN: clear/OFF candidates are high. Review CSV before LIVE WRITE.');
@@ -1442,7 +1472,8 @@
         const rowPerf = newPerf();
         if (canGridFastSkip(task, row)) {
           const current = gridCurrentValues(row);
-          const policy = buildRowPolicyMeta(task, row, i, { plannedOrderMemo: '' });
+          const plannedOrderMemo = plannedOrderMemoForGridRow(task, row, i, current.orderMemo);
+          const policy = buildRowPolicyMeta(task, row, i, { currentOrderMemo: current.orderMemo, plannedOrderMemo });
           addResult(withPerf({
             invNo: task.invNo || rowInvNo(row),
             ordNo: task.ordNo || rowOrdNo(row),
@@ -1453,7 +1484,7 @@
             currentMemo2: current.memo2,
             plannedMemo2: '',
             currentOrderMemo: current.orderMemo,
-            plannedOrderMemo: '',
+            plannedOrderMemo,
             currentHold: current.hold,
             plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
             needsChange: 'N',
@@ -1483,7 +1514,8 @@
         rowPerf.openReady = openInfo && openInfo.ready ? 'Y' : 'N';
         if (!root) {
           const plannedMemo2WithoutRoot = task.clear ? '' : memo2ForGridRow(task, row, i);
-          const policy = buildRowPolicyMeta(task, row, i, { plannedOrderMemo: task.clear ? '' : orderMemoForGridRow(task, row, i) });
+          const plannedOrderMemoWithoutRoot = plannedOrderMemoForGridRow(task, row, i, '');
+          const policy = buildRowPolicyMeta(task, row, i, { plannedOrderMemo: plannedOrderMemoWithoutRoot });
           addResult(withPerf({
             invNo: task.invNo || rowInvNo(row),
             ordNo: task.ordNo || rowOrdNo(row),
@@ -1494,7 +1526,7 @@
             currentMemo2: '',
             plannedMemo2: plannedMemo2WithoutRoot,
             currentOrderMemo: '',
-            plannedOrderMemo: task.clear ? '' : orderMemoForGridRow(task, row, i),
+            plannedOrderMemo: plannedOrderMemoWithoutRoot,
             currentHold: '',
             plannedHold: task.writeHold ? (task.hold ? 'ON' : 'OFF') : '',
             needsChange: 'UNKNOWN',
@@ -1523,11 +1555,13 @@
           const current = readCurrentValues(root, row);
           rowPerf.readMs = perfMs(readStart);
           const plannedMemo1 = task.clear ? '' : (task.writeMemo1 ? task.memo1 : current.memo1);
-          const plannedOrderMemo = task.clear ? '' : (task.writeOrderMemo ? orderMemoForGridRow(task, row, i) : current.orderMemo);
+          const orderMemoTarget = orderMemoForGridRow(task, row, i);
+          const canWriteOrderMemo = task.writeOrderMemo && !!normal(orderMemoTarget);
+          const plannedOrderMemo = plannedOrderMemoForGridRow(task, row, i, current.orderMemo);
           const plannedHold = task.clear ? false : (task.writeHold ? !!task.hold : !!current.hold);
-          const policy = buildRowPolicyMeta(task, row, i, { plannedOrderMemo });
+          const policy = buildRowPolicyMeta(task, row, i, { currentOrderMemo: current.orderMemo, plannedOrderMemo });
           const memo1Changed = task.writeMemo1 && needsChange(current.memo1, plannedMemo1);
-          const orderMemoChanged = task.writeOrderMemo && needsChange(current.orderMemo, plannedOrderMemo);
+          const orderMemoChanged = task.writeOrderMemo && (task.clear || canWriteOrderMemo) && needsChange(current.orderMemo, plannedOrderMemo);
           const holdChanged = task.writeHold && !!current.hold !== plannedHold;
         const rowMemo2Clear = memo2ClearForGridRow(task, row, i);
           const curMemo2 = current.memo2;
@@ -1577,6 +1611,11 @@
             writeOrderMemo: orderMemoChanged,
             writeHold: holdChanged
         };
+        if (rowResult.writeOrderMemo && normal(rowResult.currentOrderMemo) && !normal(rowResult.plannedOrderMemo) && !task.clear) {
+          const extraWarning = 'order_memo_clear_without_item_target';
+          rowResult.liveWriteAllowed = 'N';
+          rowResult.currentStateWarning = [rowResult.currentStateWarning, extraWarning].filter(Boolean).join(' / ');
+        }
         if (options.testMode) {
           pendingResult = { ...rowResult, log: 'TEST: ' + rowResult.invNo + ' / ' + rowResult.actionSummary };
         } else {
@@ -1709,6 +1748,7 @@
       csvMode = 'snapshot';
       $('smu0707-log').textContent = '';
       $('smu0707-download').disabled = true;
+      $('smu0707-issue-download').disabled = true;
       $('smu0707-stop').style.display = 'block';
       const range = invFilter ? 'single target' : dateRange(startDate, endDate).label;
       $('smu0707-status').textContent = 'Building current-value snapshot targets...\nRange: ' + range;
@@ -1735,11 +1775,59 @@
       return '"' + s.replace(/"/g, '""') + '"';
     }
 
+    function isIssueResult(result) {
+      const r = result || {};
+      if (r.needsChange === 'SNAPSHOT') return false;
+      if (r.needsChange === 'UNKNOWN') return true;
+      if (r.status && r.status !== 'OK') return true;
+      if (r.liveWriteAllowed && r.liveWriteAllowed !== 'Y') return true;
+      if (normal(r.currentStateWarning)) return true;
+      return false;
+    }
+
+    function csvDisplayRow(result) {
+      const r = result || {};
+      const blocked = r.needsChange !== 'SNAPSHOT' && r.liveWriteAllowed && r.liveWriteAllowed !== 'Y';
+      const blockedStatus = r.liveWriteAllowed === 'REVIEW' ? 'REVIEW_SKIP' : 'LIVE_BLOCKED';
+      if (!blocked) return { ...r, csvBlockedPlan: '' };
+      const blockedPlan = r.actionSummary && r.actionSummary !== '변경 없음'
+        ? r.actionSummary
+        : [
+          r.currentMemo1 !== r.plannedMemo1 ? '관리메모 ' + (r.plannedMemo1 || '(clear)') : '',
+          r.currentMemo2 !== r.plannedMemo2 ? '관리메모2 ' + (r.plannedMemo2 || '(clear)') : '',
+          r.currentOrderMemo !== r.plannedOrderMemo ? '주문메모 ' + (r.plannedOrderMemo || '(clear)') : '',
+          r.currentHold !== r.plannedHold ? '배송보류 ' + (r.plannedHold || '') : ''
+        ].filter(Boolean).join(' / ');
+      return {
+        ...r,
+        plannedMemo1: r.currentMemo1,
+        plannedMemo2: r.currentMemo2,
+        plannedOrderMemo: r.currentOrderMemo,
+        plannedHold: r.currentHold,
+        needsChange: 'N',
+        status: r.status === 'OK' ? blockedStatus : r.status,
+        reason: r.reason ? '차단됨(실행안함): ' + r.reason : '차단됨(실행안함)',
+        clearOffReason: r.clearOffReason ? '차단됨(실행안함): ' + r.clearOffReason : '',
+        csvBlockedPlan: blockedPlan ? '차단전 예정: ' + blockedPlan : '차단됨(실행안함)'
+      };
+    }
+
+    function issueReasonForRow(result) {
+      const r = result || {};
+      const reasons = [];
+      if (r.status && r.status !== 'OK') reasons.push('status=' + r.status);
+      if (r.liveWriteAllowed && r.liveWriteAllowed !== 'Y') reasons.push('live_write_allowed=' + r.liveWriteAllowed);
+      if (r.needsChange === 'UNKNOWN') reasons.push('실행변경필요=UNKNOWN');
+      if (normal(r.currentStateWarning)) reasons.push(r.currentStateWarning);
+      return reasons.join(' / ') || 'issue';
+    }
+
     function downloadCsv() {
-      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','예정 관리메모','현재 관리메모2','예정 관리메모2','현재 주문메모','예정 주문메모','현재 배송보류','예정 배송보류','변경필요','상태','사유','DB매칭상태','clear/OFF사유','live_write_allowed','current_state_warning','item_key_match_method','sellpia_item_no_original','sellpia_item_no_match_key','order_memo_source','memo2_target','order_memo_target','perf_open_ms','perf_read_ms','perf_write_ms','perf_close_ms','perf_total_ms','perf_open_fallback','perf_open_root','perf_open_ready','perf_close_fallback','perf_close_root','perf_close_btn'];
+      const headers = ['송장번호','주문번호','주문품목No','현재 관리메모','실행예정 관리메모','현재 관리메모2','실행예정 관리메모2','현재 주문메모','실행예정 주문메모','현재 배송보류','실행예정 배송보류','실행변경필요','상태','사유','DB매칭상태','clear/OFF사유','차단전 변경요약','live_write_allowed','current_state_warning','item_key_match_method','sellpia_item_no_original','sellpia_item_no_match_key','order_memo_source','memo2_target','order_memo_target','perf_open_ms','perf_read_ms','perf_write_ms','perf_close_ms','perf_total_ms','perf_open_fallback','perf_open_root','perf_open_ready','perf_close_fallback','perf_close_root','perf_close_btn'];
       const lines = [headers.map(csvValue).join(',')];
       for (const r of results) {
-        lines.push([r.invNo,r.ordNo,r.itemNo,r.currentMemo1,r.plannedMemo1,r.currentMemo2,r.plannedMemo2,r.currentOrderMemo,r.plannedOrderMemo,r.currentHold,r.plannedHold,r.needsChange,r.status,r.reason,r.dbMatchStatus,r.clearOffReason,r.liveWriteAllowed,r.currentStateWarning,r.itemKeyMatchMethod,r.sellpiaItemNoOriginal,r.sellpiaItemNoMatchKey,r.orderMemoSource,r.memo2Target,r.orderMemoTarget,r.perfOpenMs,r.perfReadMs,r.perfWriteMs,r.perfCloseMs,r.perfTotalMs,r.perfOpenFallback,r.perfOpenRoot,r.perfOpenReady,r.perfCloseFallback,r.perfCloseRoot,r.perfCloseBtn].map(csvValue).join(','));
+        const row = csvDisplayRow(r);
+        lines.push([row.invNo,row.ordNo,row.itemNo,row.currentMemo1,row.plannedMemo1,row.currentMemo2,row.plannedMemo2,row.currentOrderMemo,row.plannedOrderMemo,row.currentHold,row.plannedHold,row.needsChange,row.status,row.reason,row.dbMatchStatus,row.clearOffReason,row.csvBlockedPlan,row.liveWriteAllowed,row.currentStateWarning,row.itemKeyMatchMethod,row.sellpiaItemNoOriginal,row.sellpiaItemNoMatchKey,row.orderMemoSource,row.memo2Target,row.orderMemoTarget,row.perfOpenMs,row.perfReadMs,row.perfWriteMs,row.perfCloseMs,row.perfTotalMs,row.perfOpenFallback,row.perfOpenRoot,row.perfOpenReady,row.perfCloseFallback,row.perfCloseRoot,row.perfCloseBtn].map(csvValue).join(','));
       }
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -1749,6 +1837,32 @@
       const countSuffix = '_rows' + (meta.gridRows ?? 'x') + '_targets' + (meta.uniqueOrdNos ?? 'x');
       const modeName = csvMode || 'test';
       a.download = 'sellpia_stockmatch_memo_' + modeName + countSuffix + '_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadIssueCsv() {
+      const issueRows = results.filter(isIssueResult);
+      if (!issueRows.length) {
+        alert('차단/실패/경고 행이 없습니다.');
+        return;
+      }
+      const headers = ['issue_reason','송장번호','주문번호','주문품목No','상태','live_write_allowed','current_state_warning','실행변경필요','사유','차단전 변경요약','현재 배송보류','실행예정 배송보류','현재 관리메모','실행예정 관리메모','현재 관리메모2','실행예정 관리메모2','현재 주문메모','실행예정 주문메모','DB매칭상태','clear/OFF사유','item_key_match_method','sellpia_item_no_original','sellpia_item_no_match_key'];
+      const lines = [headers.map(csvValue).join(',')];
+      for (const r of issueRows) {
+        const row = csvDisplayRow(r);
+        lines.push([issueReasonForRow(r),row.invNo,row.ordNo,row.itemNo,row.status,row.liveWriteAllowed,row.currentStateWarning,row.needsChange,row.reason,row.csvBlockedPlan,row.currentHold,row.plannedHold,row.currentMemo1,row.plannedMemo1,row.currentMemo2,row.plannedMemo2,row.currentOrderMemo,row.plannedOrderMemo,row.dbMatchStatus,row.clearOffReason,row.itemKeyMatchMethod,row.sellpiaItemNoOriginal,row.sellpiaItemNoMatchKey].map(csvValue).join(','));
+      }
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const meta = lastBuildMeta || {};
+      const countSuffix = '_rows' + (meta.gridRows ?? 'x') + '_targets' + (meta.uniqueOrdNos ?? 'x');
+      const modeName = csvMode || 'test';
+      a.download = 'sellpia_stockmatch_memo_issues_' + modeName + countSuffix + '_' + new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.csv';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1781,6 +1895,7 @@
         '<button id="smu0707-start" style="flex:1;height:40px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:900;cursor:pointer">Start read test</button>' +
         '<button id="smu0707-snapshot" style="height:40px;border:1px solid #475569;border-radius:8px;background:#164e63;color:#e0f2fe;font-weight:800;cursor:pointer">Current CSV</button>' +
         '<button id="smu0707-download" disabled style="height:40px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#cbd5e1;font-weight:800;cursor:pointer">Download CSV</button>' +
+        '<button id="smu0707-issue-download" disabled style="height:40px;border:1px solid #7f1d1d;border-radius:8px;background:#450a0a;color:#fecaca;font-weight:900;cursor:pointer">Blocked/Fail CSV</button>' +
         '</div>' +
         '<div id="smu0707-status" style="min-height:38px;white-space:pre-line;color:#d1d5db;font-size:13px;margin-bottom:8px"></div>' +
         '<pre id="smu0707-log" style="height:210px;overflow:auto;background:#020617;color:#a7f3d0;border-radius:8px;padding:10px;font-size:11px;white-space:pre-wrap"></pre>' +
@@ -1793,6 +1908,7 @@
       $('smu0707-close').onclick = () => overlay.remove();
       $('smu0707-stop').onclick = () => { stopped = true; $('smu0707-stop').disabled = true; $('smu0707-stop').textContent = 'Stopping'; };
       $('smu0707-download').onclick = downloadCsv;
+      $('smu0707-issue-download').onclick = downloadIssueCsv;
       $('smu0707-start').onclick = run;
       $('smu0707-snapshot').onclick = async () => {
         const inv = normal($('smu0707-inv').value);
@@ -1822,6 +1938,7 @@
       $('smu0707-log').textContent = '';
       csvMode = 'test';
       $('smu0707-download').disabled = true;
+      $('smu0707-issue-download').disabled = true;
       $('smu0707-stop').style.display = 'block';
       const options = {
         inv: normal($('smu0707-inv').value),
